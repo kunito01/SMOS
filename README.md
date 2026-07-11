@@ -136,6 +136,27 @@ npx tsc --noEmit
 - The exchange-rate endpoint uses a live reference source when available and falls back safely when offline.
 - Private project costs remain separated from public read-only share pages.
 
+## Contributors
+
+<table>
+  <tr>
+    <td align="center">
+      <a href="https://github.com/kunito01">
+        <img src="https://github.com/kunito01.png?size=120" width="80" alt="kunito01" /><br />
+        <sub><strong>kunito01</strong></sub>
+      </a><br />
+      <sub>Creator &amp; maintainer</sub>
+    </td>
+    <td align="center">
+      <a href="https://github.com/codex">
+        <img src="https://github.com/codex.png?size=120" width="80" alt="Codex" /><br />
+        <sub><strong>Codex</strong></sub>
+      </a><br />
+      <sub>OpenAI coding agent</sub>
+    </td>
+  </tr>
+</table>
+
 ---
 
 <p align="center">
