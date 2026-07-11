@@ -252,27 +252,6 @@ npx tsc --noEmit --incremental false
 3. 运行 ESLint 和 TypeScript 检查。
 4. 对数据格式变更补充向后兼容与备份恢复说明。
 
-## 维护者
-
-<table>
-  <tr>
-    <td align="center">
-      <a href="https://github.com/kunito01">
-        <img src="https://github.com/kunito01.png?size=120" width="80" alt="kunito01" /><br />
-        <sub><strong>kunito01</strong></sub>
-      </a><br />
-      <sub>创作者与维护者</sub>
-    </td>
-    <td align="center">
-      <a href="https://github.com/codex">
-        <img src="https://github.com/codex.png?size=120" width="80" alt="Codex" /><br />
-        <sub><strong>Codex</strong></sub>
-      </a><br />
-      <sub>OpenAI 编程代理</sub>
-    </td>
-  </tr>
-</table>
-
 ## 版权
 
 本仓库当前未附带独立开源许可证。除非获得版权所有者明确授权，请勿假定拥有复制、分发、修改或商业使用本项目的许可。
