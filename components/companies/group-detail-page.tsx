@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, FolderKanban, Layers3, Rocket, Sparkles } from "lucide-react";
+import { ArrowLeft, Building2, Layers3, Rocket, Sparkles } from "lucide-react";
 import { ImageCard } from "@/components/cards/image-card";
 import { MetricTile } from "@/components/domain/metric-tile";
 import { ProjectCard } from "@/components/domain/project-card";
@@ -11,20 +11,20 @@ import { useI18n } from "@/components/providers/app-providers";
 import { Button } from "@/components/ui/button";
 import { LoadingState } from "@/components/ui/loading-state";
 import { SectionHeader } from "@/components/ui/section-header";
-import { companiesApi, groupsApi, projectsApi } from "@/lib/api";
-import { groupDescriptionKeys, groupNameKeys, translateDomainLabel } from "@/lib/i18n/domain-labels";
-import type { Company, DashboardOverview, Project, ProjectGroup } from "@/lib/types";
+import { groupsApi, projectsApi } from "@/lib/api";
+import { getProjectGroupDisplayName, groupDescriptionKeys, translateDomainLabel } from "@/lib/i18n/domain-labels";
+import type { DashboardOverview, Project, ProjectGroup } from "@/lib/types";
 
 type GroupDetailData = {
   group: ProjectGroup;
-  company: Company;
-  siblingGroups: ProjectGroup[];
+  groups: ProjectGroup[];
   projects: Project[];
   overview: DashboardOverview;
+  associatedCompanyCount: number;
 };
 
 export function GroupDetailPage({ groupId }: { groupId: string }) {
-  const { t } = useI18n();
+  const { language, t } = useI18n();
   const [data, setData] = useState<GroupDetailData | null>(null);
 
   useEffect(() => {
@@ -32,15 +32,20 @@ export function GroupDetailPage({ groupId }: { groupId: string }) {
 
     async function load() {
       const group = await groupsApi.getGroup(groupId);
-      const [company, siblingGroups, projects, overview] = await Promise.all([
-        companiesApi.getCompany(group.companyId),
-        companiesApi.listCompanyGroups(group.companyId),
+      const [groups, projects, overview] = await Promise.all([
+        groupsApi.listGroups(),
         groupsApi.listGroupProjects(groupId),
-        projectsApi.getDashboardOverview({ type: "group", id: groupId })
+        projectsApi.getDashboardOverview({ type: "group", id: groupId }, { includeArchivedTotal: false })
       ]);
 
       if (isMounted) {
-        setData({ group, company, siblingGroups, projects, overview });
+        setData({
+          group,
+          groups,
+          projects,
+          overview,
+          associatedCompanyCount: new Set(projects.map((project) => project.companyId)).size
+        });
       }
     }
 
@@ -61,18 +66,18 @@ export function GroupDetailPage({ groupId }: { groupId: string }) {
             <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.48fr)]">
               <ImageCard
                 imageUrl={data.group.coverImage}
-                title={translateDomainLabel(data.group.name, groupNameKeys, t)}
-                meta={data.company.name}
+                title={getProjectGroupDisplayName(data.group, language, t)}
+                meta={t("groupOverview")}
                 heightClassName="min-h-[28rem]"
               >
                 <p className="max-w-2xl text-base font-bold leading-7 text-white/80">
-                  {translateDomainLabel(data.group.name, groupDescriptionKeys, t)}
+                  {translateDomainLabel(data.group.name, groupDescriptionKeys, t, data.group.description)}
                 </p>
                 <div className="mt-5 flex flex-wrap gap-3">
-                  <Link href={`/companies/${data.company.id}`} prefetch={false}>
+                  <Link href="/companies" prefetch={false}>
                     <Button variant="ghost" size="md">
                       <ArrowLeft size={18} />
-                      {t("companyOverview")}
+                      {t("navCompanies")}
                     </Button>
                   </Link>
                 </div>
@@ -82,7 +87,7 @@ export function GroupDetailPage({ groupId }: { groupId: string }) {
                 <MetricTile label={t("projectsCount")} value={data.overview.totalProjectCount} icon={Layers3} tone="lime" />
                 <MetricTile label={t("activeCount")} value={data.overview.activeProjectCount} icon={Rocket} tone="aqua" />
                 <MetricTile label={t("averageProgressShort")} value={`${data.overview.averageProgress}%`} icon={Sparkles} tone="coral" />
-                <MetricTile label={t("projectGroupsCount")} value={data.siblingGroups.length} icon={FolderKanban} tone="dark" />
+                <MetricTile label={t("companiesCount")} value={data.associatedCompanyCount} icon={Building2} tone="dark" />
               </div>
             </section>
 
@@ -90,7 +95,7 @@ export function GroupDetailPage({ groupId }: { groupId: string }) {
               <SectionHeader eyebrow={t("projectsInside")} title={t("creativeProjects")} />
               <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                 {data.projects.map((project) => (
-                  <ProjectCard key={project.id} project={project} groups={data.siblingGroups} t={t} />
+                  <ProjectCard key={project.id} project={project} groups={data.groups} t={t} />
                 ))}
               </div>
             </section>

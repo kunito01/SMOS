@@ -1,7 +1,7 @@
 import { mockApi } from "@/lib/api/mock-client";
 import { hydrateMockDatabase, persistMockDatabase } from "@/lib/api/mock-persistence";
-import { getTotalMonthlySubscriptionCost, mockDatabase } from "@/lib/mock";
-import type { CostLibraryItem, Person, Tool, ToolSubscription } from "@/lib/types";
+import { getProjectActualCost, getTotalMonthlySubscriptionCost, mockDatabase } from "@/lib/mock";
+import type { CostLibraryItem, Person, PersonProjectParticipation, Project, Tool, ToolSubscription } from "@/lib/types";
 
 type AddPersonInput = Pick<Person, "name" | "role" | "type"> & {
   costTemplateId?: string;
@@ -43,6 +43,47 @@ export async function getToolSubscriptionSummary() {
 export async function listCostTemplates() {
   hydrateMockDatabase();
   return mockApi(mockDatabase.costLibrary);
+}
+
+export async function listPersonProjectParticipation(): Promise<PersonProjectParticipation[]> {
+  hydrateMockDatabase();
+  const companyById = new Map(mockDatabase.companies.map((company) => [company.id, company]));
+  const groupById = new Map(mockDatabase.groups.map((group) => [group.id, group]));
+
+  return mockApi(
+    mockDatabase.people.map((person) => {
+      const projects = mockDatabase.projects
+        .filter((project) => !project.archivedAt && projectHasPerson(project, person.id))
+        .map((project) => {
+          const company = companyById.get(project.companyId);
+          const group = groupById.get(project.groupId);
+
+          return {
+            projectId: project.id,
+            projectName: project.name,
+            companyId: project.companyId,
+            companyName: company?.name ?? "",
+            groupId: project.groupId,
+            groupName: group?.name ?? "",
+            groupNameI18n: group?.nameI18n,
+            progress: project.progress,
+            status: project.status,
+            actualCostSoFar: getProjectActualCost(project)
+          };
+        });
+      const actualCostTotal = projects.reduce((sum, project) => sum + project.actualCostSoFar, 0);
+
+      return {
+        personId: person.id,
+        totalProjectCount: projects.length,
+        averageProgress: projects.length
+          ? Math.round(projects.reduce((sum, project) => sum + project.progress, 0) / projects.length)
+          : 0,
+        actualCostTotal,
+        projects
+      };
+    })
+  );
 }
 
 export async function addPerson(input: AddPersonInput) {
@@ -162,3 +203,20 @@ export async function deleteCostTemplate(costTemplateId: string) {
 
   return mockApi({ id: costTemplateId });
 }
+
+const projectHasPerson = (project: Project, personId: string) => {
+  if (project.people.some((person) => person.id === personId)) {
+    return true;
+  }
+
+  return project.phases.some((phase) => {
+    if (phase.assigneeId === personId || phase.personIds?.includes(personId)) {
+      return true;
+    }
+
+    return phase.deliverables.some(
+      (deliverable) =>
+        deliverable.assigneeId === personId || deliverable.tasks.some((task) => task.assigneeId === personId)
+    );
+  });
+};

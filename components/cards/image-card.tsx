@@ -5,6 +5,7 @@ type ImageCardProps = React.HTMLAttributes<HTMLDivElement> & {
   title: string;
   meta?: string;
   heightClassName?: string;
+  action?: React.ReactNode;
 };
 
 export function ImageCard({
@@ -13,6 +14,7 @@ export function ImageCard({
   meta,
   className,
   heightClassName = "h-72",
+  action,
   children,
   ...props
 }: ImageCardProps) {
@@ -26,6 +28,7 @@ export function ImageCard({
       style={{ backgroundImage: `url(${imageUrl})` }}
       {...props}
     >
+      {action ? <div className="absolute right-5 top-5 z-20">{action}</div> : null}
       <div className="relative z-10">
         {meta ? <p className="mb-2 text-sm font-bold text-white/[0.82]">{meta}</p> : null}
         <h3 className="max-w-56 text-2xl font-black leading-none">{title}</h3>

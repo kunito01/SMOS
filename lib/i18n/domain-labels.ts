@@ -1,5 +1,18 @@
-import type { TranslationKey } from "@/lib/i18n/translations";
-import type { ActivityEvent, CostItem, Material, Person, ProjectStatus, ProjectVersion, Tool } from "@/lib/types";
+import type { Language, TranslationKey } from "@/lib/i18n/translations";
+import type { ActivityEvent, CostItem, Material, Person, ProjectGroup, ProjectStatus, ProjectVersion, Tool } from "@/lib/types";
+
+const demoCompanyIds = new Set(["company-northstar", "company-color-works"]);
+const demoProjectIds = new Set(Array.from({ length: 12 }, (_, index) => `project-${String(index + 1).padStart(2, "0")}`));
+
+export function formatDemoEntityName(
+  value: string,
+  id: string,
+  kind: "company" | "project",
+  t: (key: TranslationKey) => string
+) {
+  const isDemo = kind === "company" ? demoCompanyIds.has(id) : demoProjectIds.has(id);
+  return isDemo ? `${value}${t("exampleNameSuffix")}` : value;
+}
 
 export const projectNameKeys: Record<string, TranslationKey> = {
   "AI Web Game Prototype": "projectGameTitle",
@@ -22,6 +35,20 @@ export const groupNameKeys: Record<string, TranslationKey> = {
   "Website Projects": "projectBrandGroup",
   "Client Projects": "groupClientProjects"
 };
+
+export function getProjectGroupDisplayName(
+  group: Pick<ProjectGroup, "name" | "nameI18n">,
+  language: Language,
+  t: (key: TranslationKey) => string
+) {
+  const localizedName = group.nameI18n?.[language]?.trim();
+
+  if (localizedName) {
+    return localizedName;
+  }
+
+  return translateDomainLabel(group.name, groupNameKeys, t, group.name);
+}
 
 export const companyDescriptionKeys: Record<string, TranslationKey> = {
   "company-northstar": "companyNorthstarDescription",
@@ -65,13 +92,17 @@ export const materialNameKeys: Record<string, TranslationKey> = {
 export const versionNameKeys: Record<string, TranslationKey> = {
   "Direction lock": "versionDirectionLock",
   "Interactive review": "versionInteractiveReview",
-  "Launch candidate": "versionLaunchCandidate"
+  "Launch candidate": "versionLaunchCandidate",
+  "Demo release": "versionDemoRelease",
+  "Official release": "versionOfficialRelease"
 };
 
 export const versionSummaryKeys: Record<string, TranslationKey> = {
   "Core visual direction, audience promise, and first playable shape are aligned.": "versionSummaryDirectionLock",
   "Key interactions, motion timing, and public review notes are collected in one pass.": "versionSummaryInteractiveReview",
-  "Final content, share room, and delivery checklist are being prepared for release.": "versionSummaryLaunchCandidate"
+  "Final content, share room, and delivery checklist are being prepared for release.": "versionSummaryLaunchCandidate",
+  "Demo publishing checkpoint.": "versionSummaryDemoRelease",
+  "Formal release checkpoint.": "versionSummaryOfficialRelease"
 };
 
 export const activityTitleKeys: Record<string, TranslationKey> = {
@@ -88,6 +119,7 @@ export const statusKeys: Record<ProjectStatus, TranslationKey> = {
   planning: "statusPlanning",
   active: "statusActive",
   paused: "statusPaused",
+  terminated: "statusTerminated",
   completed: "statusCompleted"
 };
 
@@ -154,8 +186,9 @@ export const activityToneClasses: Record<ActivityEvent["tone"], string> = {
 export function translateDomainLabel(
   value: string,
   dictionary: Record<string, TranslationKey>,
-  t: (key: TranslationKey) => string
+  t: (key: TranslationKey) => string,
+  fallback = value
 ) {
   const key = dictionary[value];
-  return key ? t(key) : value;
+  return key ? t(key) : fallback;
 }

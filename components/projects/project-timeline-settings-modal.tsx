@@ -6,6 +6,8 @@ import { projectsApi } from "@/lib/api";
 import type { UpdateProjectTimelineInput } from "@/lib/api/projects";
 import type { Project, Task, TimelineCustomRow } from "@/lib/types";
 import type { TranslationKey } from "@/lib/i18n/translations";
+import { DeleteConfirmDialog } from "@/components/ui/delete-confirm-dialog";
+import { ModalPortal } from "@/components/ui/modal-portal";
 import { cn } from "@/lib/utils/cn";
 
 type TimelineSettingsModalProps = {
@@ -40,6 +42,11 @@ type PhaseDraft = {
 
 type RowDraft = TimelineCustomRow;
 
+type PendingTimelineDelete =
+  | { phaseId: string; type: "phase" }
+  | { phaseId: string; taskId: string | undefined; type: "task" }
+  | { rowId: string; type: "row" };
+
 const inputClass =
   "min-h-11 w-full rounded-2xl border border-black/[0.08] bg-white px-3 py-2 text-sm font-bold text-ink outline-none transition focus:border-coral focus:ring-4 focus:ring-coral/10";
 const fieldLabelClass = "text-xs font-black uppercase text-muted";
@@ -57,7 +64,7 @@ const createTaskDraft = (phase: Pick<PhaseDraft, "id" | "endDate" | "personIds">
 });
 
 const projectToDrafts = (project: Project): { phases: PhaseDraft[]; rows: RowDraft[]; title: string } => ({
-  title: project.timelineTitle ?? "Timeline board",
+  title: project.timelineTitle && project.timelineTitle !== "Timeline board" ? project.timelineTitle : "",
   phases: project.phases.map((phase, index) => {
     const personIds = phase.personIds?.length
       ? phase.personIds
@@ -106,6 +113,7 @@ export function ProjectTimelineSettingsModal({
   const [phases, setPhases] = useState<PhaseDraft[]>(initialDraft.phases);
   const [rows, setRows] = useState<RowDraft[]>(initialDraft.rows);
   const [saving, setSaving] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<PendingTimelineDelete | null>(null);
 
   useEffect(() => {
     if (!open) {
@@ -227,6 +235,26 @@ export function ProjectTimelineSettingsModal({
     setRows((current) => current.filter((row) => row.id !== rowId));
   };
 
+  const confirmPendingDelete = () => {
+    if (!pendingDelete) {
+      return;
+    }
+
+    if (pendingDelete.type === "phase") {
+      removePhase(pendingDelete.phaseId);
+    }
+
+    if (pendingDelete.type === "task") {
+      removeTask(pendingDelete.phaseId, pendingDelete.taskId);
+    }
+
+    if (pendingDelete.type === "row") {
+      removeRow(pendingDelete.rowId);
+    }
+
+    setPendingDelete(null);
+  };
+
   const updateRowValue = (rowId: string, phaseId: string, value: string) => {
     setRows((current) =>
       current.map((row) =>
@@ -239,17 +267,7 @@ export function ProjectTimelineSettingsModal({
 
   const save = async () => {
     setSaving(true);
-    const payload: UpdateProjectTimelineInput = {
-      title,
-      phases: phases.map((phase) => ({
-        ...phase,
-        tasks: phase.tasks.map((task) => ({
-          ...task,
-          title: task.title.trim() || t("untitledTask")
-        }))
-      })),
-      rows
-    };
+    const payload: UpdateProjectTimelineInput = { title, phases, rows };
     const nextProject = await projectsApi.updateProjectTimeline(project.id, payload);
     setSaving(false);
     onSaved(nextProject);
@@ -257,8 +275,14 @@ export function ProjectTimelineSettingsModal({
   };
 
   return (
-    <div className="fixed inset-0 z-[90] bg-ink/45 p-3 backdrop-blur-sm sm:p-6" role="dialog" aria-modal="true">
-      <div className="mx-auto flex max-h-[calc(100vh-1.5rem)] max-w-6xl flex-col overflow-hidden rounded-studio-lg bg-[#f8fbf2] shadow-lift ring-1 ring-black/[0.08] sm:max-h-[calc(100vh-3rem)]">
+    <>
+    <ModalPortal>
+      <div
+        className="fixed inset-0 z-[90] flex min-h-dvh items-center justify-center overflow-y-auto bg-ink/45 p-3 backdrop-blur-sm sm:p-6"
+        role="dialog"
+        aria-modal="true"
+      >
+      <div className="mx-auto flex max-h-[calc(100dvh-1.5rem)] max-w-6xl flex-col overflow-hidden rounded-studio-lg bg-[#f8fbf2] shadow-lift ring-1 ring-black/[0.08] sm:max-h-[calc(100dvh-3rem)]">
         <div className="flex items-start justify-between gap-4 border-b border-black/[0.06] p-4 sm:p-6">
           <div className="min-w-0">
             <p className="text-sm font-black uppercase text-muted">{t("editTimeline")}</p>
@@ -281,7 +305,12 @@ export function ProjectTimelineSettingsModal({
           <div className="grid gap-3 rounded-studio bg-white p-4 shadow-soft">
             <label className="grid gap-2">
               <span className={fieldLabelClass}>{t("timelineTitleLabel")}</span>
-              <input className={inputClass} value={title} onChange={(event) => setTitle(event.target.value)} />
+              <input
+                className={inputClass}
+                value={title}
+                placeholder={t("timelineBoard")}
+                onChange={(event) => setTitle(event.target.value)}
+              />
             </label>
           </div>
 
@@ -315,7 +344,7 @@ export function ProjectTimelineSettingsModal({
                   </div>
                   <button
                     type="button"
-                    onClick={() => removePhase(phase.id)}
+                    onClick={() => setPendingDelete({ phaseId: phase.id, type: "phase" })}
                     disabled={phases.length <= 1}
                     className="inline-flex h-10 items-center gap-2 rounded-full bg-cloud px-4 text-sm font-black text-ink disabled:opacity-40"
                   >
@@ -330,6 +359,7 @@ export function ProjectTimelineSettingsModal({
                     <input
                       className={inputClass}
                       value={phase.name}
+                      placeholder={t("untitledStage")}
                       onChange={(event) => updatePhase(phase.id, { name: event.target.value })}
                     />
                   </label>
@@ -446,7 +476,7 @@ export function ProjectTimelineSettingsModal({
                         <input
                           className={inputClass}
                           value={task.title}
-                          placeholder={t("taskTitle")}
+                          placeholder={t("untitledTask")}
                           onChange={(event) => updateTask(phase.id, task.id, { title: event.target.value })}
                         />
                         <input
@@ -468,7 +498,7 @@ export function ProjectTimelineSettingsModal({
                         </select>
                         <button
                           type="button"
-                          onClick={() => removeTask(phase.id, task.id)}
+                          onClick={() => setPendingDelete({ phaseId: phase.id, taskId: task.id, type: "task" })}
                           className="grid size-11 place-items-center rounded-full bg-cloud text-muted"
                           aria-label={t("delete")}
                         >
@@ -527,6 +557,7 @@ export function ProjectTimelineSettingsModal({
                       <input
                         className={inputClass}
                         value={row.label}
+                        placeholder={t("customRowLabel")}
                         onChange={(event) =>
                           setRows((current) =>
                             current.map((item) =>
@@ -545,7 +576,7 @@ export function ProjectTimelineSettingsModal({
                       ))}
                       <button
                         type="button"
-                        onClick={() => removeRow(row.id)}
+                        onClick={() => setPendingDelete({ rowId: row.id, type: "row" })}
                         className="grid size-11 place-items-center rounded-full bg-cloud text-muted"
                         aria-label={t("delete")}
                       >
@@ -583,5 +614,17 @@ export function ProjectTimelineSettingsModal({
         </div>
       </div>
     </div>
+    </ModalPortal>
+    <DeleteConfirmDialog
+      open={Boolean(pendingDelete)}
+      title={t("deleteItemTitle")}
+      description={t("deleteItemDescription")}
+      warning={t("deleteIrreversibleWarning")}
+      cancelLabel={t("cancel")}
+      confirmLabel={t("confirmDelete")}
+      onCancel={() => setPendingDelete(null)}
+      onConfirm={confirmPendingDelete}
+    />
+    </>
   );
 }

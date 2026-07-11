@@ -11,7 +11,7 @@ import { LoadingState } from "@/components/ui/loading-state";
 import { Pill } from "@/components/ui/pill";
 import { SectionHeader } from "@/components/ui/section-header";
 import { projectsApi, shareApi } from "@/lib/api";
-import { projectNameKeys, translateDomainLabel } from "@/lib/i18n/domain-labels";
+import { formatDemoEntityName, projectNameKeys, translateDomainLabel } from "@/lib/i18n/domain-labels";
 import type { Project, ShareSettings } from "@/lib/types";
 
 const settingKeys: Array<
@@ -116,7 +116,12 @@ export function ProjectShareSettingsPage({ projectId }: { projectId: string }) {
                   <div>
                     <p className="text-sm font-bold text-white/60">{t("sharePublicLink")}</p>
                     <h2 className="mt-2 text-2xl font-black">
-                      {translateDomainLabel(project.name, projectNameKeys, t)}
+                      {formatDemoEntityName(
+                        translateDomainLabel(project.name, projectNameKeys, t),
+                        project.id,
+                        "project",
+                        t
+                      )}
                     </h2>
                   </div>
                   <Share2 size={24} className="text-limepop" />
