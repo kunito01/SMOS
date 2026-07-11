@@ -46,6 +46,7 @@ import {
 } from "@/lib/i18n/domain-labels";
 import { formatLocalizedDate } from "@/lib/i18n/formatters";
 import type { CostItem, CostLibraryItem, Person, PersonProjectParticipation, ProjectStatus, Tool } from "@/lib/types";
+import { projectPath } from "@/lib/utils/app-routes";
 import { formatNumber, type MoneyCurrency } from "@/lib/utils/money";
 
 type LibrariesData = {
@@ -701,7 +702,7 @@ export function LibrariesPage() {
                                 projectRows.map((project) => (
                                   <Link
                                     key={project.projectId}
-                                    href={`/projects/${project.projectId}`}
+                                    href={projectPath(project.projectId)}
                                     prefetch={false}
                                     className="rounded-2xl bg-white/75 p-3 text-ink shadow-sm ring-1 ring-black/[0.04] transition hover:-translate-y-0.5 hover:bg-white"
                                   >

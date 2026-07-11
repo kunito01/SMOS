@@ -7,12 +7,17 @@
 <p align="center"><strong>创意项目操作系统</strong></p>
 
 <p align="center">
-  <a href="./README.md">English</a> · <strong>简体中文</strong> · 日本語 · Español · Português · Deutsch · Français · Русский · Türkçe · 한국어 · ไทย
+  <a href="./README.md">English</a> · <strong>简体中文</strong> · <a href="./README.ja.md">日本語</a> · <a href="./README.es.md">Español</a> · <a href="./README.pt-BR.md">Português</a> · <a href="./README.de.md">Deutsch</a> · <a href="./README.fr.md">Français</a> · <a href="./README.ru.md">Русский</a> · <a href="./README.tr.md">Türkçe</a> · <a href="./README.ko.md">한국어</a> · <a href="./README.th.md">ไทย</a>
 </p>
 
 <p align="center">
   <strong>让一个人的工作室，像一支完整团队一样运转。</strong><br />
   面向独立创作者与一人公司的本地优先可视化项目操作系统。
+</p>
+
+<p align="center">
+  <a href="https://kunito01.github.io/SMOS/login/"><img src="https://img.shields.io/badge/Live_Demo-Open_PWA-ff4b2b?style=for-the-badge&logo=pwa&logoColor=white" alt="Open Live Demo" /></a>
+  <a href="https://github.com/kunito01/SMOS/releases/latest"><img src="https://img.shields.io/badge/Download-Portable_PWA-f4f414?style=for-the-badge&logo=github&logoColor=1c2328" alt="Download portable PWA" /></a>
 </p>
 
 <p align="center">
@@ -24,6 +29,7 @@
   <img src="https://img.shields.io/badge/TypeScript-5-3178c6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript 5" />
   <img src="https://img.shields.io/badge/PWA-可安装-5a0fc8?style=flat-square&logo=pwa&logoColor=white" alt="可安装 PWA" />
   <img src="https://img.shields.io/badge/数据-本地优先-e9e5df?style=flat-square" alt="本地优先数据" />
+  <a href="./LICENSE"><img src="https://img.shields.io/badge/许可证-Apache--2.0-03b5aa?style=flat-square" alt="Apache 2.0 许可证" /></a>
 </p>
 
 ---
@@ -33,6 +39,14 @@
 Studio Map OS 将品牌、项目组、项目、人员、软件工具、成本、时间表、发布节点和归档统一到一个可视化工作区中，帮助独立创作者管理多个并行项目，而不必把创作过程压缩成普通的任务清单。
 
 当前版本是一个可安装的本地优先 PWA：业务数据保存在本机，经 Web Crypto 加密后写入 IndexedDB；Manifest、Service Worker、离线回退页、应用图标和独立打包流程均已接入。账户、恢复密钥与备份流程也在浏览器端完成，但项目尚未接入远程业务后端或服务器认证。
+
+## 产品截图
+
+![01 — 登录与整站加密备份入口](./docs/screenshots/01.png)
+
+![02 — 全部项目索引与可视化项目卡片](./docs/screenshots/02.png)
+
+![03 — 人员、软件与成本模板资源库](./docs/screenshots/03.png)
 
 ## 核心能力
 
@@ -141,15 +155,15 @@ npm run package:pwa
 | `/offline` | Service Worker 在文档导航失败时显示的离线回退页 |
 | `/dashboard` | 工作室总览、范围筛选、指标和项目地图 |
 | `/companies` | 品牌与项目组管理 |
-| `/companies/[companyId]` | 品牌详情与关联项目汇总 |
+| `/company/?companyId=...` | 品牌详情与关联项目汇总 |
 | `/projects` | 全部活动项目 |
-| `/projects/[projectId]` | 项目状态、时间表、发布、收款与设置 |
-| `/projects/[projectId]/costs` | 项目预算与成本详情 |
-| `/projects/[projectId]/share` | 只读分享字段设置 |
+| `/project/?projectId=...` | 项目状态、时间表、发布、收款与设置 |
+| `/project-costs/?projectId=...` | 项目预算与成本详情 |
+| `/project-share/?projectId=...` | 只读分享字段设置 |
 | `/costs` | 工作室级成本汇总与显示货币设置 |
 | `/libraries` | 人员、软件订阅与成本模板资源库 |
 | `/archive` | 已归档项目、整站和工作区备份恢复 |
-| `/share/[token]` | 本地只读项目快照 |
+| `/share/?token=...` | 本地只读项目快照 |
 
 ## 数据与安全模型
 
@@ -184,7 +198,7 @@ IndexedDB 持久化
 - JPY — 日元
 - EUR — 欧元
 
-应用优先从 Frankfurter / 欧洲中央银行数据源读取参考汇率，并在请求失败时使用浏览器缓存或内置回退汇率。汇率仅用于工作室内部估算，不应视为结算或财务建议。
+应用会在浏览器中直接从 Frankfurter 提供的欧洲中央银行汇率服务读取参考汇率，并在请求失败时使用浏览器缓存或内置回退汇率。汇率仅用于工作室内部估算，不应视为结算或财务建议。
 
 ## 备份文件
 
@@ -211,7 +225,7 @@ IndexedDB 持久化
 ## 项目结构
 
 ```text
-app/                  Next.js 路由、Manifest、Service Worker 与汇率接口
+app/                  Next.js 路由、Manifest、Service Worker 与静态 PWA 入口
 components/           页面、业务模块、布局与通用 UI
 lib/api/              本地业务 API 适配器
 lib/i18n/             界面语言与领域标签
@@ -252,9 +266,9 @@ npx tsc --noEmit --incremental false
 3. 运行 ESLint 和 TypeScript 检查。
 4. 对数据格式变更补充向后兼容与备份恢复说明。
 
-## 版权
+## 许可证
 
-本仓库当前未附带独立开源许可证。除非获得版权所有者明确授权，请勿假定拥有复制、分发、修改或商业使用本项目的许可。
+Studio Map OS 采用 [Apache License 2.0](./LICENSE) 开源许可证。你可以在遵守许可证条款的前提下使用、复制、修改和分发本项目。
 
 <p align="center">
   <strong>Studio Map OS</strong><br />

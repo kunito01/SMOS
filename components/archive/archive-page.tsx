@@ -38,6 +38,7 @@ import {
 } from "@/lib/security/workspace-crypto";
 import type { Company, Project, ProjectGroup } from "@/lib/types";
 import type { ImportedSiteBackup } from "@/lib/api/auth";
+import { projectPath, withBasePath } from "@/lib/utils/app-routes";
 
 type ArchiveData = {
   companies: Company[];
@@ -288,7 +289,7 @@ export function ArchivePage() {
           // The restored accounts and encrypted data are already durable.
         }
         setPendingBackup(null);
-        window.location.assign("/login");
+        window.location.assign(withBasePath("/login"));
         return;
       }
 
@@ -322,7 +323,7 @@ export function ArchivePage() {
         } catch {
           // Navigation still returns to a fail-closed login screen.
         }
-        window.location.assign("/login");
+        window.location.assign(withBasePath("/login"));
       }
     }
   };
@@ -414,7 +415,7 @@ export function ArchivePage() {
                               {projects.map((project) => (
                                 <Link
                                   key={project.id}
-                                  href={`/projects/${project.id}`}
+                                  href={projectPath(project.id)}
                                   prefetch={false}
                                   className="block rounded-studio-xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-coral"
                                 >

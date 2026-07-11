@@ -10,6 +10,8 @@ const notable = Notable({
   weight: "400"
 });
 
+const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
+
 export const metadata: Metadata = {
   applicationName: "Studio Map OS",
   title: {
@@ -17,13 +19,13 @@ export const metadata: Metadata = {
     template: "%s · Studio Map OS"
   },
   description: "A private, local-first project operating system for creative studios.",
-  manifest: "/manifest.webmanifest",
+  manifest: `${basePath}/manifest.webmanifest`,
   icons: {
     icon: [
-      { url: "/icon.svg", type: "image/svg+xml" },
-      { url: "/icons/pwa-192.png", sizes: "192x192", type: "image/png" }
+      { url: `${basePath}/icon.svg`, type: "image/svg+xml" },
+      { url: `${basePath}/icons/pwa-192.png`, sizes: "192x192", type: "image/png" }
     ],
-    apple: [{ url: "/icons/apple-touch-icon.png", sizes: "180x180", type: "image/png" }]
+    apple: [{ url: `${basePath}/icons/apple-touch-icon.png`, sizes: "180x180", type: "image/png" }]
   },
   appleWebApp: {
     capable: true,

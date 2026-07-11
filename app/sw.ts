@@ -12,8 +12,16 @@ declare global {
 
 declare const self: ServiceWorkerGlobalScope;
 
+const offlineFallbackUrl = new URL(
+  process.env.NEXT_PUBLIC_BASE_PATH ? "offline/" : "offline",
+  self.registration.scope
+).pathname;
+
 const serwist = new Serwist({
   precacheEntries: self.__SW_MANIFEST,
+  precacheOptions: {
+    ignoreURLParametersMatching: [/.*/]
+  },
   clientsClaim: true,
   skipWaiting: false,
   navigationPreload: true,
@@ -22,7 +30,7 @@ const serwist = new Serwist({
   fallbacks: {
     entries: [
       {
-        url: "/offline",
+        url: offlineFallbackUrl,
         matcher: ({ request }) => request.destination === "document"
       }
     ]

@@ -15,6 +15,7 @@ import {
 } from "@/lib/i18n/domain-labels";
 import type { TranslationKey } from "@/lib/i18n/translations";
 import type { Project, ProjectGroup } from "@/lib/types";
+import { projectPath } from "@/lib/utils/app-routes";
 
 type ProjectCardProps = {
   project: Project;
@@ -24,7 +25,7 @@ type ProjectCardProps = {
   actionLabel?: string;
 };
 
-export function ProjectCard({ project, groups, t, href = `/projects/${project.id}`, actionLabel }: ProjectCardProps) {
+export function ProjectCard({ project, groups, t, href = projectPath(project.id), actionLabel }: ProjectCardProps) {
   const { language } = useI18n();
   const group = groups.find((item) => item.id === project.groupId);
 

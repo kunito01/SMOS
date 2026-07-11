@@ -23,6 +23,7 @@ import {
   translateDomainLabel
 } from "@/lib/i18n/domain-labels";
 import type { CostItem, Project, ProjectGroup } from "@/lib/types";
+import { projectCostsPath } from "@/lib/utils/app-routes";
 
 type GlobalCostsData = {
   projects: Project[];
@@ -183,7 +184,7 @@ export function GlobalCostsPage() {
                     const group = data.groups.find((item) => item.id === project.groupId);
 
                     return (
-                      <Link key={project.id} href={`/projects/${project.id}/costs`} prefetch={false}>
+                      <Link key={project.id} href={projectCostsPath(project.id)} prefetch={false}>
                         <div
                           className={`rounded-studio p-4 transition duration-200 hover:-translate-y-1 ${
                             groupCostCardToneClasses[group?.colorTheme ?? ""] ?? "bg-cloud/70 text-ink"

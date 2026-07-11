@@ -14,6 +14,7 @@ import { LoadingState } from "@/components/ui/loading-state";
 import { SectionHeader } from "@/components/ui/section-header";
 import { companiesApi, groupsApi, projectsApi } from "@/lib/api";
 import type { Company, Project, ProjectGroup } from "@/lib/types";
+import { projectPath } from "@/lib/utils/app-routes";
 
 type ProjectsData = {
   companies: Company[];
@@ -143,7 +144,7 @@ export function ProjectsPage() {
           onClose={() => setCreateOpen(false)}
           onCreated={(project) => {
             setCreateOpen(false);
-            router.push(`/projects/${project.id}`);
+            router.push(projectPath(project.id));
           }}
         />
       </div>

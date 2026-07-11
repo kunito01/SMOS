@@ -54,6 +54,7 @@ import {
 } from "@/lib/i18n/domain-labels";
 import { formatLocalizedDate } from "@/lib/i18n/formatters";
 import type { Project, ProjectGroup, ProjectStatus, ProjectVersion } from "@/lib/types";
+import { projectCostsPath } from "@/lib/utils/app-routes";
 import { cn } from "@/lib/utils/cn";
 import { findProjectReleaseVersion } from "@/lib/utils/project-release";
 
@@ -503,7 +504,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
                 void handleTaskToggle(taskId, completed);
               }}
               footerAction={
-                <Link href={`/projects/${data.project.id}/costs`} prefetch={false}>
+                <Link href={projectCostsPath(data.project.id)} prefetch={false}>
                   <Button variant="secondary" size="lg" className="w-full">
                     <CircleDollarSign size={19} />
                     {t("openCosts")}

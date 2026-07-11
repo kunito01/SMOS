@@ -27,6 +27,7 @@ import {
   translateDomainLabel
 } from "@/lib/i18n/domain-labels";
 import type { CompanySummary, ProjectGroupSummary } from "@/lib/types";
+import { companyPath } from "@/lib/utils/app-routes";
 import type { ExchangeRateSnapshot, MoneyCurrency } from "@/lib/utils/money";
 
 const spring = { type: "spring", stiffness: 150, damping: 18 } as const;
@@ -249,7 +250,7 @@ export function CompaniesPage() {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ ...spring, delay: index * 0.05 }}
               >
-                <Link href={`/companies/${summary.company.id}`} prefetch={false}>
+                <Link href={companyPath(summary.company.id)} prefetch={false}>
                   <ImageCard
                     imageUrl={summary.company.coverImage}
                     title={formatDemoEntityName(summary.company.name, summary.company.id, "company", t)}

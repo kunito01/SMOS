@@ -13,6 +13,7 @@ const eslintConfig = [
   {
     ignores: [
       ".next/**",
+      ".next-pages/**",
       ".next-pwa/**",
       "node_modules/**",
       "out/**",

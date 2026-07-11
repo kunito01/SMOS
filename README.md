@@ -7,12 +7,17 @@
 <p align="center"><strong>CREATIVE PROJECT OPERATING SYSTEM</strong></p>
 
 <p align="center">
-  <strong>English</strong> · <a href="./README.zh-CN.md">简体中文</a> · 日本語 · Español · Português · Deutsch · Français · Русский · Türkçe · 한국어 · ไทย
+  <strong>English</strong> · <a href="./README.zh-CN.md">简体中文</a> · <a href="./README.ja.md">日本語</a> · <a href="./README.es.md">Español</a> · <a href="./README.pt-BR.md">Português</a> · <a href="./README.de.md">Deutsch</a> · <a href="./README.fr.md">Français</a> · <a href="./README.ru.md">Русский</a> · <a href="./README.tr.md">Türkçe</a> · <a href="./README.ko.md">한국어</a> · <a href="./README.th.md">ไทย</a>
 </p>
 
 <p align="center">
   <strong>Let a one-person studio run like a complete team.</strong><br />
   A local-first visual project operating system for independent creators and one-person companies.
+</p>
+
+<p align="center">
+  <a href="https://kunito01.github.io/SMOS/login/"><img src="https://img.shields.io/badge/Live_Demo-Open_PWA-ff4b2b?style=for-the-badge&logo=pwa&logoColor=white" alt="Open Live Demo" /></a>
+  <a href="https://github.com/kunito01/SMOS/releases/latest"><img src="https://img.shields.io/badge/Download-Portable_PWA-f4f414?style=for-the-badge&logo=github&logoColor=1c2328" alt="Download portable PWA" /></a>
 </p>
 
 <p align="center">
@@ -24,6 +29,7 @@
   <img src="https://img.shields.io/badge/TypeScript-5-3178c6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript 5" />
   <img src="https://img.shields.io/badge/PWA-installable-5a0fc8?style=flat-square&logo=pwa&logoColor=white" alt="Installable PWA" />
   <img src="https://img.shields.io/badge/data-local--first-e9e5df?style=flat-square" alt="Local-first data" />
+  <a href="./LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-03b5aa?style=flat-square" alt="Apache License 2.0" /></a>
 </p>
 
 ---
@@ -33,6 +39,14 @@
 Studio Map OS connects brands, project groups, projects, people, software, costs, timelines, release checkpoints, and archives in one visual workspace. It helps independent creators operate several parallel projects without flattening the creative process into a generic task list.
 
 The current version is an installable, local-first PWA. Business data stays on the device, is encrypted with Web Crypto, and is persisted in IndexedDB. The Web App Manifest, Service Worker, offline fallback, application icons, and standalone packaging workflow are integrated. Accounts, recovery keys, and backups are also handled in the browser; a remote business backend and server authentication are not connected yet.
+
+## Screenshots
+
+![01 — Sign-in and encrypted full-site backup entry](./docs/screenshots/01.png)
+
+![02 — All-project index and visual project cards](./docs/screenshots/02.png)
+
+![03 — People, software, and cost-template libraries](./docs/screenshots/03.png)
 
 ## Core capabilities
 
@@ -141,15 +155,15 @@ The bundle is written to `output/pwa/studio-map-os-pwa/`. It includes the standa
 | `/offline` | Document fallback when Service Worker navigation fails |
 | `/dashboard` | Studio overview, scopes, metrics, and project maps |
 | `/companies` | Brand and project-group management |
-| `/companies/[companyId]` | Brand details and linked project summaries |
+| `/company/?companyId=...` | Brand details and linked project summaries |
 | `/projects` | All active projects |
-| `/projects/[projectId]` | Project status, timeline, releases, receivables, and settings |
-| `/projects/[projectId]/costs` | Project budget and cost details |
-| `/projects/[projectId]/share` | Read-only share-field settings |
+| `/project/?projectId=...` | Project status, timeline, releases, receivables, and settings |
+| `/project-costs/?projectId=...` | Project budget and cost details |
+| `/project-share/?projectId=...` | Read-only share-field settings |
 | `/costs` | Studio-level cost totals and display-currency settings |
 | `/libraries` | People, software subscriptions, and cost-template libraries |
 | `/archive` | Archived projects plus device and workspace backup recovery |
-| `/share/[token]` | Local read-only project snapshot |
+| `/share/?token=...` | Local read-only project snapshot |
 
 ## Data and security model
 
@@ -184,7 +198,7 @@ The current calculation and display currencies are:
 - JPY — Japanese yen
 - EUR — Euro
 
-The application first requests reference rates from Frankfurter and the European Central Bank, then falls back to a recent browser cache or bundled rates. Exchange rates are intended for internal studio estimates, not settlement or financial advice.
+The application requests reference rates directly in the browser from Frankfurter's ECB-backed service, then falls back to a recent browser cache or bundled rates. Exchange rates are intended for internal studio estimates, not settlement or financial advice.
 
 ## Backup files
 
@@ -211,7 +225,7 @@ The interface supports eleven languages. Locale files fall back to English when 
 ## Project structure
 
 ```text
-app/                  Next.js routes, Manifest, Service Worker, and exchange-rate API
+app/                  Next.js routes, Manifest, Service Worker, and static PWA entry points
 components/           Pages, product modules, layout, and shared UI
 lib/api/              Local business API adapters
 lib/i18n/             Interface dictionaries and domain labels
@@ -252,9 +266,9 @@ Issues and Pull Requests are welcome. Before submitting a change:
 3. Run ESLint and the TypeScript check.
 4. Document backward compatibility and backup recovery for data-format changes.
 
-## Copyright
+## License
 
-This repository currently has no separate open-source license. Unless the copyright owner grants explicit permission, do not assume rights to copy, distribute, modify, or use the project commercially.
+Studio Map OS is licensed under the [Apache License 2.0](./LICENSE). You may use, reproduce, modify, and distribute the project in compliance with the license terms.
 
 <p align="center">
   <strong>Studio Map OS</strong><br />

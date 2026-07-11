@@ -18,6 +18,7 @@ import {
 } from "@/lib/i18n/domain-labels";
 import { formatLocalizedDate } from "@/lib/i18n/formatters";
 import type { Project, Task } from "@/lib/types";
+import { projectPath } from "@/lib/utils/app-routes";
 import { cn } from "@/lib/utils/cn";
 
 type TodayCommandModalProps = {
@@ -82,7 +83,7 @@ export function TodayCommandModal({ open, project, tasks, onClose }: TodayComman
                   </div>
                   <ProgressBar value={project.progress} className="bg-white/15" barClassName="bg-limepop" />
                 </div>
-                <Link href={`/projects/${project.id}`} prefetch={false}>
+                <Link href={projectPath(project.id)} prefetch={false}>
                   <Button variant="secondary" size="md" className="mt-5">
                     {t("openProjectDetail")}
                   </Button>

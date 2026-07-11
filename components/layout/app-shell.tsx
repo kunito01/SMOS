@@ -27,6 +27,7 @@ import { ModalPortal } from "@/components/ui/modal-portal";
 import { projectsApi } from "@/lib/api";
 import { formatDemoEntityName, projectNameKeys, taskTitleKeys, translateDomainLabel } from "@/lib/i18n/domain-labels";
 import { formatLocalizedDate } from "@/lib/i18n/formatters";
+import { projectPath } from "@/lib/utils/app-routes";
 import { cn } from "@/lib/utils/cn";
 
 const navItems = [
@@ -538,7 +539,7 @@ export function AppShell({ beforeNavigate, children }: AppShellProps) {
                       }
 
                       setNotificationsOpen(false);
-                      router.push(`/projects/${item.projectId}`);
+                      router.push(projectPath(item.projectId));
                     };
 
                     return (

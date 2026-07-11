@@ -8,6 +8,7 @@ import {
   isExchangeRateSnapshot,
   isExchangeRateSnapshotRecent,
   isMoneyCurrency,
+  supportedCurrencies,
   sumMoney,
   type ExchangeRateSnapshot,
   type MoneyCurrency
@@ -28,26 +29,85 @@ type CostDisplayCurrencyContextValue = {
 
 const displayCurrencyStorageKey = "studio-map-os.display-currency";
 const exchangeRateSnapshotStorageKey = "studio-map-os.exchange-rate-snapshot";
+const exchangeRateRequestTimeoutMs = 5_000;
+const frankfurterUrl =
+  "https://api.frankfurter.dev/v2/rates?base=CNY&quotes=USD%2CJPY%2CEUR&providers=ECB";
+
+type FrankfurterRate = {
+  base: string;
+  date: string;
+  quote: string;
+  rate: number;
+};
 
 let exchangeRateRequest: Promise<ExchangeRateSnapshot> | null = null;
 const CostDisplayCurrencyContext = createContext<CostDisplayCurrencyContextValue | null>(null);
 
+const fetchExchangeRates = async (): Promise<ExchangeRateSnapshot> => {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), exchangeRateRequestTimeoutMs);
+
+  try {
+    const response = await fetch(frankfurterUrl, {
+      cache: "no-store",
+      signal: controller.signal
+    });
+
+    if (!response.ok) {
+      throw new Error(`Frankfurter returned ${response.status}`);
+    }
+
+    const payload: unknown = await response.json();
+
+    if (!Array.isArray(payload)) {
+      throw new Error("Exchange-rate response is invalid");
+    }
+
+    const rates: Partial<Record<MoneyCurrency, number>> = { CNY: 1 };
+    const observationDates = new Set<string>();
+
+    payload.forEach((value: unknown) => {
+      const row = value as Partial<FrankfurterRate>;
+
+      if (
+        row.base === "CNY" &&
+        typeof row.quote === "string" &&
+        isMoneyCurrency(row.quote) &&
+        typeof row.rate === "number" &&
+        Number.isFinite(row.rate) &&
+        row.rate > 0 &&
+        typeof row.date === "string"
+      ) {
+        rates[row.quote] = row.rate;
+        observationDates.add(row.date);
+      }
+    });
+
+    if (
+      observationDates.size !== 1 ||
+      !supportedCurrencies.every((currency) => {
+        const rate = rates[currency];
+        return typeof rate === "number" && Number.isFinite(rate) && rate > 0;
+      })
+    ) {
+      throw new Error("Exchange-rate response is incomplete");
+    }
+
+    return {
+      base: "CNY",
+      rates: rates as Record<MoneyCurrency, number>,
+      asOf: [...observationDates][0] ?? "",
+      fetchedAt: new Date().toISOString(),
+      source: "ECB via Frankfurter"
+    };
+  } finally {
+    window.clearTimeout(timeout);
+  }
+};
+
 const requestExchangeRates = () => {
   if (!exchangeRateRequest) {
-    exchangeRateRequest = fetch("/api/exchange-rates", { cache: "no-store" })
-      .then(async (response) => {
-        if (!response.ok) {
-          throw new Error(`Exchange-rate request failed: ${response.status}`);
-        }
-
-        const payload: unknown = await response.json();
-
-        if (!isExchangeRateSnapshot(payload)) {
-          throw new Error("Exchange-rate response is invalid");
-        }
-
-        return payload;
-      })
+    exchangeRateRequest = fetchExchangeRates()
       .finally(() => {
         exchangeRateRequest = null;
       });
@@ -123,6 +183,14 @@ export function CostDisplayCurrencyProvider({ children }: { children: React.Reac
     }
 
     setIsReady(true);
+
+    if (!window.navigator.onLine) {
+      setIsRateUpdating(false);
+      return () => {
+        isMounted = false;
+      };
+    }
+
     setIsRateUpdating(true);
 
     requestExchangeRates()

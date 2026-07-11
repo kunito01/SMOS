@@ -28,6 +28,7 @@ import {
   translateDomainLabel
 } from "@/lib/i18n/domain-labels";
 import type { CostItem, CostLibraryItem, Person, Project, ProjectBudget, Tool } from "@/lib/types";
+import { projectPath } from "@/lib/utils/app-routes";
 import { cn } from "@/lib/utils/cn";
 import { createEmptyProjectBudget } from "@/lib/utils/project-budget";
 
@@ -330,7 +331,7 @@ export function ProjectCostsPage({ projectId }: { projectId: string }) {
                 </p>
                 <div className="mt-6 flex flex-wrap gap-3">
                   <Link
-                    href={`/projects/${data.project.id}`}
+                    href={projectPath(data.project.id)}
                     prefetch={false}
                     onNavigate={(event) => {
                       if (!confirmBudgetNavigation()) {
@@ -368,7 +369,7 @@ export function ProjectCostsPage({ projectId }: { projectId: string }) {
                 <p className="mt-2 max-w-3xl text-sm font-bold leading-6 text-ink/70">
                   {t("projectBudgetTimelineRequiredBody")}
                 </p>
-                <Link href={`/projects/${data.project.id}`} prefetch={false} className="mt-4 inline-flex">
+                <Link href={projectPath(data.project.id)} prefetch={false} className="mt-4 inline-flex">
                   <Button type="button" variant="secondary" size="sm">
                     <ArrowLeft size={16} />
                     {t("projectWorkspace")}

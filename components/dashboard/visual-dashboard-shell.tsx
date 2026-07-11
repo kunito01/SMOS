@@ -39,6 +39,7 @@ import {
 } from "@/lib/i18n/domain-labels";
 import type { TranslationKey } from "@/lib/i18n/translations";
 import type { Company, DashboardOverview, DashboardScope, Project, ProjectGroup } from "@/lib/types";
+import { projectPath } from "@/lib/utils/app-routes";
 import { cn } from "@/lib/utils/cn";
 import { fixedNumericLocale } from "@/lib/utils/money";
 
@@ -437,7 +438,7 @@ export function VisualDashboardShell() {
             }
           />
           {spotlightProjects.map((project, index) => (
-            <Link key={project.id} href={`/projects/${project.id}`} prefetch={false} className="block rounded-studio-xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-coral">
+            <Link key={project.id} href={projectPath(project.id)} prefetch={false} className="block rounded-studio-xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-coral">
               <motion.div
               key={project.id}
               className="rounded-studio-xl shadow-soft ring-1 ring-black/[0.04]"
@@ -625,7 +626,7 @@ export function VisualDashboardShell() {
                                 {projects.map((project, projectIndex) => (
                                   <Link
                                     key={project.id}
-                                    href={`/projects/${project.id}`}
+                                    href={projectPath(project.id)}
                                     prefetch={false}
                                     className="relative block w-full min-w-0 max-w-full overflow-hidden rounded-full bg-white/78 px-2 py-1.5 text-[11px] font-black shadow-sm transition hover:-translate-y-0.5 hover:shadow-soft min-[400px]:px-3 min-[400px]:py-2 min-[400px]:text-sm"
                                   >

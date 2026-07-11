@@ -14,6 +14,7 @@ import { SectionHeader } from "@/components/ui/section-header";
 import { projectsApi, shareApi } from "@/lib/api";
 import { formatDemoEntityName, projectNameKeys, translateDomainLabel } from "@/lib/i18n/domain-labels";
 import type { Project, ShareSettings } from "@/lib/types";
+import { projectPath, publicSharePath, withBasePath } from "@/lib/utils/app-routes";
 
 const settingKeys: Array<
   keyof Pick<
@@ -64,7 +65,7 @@ export function ProjectShareSettingsPage({ projectId }: { projectId: string }) {
       return "";
     }
 
-    return `${origin}/share/${settings.token}`;
+    return `${origin}${withBasePath(publicSharePath(settings.token))}`;
   }, [origin, settings?.token]);
 
   const updateSetting = (key: keyof ShareSettings, value: boolean) => {
@@ -108,7 +109,7 @@ export function ProjectShareSettingsPage({ projectId }: { projectId: string }) {
                   {t("shareSettingsBody")}
                 </p>
                 <div className="mt-6 flex flex-wrap gap-3">
-                  <Link href={`/projects/${project.id}`} prefetch={false}>
+                  <Link href={projectPath(project.id)} prefetch={false}>
                     <Button variant="ghost" size="md">
                       <ArrowLeft size={18} />
                       {t("projectWorkspace")}
