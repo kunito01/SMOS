@@ -3,8 +3,16 @@
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { ImageCard } from "@/components/cards/image-card";
+import { useI18n } from "@/components/providers/app-providers";
+import { ProjectReleaseBadges } from "@/components/projects/project-release-badges";
 import { ProgressBar } from "@/components/ui/progress-bar";
-import { groupNameKeys, projectNameKeys, statusKeys, translateDomainLabel } from "@/lib/i18n/domain-labels";
+import {
+  formatDemoEntityName,
+  getProjectGroupDisplayName,
+  projectNameKeys,
+  statusKeys,
+  translateDomainLabel
+} from "@/lib/i18n/domain-labels";
 import type { TranslationKey } from "@/lib/i18n/translations";
 import type { Project, ProjectGroup } from "@/lib/types";
 
@@ -17,15 +25,22 @@ type ProjectCardProps = {
 };
 
 export function ProjectCard({ project, groups, t, href = `/projects/${project.id}`, actionLabel }: ProjectCardProps) {
+  const { language } = useI18n();
   const group = groups.find((item) => item.id === project.groupId);
 
   return (
     <Link href={href} prefetch={false} className="block rounded-studio-xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-coral">
       <ImageCard
         imageUrl={project.coverImage}
-        title={translateDomainLabel(project.name, projectNameKeys, t)}
-        meta={translateDomainLabel(group?.name ?? "", groupNameKeys, t)}
+        title={formatDemoEntityName(
+          translateDomainLabel(project.name, projectNameKeys, t),
+          project.id,
+          "project",
+          t
+        )}
+        meta={group ? getProjectGroupDisplayName(group, language, t) : ""}
         className="min-h-72 transition duration-200 hover:-translate-y-1"
+        action={<ProjectReleaseBadges project={project} t={t} className="max-w-48" />}
       >
         <div className="rounded-full bg-white/[0.88] p-1">
           <ProgressBar value={project.progress} />

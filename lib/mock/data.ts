@@ -20,7 +20,13 @@ import type {
   Tool,
   User
 } from "@/lib/types";
-import { toCny } from "@/lib/utils/money";
+import {
+  bundledExchangeRateSnapshot,
+  convertCurrency,
+  type ExchangeRateSnapshot,
+  type MoneyCurrency
+} from "@/lib/utils/money";
+import { hasProjectPublishedRelease } from "@/lib/utils/project-release";
 
 const projectImages = [
   "https://images.unsplash.com/photo-1511512578047-dfb367046420?auto=format&fit=crop&w=1200&q=80",
@@ -245,15 +251,49 @@ const companySeeds = [
 ];
 
 const groupSeeds = [
-  ["Game Projects", "AI Video Projects"],
-  ["Website Projects", "Client Projects"]
+  {
+    id: "group-1-1",
+    name: "Game Projects",
+    nameI18n: { en: "Game Projects", zh: "游戏项目", ja: "ゲームプロジェクト" }
+  },
+  {
+    id: "group-1-2",
+    name: "AI Video Projects",
+    nameI18n: { en: "AI Video Projects", zh: "AI 视频项目", ja: "AI動画プロジェクト" }
+  },
+  {
+    id: "group-2-1",
+    name: "Website Projects",
+    nameI18n: { en: "Website Projects", zh: "网站项目", ja: "Webサイトプロジェクト" }
+  },
+  {
+    id: "group-2-2",
+    name: "Client Projects",
+    nameI18n: { en: "Client Projects", zh: "客户项目", ja: "クライアントプロジェクト" }
+  }
 ];
 
-const projectNameSets = [
-  ["AI Web Game Prototype", "Three.js Engine Experiment", "Visual Asset Production"],
-  ["Short Video Pipeline", "Runway Trailer Sprint", "Motion Identity Pack"],
-  ["Brand Landing Page", "Portfolio Relaunch", "Interactive Product Site"],
-  ["Marketing Campaign", "Client Progress Room", "Event Concept Board"]
+const projectSeedAssignments = [
+  {
+    companyId: "company-northstar",
+    groupId: "group-1-1",
+    names: ["AI Web Game Prototype", "Three.js Engine Experiment", "Visual Asset Production"]
+  },
+  {
+    companyId: "company-northstar",
+    groupId: "group-1-2",
+    names: ["Short Video Pipeline", "Runway Trailer Sprint", "Motion Identity Pack"]
+  },
+  {
+    companyId: "company-color-works",
+    groupId: "group-2-1",
+    names: ["Brand Landing Page", "Portfolio Relaunch", "Interactive Product Site"]
+  },
+  {
+    companyId: "company-color-works",
+    groupId: "group-2-2",
+    names: ["Marketing Campaign", "Client Progress Room", "Event Concept Board"]
+  }
 ];
 
 const materialSeeds: Array<Pick<Material, "name" | "type" | "status">> = [
@@ -263,20 +303,17 @@ const materialSeeds: Array<Pick<Material, "name" | "type" | "status">> = [
   { name: "Share deck", type: "doc", status: "approved" }
 ];
 
-const versionSeeds: Array<Pick<ProjectVersion, "name" | "summary" | "status">> = [
+const versionSeeds: Array<Pick<ProjectVersion, "kind" | "name" | "summary" | "status">> = [
   {
-    name: "Direction lock",
-    summary: "Core visual direction, audience promise, and first playable shape are aligned.",
-    status: "released"
+    kind: "demo",
+    name: "Demo release",
+    summary: "Demo publishing checkpoint.",
+    status: "draft"
   },
   {
-    name: "Interactive review",
-    summary: "Key interactions, motion timing, and public review notes are collected in one pass.",
-    status: "review"
-  },
-  {
-    name: "Launch candidate",
-    summary: "Final content, share room, and delivery checklist are being prepared for release.",
+    kind: "official",
+    name: "Official release",
+    summary: "Formal release checkpoint.",
     status: "draft"
   }
 ];
@@ -480,7 +517,7 @@ const createMaterials = (projectId: string, projectIndex: number): Material[] =>
 
 const createVersions = (projectId: string, projectIndex: number): ProjectVersion[] =>
   versionSeeds.map((version, versionIndex) => ({
-    id: `${projectId}-version-${versionIndex + 1}`,
+    id: `${projectId}-version-${version.kind}`,
     projectId,
     ...version,
     createdAt: dateFor(6 + versionIndex, 6 + projectIndex + versionIndex * 5)
@@ -526,6 +563,7 @@ export const createMockProject = (
     name,
     description: "A visual studio initiative managed through phases, deliverables, people, tools, and share settings.",
     coverImage: projectImages[projectIndex % projectImages.length],
+    archivedAt: null,
     tools: pickSlice(toolPool, projectIndex, 4),
     people: pickSlice(peoplePool, projectIndex, 4),
     startDate: "2026-06-01",
@@ -552,24 +590,22 @@ const createDatabase = (): MockDatabase => {
     createdAt: `2026-06-0${index + 1}T09:00:00.000Z`
   }));
 
-  const groups: ProjectGroup[] = companies.flatMap((company, companyIndex) =>
-    groupSeeds[companyIndex].map((groupName, groupIndex) => ({
-      id: `group-${companyIndex + 1}-${groupIndex + 1}`,
-      companyId: company.id,
-      name: groupName,
-      description: `${groupName} under ${company.name}, grouped for visual planning and progress sharing.`,
-      coverImage: groupCovers[companyIndex * 2 + groupIndex],
-      colorTheme: groupIndex % 2 === 0 ? "aqua" : "lime",
-      createdAt: `2026-06-0${groupIndex + 3}T09:00:00.000Z`
-    }))
-  );
+  const groups: ProjectGroup[] = groupSeeds.map((group, groupIndex) => ({
+    id: group.id,
+    name: group.name,
+    nameI18n: group.nameI18n,
+    description: `${group.name}, grouped for visual planning and progress sharing.`,
+    coverImage: groupCovers[groupIndex],
+    colorTheme: groupIndex % 2 === 0 ? "aqua" : "lime",
+    createdAt: `2026-06-0${(groupIndex % 2) + 3}T09:00:00.000Z`
+  }));
 
-  const projects = groups.flatMap((group, groupIndex) =>
-    projectNameSets[groupIndex].map((projectName, projectOffset) => {
-      const projectIndex = groupIndex * 3 + projectOffset;
+  const projects = projectSeedAssignments.flatMap((assignment, assignmentIndex) =>
+    assignment.names.map((projectName, projectOffset) => {
+      const projectIndex = assignmentIndex * 3 + projectOffset;
       const shareToken = projectIndex === 0 ? "studio-share-alpha" : projectIndex === 4 ? "studio-share-beta" : undefined;
 
-      return createMockProject(group.companyId, group.id, projectName, projectIndex, shareToken);
+      return createMockProject(assignment.companyId, assignment.groupId, projectName, projectIndex, shareToken);
     })
   );
 
@@ -598,23 +634,34 @@ const createDatabase = (): MockDatabase => {
 
 export const mockDatabase = createDatabase();
 
-export const getToolMonthlySubscriptionCost = (tool: Tool) => {
+const getToolMonthlySubscriptionMoney = (tool: Tool) => {
   const subscription = tool.subscription;
 
   if (!subscription || subscription.amount <= 0) {
-    return 0;
+    return null;
   }
 
-  const monthlyAmount =
-    subscription.billingCycle === "yearly"
-      ? subscription.amount / 12
-      : subscription.amount;
-
-  return toCny(monthlyAmount, subscription.currency);
+  return {
+    amount: subscription.billingCycle === "yearly" ? subscription.amount / 12 : subscription.amount,
+    currency: subscription.currency
+  };
 };
 
-export const getTotalMonthlySubscriptionCost = (tools: Tool[] = mockDatabase.tools) =>
-  tools.reduce((sum, tool) => sum + getToolMonthlySubscriptionCost(tool), 0);
+export const getToolMonthlySubscriptionCost = (
+  tool: Tool,
+  currency: MoneyCurrency = "CNY",
+  snapshot: ExchangeRateSnapshot = bundledExchangeRateSnapshot
+) => {
+  const monthly = getToolMonthlySubscriptionMoney(tool);
+
+  return monthly ? convertCurrency(monthly.amount, monthly.currency, currency, snapshot) : 0;
+};
+
+export const getTotalMonthlySubscriptionCost = (
+  tools: Tool[] = mockDatabase.tools,
+  currency: MoneyCurrency = "CNY",
+  snapshot: ExchangeRateSnapshot = bundledExchangeRateSnapshot
+) => tools.reduce((sum, tool) => sum + getToolMonthlySubscriptionCost(tool, currency, snapshot), 0);
 
 export const getProjectSubscriptionTools = (project: Project, tools: Tool[] = mockDatabase.tools) => {
   const usedToolIds = new Set([
@@ -622,29 +669,42 @@ export const getProjectSubscriptionTools = (project: Project, tools: Tool[] = mo
     ...project.phases.flatMap((phase) => phase.toolIds ?? [])
   ]);
 
-  return tools.filter((tool) => usedToolIds.has(tool.id) && getToolMonthlySubscriptionCost(tool) > 0);
+  return tools.filter((tool) => usedToolIds.has(tool.id) && Boolean(getToolMonthlySubscriptionMoney(tool)));
 };
 
-export const getProjectSubscriptionCost = (project: Project, tools: Tool[] = mockDatabase.tools) =>
+export const getProjectSubscriptionCost = (
+  project: Project,
+  tools: Tool[] = mockDatabase.tools,
+  currency: MoneyCurrency = "CNY",
+  snapshot: ExchangeRateSnapshot = bundledExchangeRateSnapshot
+) =>
   getProjectSubscriptionTools(project, tools).reduce(
-    (sum, tool) => sum + getToolMonthlySubscriptionCost(tool),
+    (sum, tool) => sum + getToolMonthlySubscriptionCost(tool, currency, snapshot),
     0
   );
 
 export const createProjectSubscriptionCostItems = (project: Project, tools: Tool[] = mockDatabase.tools): CostItem[] =>
-  getProjectSubscriptionTools(project, tools).map((tool) => ({
-    id: `${project.id}-subscription-${tool.id}`,
-    projectId: project.id,
-    name: `Subscription · ${tool.name}`,
-    category: "software",
-    amount: getToolMonthlySubscriptionCost(tool),
-    currency: "CNY",
-    billingType: "monthly",
-    startDate: project.startDate,
-    endDate: tool.subscription?.expiresAt,
-    isActual: true,
-    visibility: "private"
-  }));
+  getProjectSubscriptionTools(project, tools).flatMap((tool) => {
+    const monthly = getToolMonthlySubscriptionMoney(tool);
+
+    return monthly
+      ? [
+          {
+            id: `${project.id}-subscription-${tool.id}`,
+            projectId: project.id,
+            name: `Subscription · ${tool.name}`,
+            category: "software" as const,
+            amount: monthly.amount,
+            currency: monthly.currency,
+            billingType: "monthly" as const,
+            startDate: project.startDate,
+            endDate: tool.subscription?.expiresAt,
+            isActual: true,
+            visibility: "private" as const
+          }
+        ]
+      : [];
+  });
 
 export const getAllTasks = (projects: Project[] = mockDatabase.projects) =>
   projects.flatMap((project) =>
@@ -656,56 +716,93 @@ export const getAllTasks = (projects: Project[] = mockDatabase.projects) =>
 export const getAllDeliverables = (projects: Project[] = mockDatabase.projects) =>
   projects.flatMap((project) => project.phases.flatMap((phase) => phase.deliverables));
 
-export const getProjectActualCost = (project: Project) =>
-  project.costs.filter((cost) => cost.isActual).reduce((sum, cost) => sum + toCny(cost.amount, cost.currency), 0) +
-  getProjectSubscriptionCost(project);
+export const getProjectActualCost = (
+  project: Project,
+  currency: MoneyCurrency = "CNY",
+  snapshot: ExchangeRateSnapshot = bundledExchangeRateSnapshot
+) =>
+  project.costs
+    .filter((cost) => cost.isActual)
+    .reduce((sum, cost) => sum + convertCurrency(cost.amount, cost.currency, currency, snapshot), 0) +
+  getProjectSubscriptionCost(project, mockDatabase.tools, currency, snapshot);
 
-export const getProjectFutureCost = (project: Project) =>
-  project.costs.filter((cost) => !cost.isActual).reduce((sum, cost) => sum + toCny(cost.amount, cost.currency), 0);
+export const getProjectFutureCost = (
+  project: Project,
+  currency: MoneyCurrency = "CNY",
+  snapshot: ExchangeRateSnapshot = bundledExchangeRateSnapshot
+) =>
+  project.costs
+    .filter((cost) => !cost.isActual)
+    .reduce((sum, cost) => sum + convertCurrency(cost.amount, cost.currency, currency, snapshot), 0);
 
-export const getProjectPlannedReceivable = (project: Project) =>
+export const getProjectPlannedReceivable = (
+  project: Project,
+  currency: MoneyCurrency = "CNY",
+  snapshot: ExchangeRateSnapshot = bundledExchangeRateSnapshot
+) =>
   (project.payments ?? [])
     .filter((payment) => payment.type === "planned")
-    .reduce((sum, payment) => sum + toCny(payment.amount, payment.currency), 0);
+    .reduce((sum, payment) => sum + convertCurrency(payment.amount, payment.currency, currency, snapshot), 0);
 
-export const getProjectReceivedRevenue = (project: Project) =>
+export const getProjectReceivedRevenue = (
+  project: Project,
+  currency: MoneyCurrency = "CNY",
+  snapshot: ExchangeRateSnapshot = bundledExchangeRateSnapshot
+) =>
   (project.payments ?? [])
     .filter((payment) => payment.type === "received")
-    .reduce((sum, payment) => sum + toCny(payment.amount, payment.currency), 0);
+    .reduce((sum, payment) => sum + convertCurrency(payment.amount, payment.currency, currency, snapshot), 0);
 
-export const getProjectActualProfit = (project: Project) =>
-  getProjectReceivedRevenue(project) - getProjectActualCost(project);
+export const getProjectActualProfit = (
+  project: Project,
+  currency: MoneyCurrency = "CNY",
+  snapshot: ExchangeRateSnapshot = bundledExchangeRateSnapshot
+) => getProjectReceivedRevenue(project, currency, snapshot) - getProjectActualCost(project, currency, snapshot);
 
-export const getProjectProjectedProfit = (project: Project) =>
-  getProjectPlannedReceivable(project) - getProjectActualCost(project) - getProjectFutureCost(project);
+export const getProjectProjectedProfit = (
+  project: Project,
+  currency: MoneyCurrency = "CNY",
+  snapshot: ExchangeRateSnapshot = bundledExchangeRateSnapshot
+) =>
+  getProjectPlannedReceivable(project, currency, snapshot) -
+  getProjectActualCost(project, currency, snapshot) -
+  getProjectFutureCost(project, currency, snapshot);
 
-export const createDashboardOverview = (projects: Project[] = mockDatabase.projects): DashboardOverview => {
-  const deliverables = getAllDeliverables(projects);
-  const tasks = getAllTasks(projects);
-  const projectCount = projects.length;
+export const createDashboardOverview = (
+  projects: Project[] = mockDatabase.projects,
+  options: { includeArchivedTotal?: boolean } = { includeArchivedTotal: true }
+): DashboardOverview => {
+  const operationalProjects = projects.filter((project) => !project.archivedAt);
+  const countedProjects = options.includeArchivedTotal === false ? operationalProjects : projects;
+  const deliverables = getAllDeliverables(operationalProjects);
+  const tasks = getAllTasks(operationalProjects);
+  const projectCount = countedProjects.length;
   const preferredSpotlightIndexes = [0, 6, 3, 1];
   const preferredSpotlights = preferredSpotlightIndexes.flatMap((projectIndex) =>
-    projects[projectIndex] ? [projects[projectIndex]] : []
+    operationalProjects[projectIndex] ? [operationalProjects[projectIndex]] : []
   );
   const spotlightProjects = [
     ...preferredSpotlights,
-    ...projects.filter((project) => !preferredSpotlights.some((spotlight) => spotlight.id === project.id))
+    ...operationalProjects.filter((project) => !preferredSpotlights.some((spotlight) => spotlight.id === project.id))
   ].slice(0, 4);
 
   return {
     totalProjectCount: projectCount,
-    activeProjectCount: projects.filter((project) => project.status === "active").length,
-    completedProjectCount: projects.filter((project) => project.status === "completed").length,
-    pausedProjectCount: projects.filter((project) => project.status === "paused").length,
+    activeProjectCount: operationalProjects.filter((project) => project.status === "active").length,
+    completedProjectCount: operationalProjects.filter((project) => project.status === "completed").length,
+    pausedProjectCount: operationalProjects.filter((project) => project.status === "paused").length,
     averageProgress: projectCount
-      ? Math.round(projects.reduce((sum, project) => sum + project.progress, 0) / projectCount)
+      ? Math.round(countedProjects.reduce((sum, project) => sum + project.progress, 0) / projectCount)
       : 0,
+    releasedProjectCount: countedProjects.filter((project) =>
+      project.status === "completed" || hasProjectPublishedRelease(project)
+    ).length,
     upcomingDeliverableCount: deliverables.filter((deliverable) => !deliverable.completed).length,
     overdueTaskCount: tasks.filter((task) => !task.completed && task.priority === "high").length,
-    actualCostSoFar: projects.reduce((sum, project) => sum + getProjectActualCost(project), 0),
-    futureEstimatedCost: projects.reduce((sum, project) => sum + getProjectFutureCost(project), 0),
+    actualCostSoFar: operationalProjects.reduce((sum, project) => sum + getProjectActualCost(project), 0),
+    futureEstimatedCost: operationalProjects.reduce((sum, project) => sum + getProjectFutureCost(project), 0),
     stageDistribution: phaseNames.map((phaseName) => {
-      const phaseTasks = projects.flatMap((project) =>
+      const phaseTasks = operationalProjects.flatMap((project) =>
         project.phases
           .filter((phase) => phase.name === phaseName)
           .flatMap((phase) => phase.deliverables.flatMap((deliverable) => deliverable.tasks))

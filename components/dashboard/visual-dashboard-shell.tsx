@@ -2,30 +2,25 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import {
   AlertTriangle,
   ArrowRight,
-  BellRing,
   Building2,
   CalendarDays,
   ChartPie,
   CheckCircle2,
   CircleDollarSign,
-  Clock3,
   FolderKanban,
   Layers3,
   Network,
-  Plus,
   Rocket,
-  Share2,
-  Users,
-  WandSparkles
+  Users
 } from "lucide-react";
 import { ImageCard } from "@/components/cards/image-card";
-import { ProjectCreateModal } from "@/components/dashboard/project-create-modal";
+import { PixelHeroScene } from "@/components/auth/pixel-hero-scene";
 import { AppShell } from "@/components/layout/app-shell";
+import { ProjectReleaseBadges } from "@/components/projects/project-release-badges";
 import { useI18n } from "@/components/providers/app-providers";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -34,12 +29,13 @@ import { ProgressBar } from "@/components/ui/progress-bar";
 import { SectionHeader } from "@/components/ui/section-header";
 import { companiesApi, groupsApi, projectsApi } from "@/lib/api";
 import {
-  groupNameKeys,
+  formatDemoEntityName,
+  getProjectGroupDisplayName,
   projectNameKeys,
-  taskTitleKeys,
+  statusKeys,
   translateDomainLabel
 } from "@/lib/i18n/domain-labels";
-import type { TranslationKey } from "@/lib/i18n/translations";
+import { languageLocales, type TranslationKey } from "@/lib/i18n/translations";
 import type { Company, DashboardOverview, DashboardScope, Project, ProjectGroup } from "@/lib/types";
 import { cn } from "@/lib/utils/cn";
 
@@ -49,34 +45,34 @@ const spring = {
   damping: 18
 } as const;
 
-type MetricValueKey = "totalProjectCount" | "activeProjectCount" | "averageProgress" | "upcomingDeliverableCount";
+type MetricValueKey = "totalProjectCount" | "activeProjectCount" | "averageProgress" | "releasedProjectCount";
 
 const metrics: Array<{
   labelKey: TranslationKey;
   valueKey: MetricValueKey;
-  valueFormat: "count" | "percent" | "year";
+  valueFormat: "count" | "percent";
   tone: "aqua" | "coral" | "lime";
   icon: typeof Layers3;
 }> = [
-  { labelKey: "metricMapped", valueKey: "totalProjectCount", valueFormat: "year", tone: "lime", icon: Layers3 },
+  { labelKey: "metricMapped", valueKey: "totalProjectCount", valueFormat: "count", tone: "lime", icon: Layers3 },
   { labelKey: "metricActive", valueKey: "activeProjectCount", valueFormat: "count", tone: "aqua", icon: Rocket },
   { labelKey: "metricCompleted", valueKey: "averageProgress", valueFormat: "percent", tone: "lime", icon: CheckCircle2 },
-  { labelKey: "metricDue", valueKey: "upcomingDeliverableCount", valueFormat: "count", tone: "coral", icon: CalendarDays }
+  { labelKey: "metricDue", valueKey: "releasedProjectCount", valueFormat: "count", tone: "coral", icon: CalendarDays }
 ];
 
-const metricCardStyles = [
-  "col-span-2 bg-[#e3f596] text-ink xl:col-span-1",
-  "col-span-1 bg-[#f4e9d8] text-ink xl:col-span-1",
-  "col-span-1 bg-[#f4e9d8] text-ink xl:col-span-1",
-  "col-span-2 bg-[#e3f596] text-ink xl:col-span-1"
-] as const;
+const metricIconToneStyles = {
+  aqua: "bg-aqua text-ink",
+  coral: "bg-coral text-white",
+  lime: "bg-limepop text-ink"
+} as const;
 
-const metricIconStyles = [
-  "bg-ink text-white xl:bg-ink xl:text-white",
-  "bg-aqua text-ink xl:bg-aqua xl:text-ink",
-  "bg-limepop text-ink xl:bg-white/10 xl:text-white",
-  "bg-coral text-white xl:bg-coral xl:text-white"
-] as const;
+const projectStatusTone: Record<Project["status"], "aqua" | "lime" | "coral" | "dark" | "cloud"> = {
+  planning: "cloud",
+  active: "coral",
+  paused: "dark",
+  terminated: "cloud",
+  completed: "lime"
+};
 
 type DashboardData = {
   companies: Company[];
@@ -85,13 +81,10 @@ type DashboardData = {
 };
 
 export function VisualDashboardShell() {
-  const router = useRouter();
   const { language, t } = useI18n();
   const [data, setData] = useState<DashboardData | null>(null);
   const [overview, setOverview] = useState<DashboardOverview | null>(null);
   const [scope, setScope] = useState<DashboardScope>({ type: "all" });
-  const [createOpen, setCreateOpen] = useState(false);
-  const [completedTaskIds, setCompletedTaskIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     let isMounted = true;
@@ -141,17 +134,6 @@ export function VisualDashboardShell() {
   );
   const spotlightProjects = overview?.spotlightProjects ?? [];
   const atlasProject = spotlightProjects[0];
-  const focusTasks = useMemo(
-    () =>
-      atlasProject?.phases
-        .flatMap((phase) => phase.deliverables.flatMap((deliverable) => deliverable.tasks))
-        .slice(0, 4) ?? [],
-    [atlasProject]
-  );
-
-  useEffect(() => {
-    setCompletedTaskIds(new Set(focusTasks.filter((task) => task.completed).map((task) => task.id)));
-  }, [focusTasks]);
 
   const scopedProjects = useMemo(() => {
     const projects = data?.projects ?? [];
@@ -168,11 +150,9 @@ export function VisualDashboardShell() {
   }, [data?.projects, scope]);
   const displayName = (value: string, dictionary: Record<string, TranslationKey>) =>
     translateDomainLabel(value, dictionary, t);
+  const displayGroupName = (group: ProjectGroup | null | undefined) =>
+    group ? getProjectGroupDisplayName(group, language, t) : "";
   const formatMetricValue = (metric: (typeof metrics)[number], value: number) => {
-    if (metric.valueFormat === "year") {
-      return "2026";
-    }
-
     if (metric.valueFormat === "percent") {
       return `${value}%`;
     }
@@ -181,7 +161,7 @@ export function VisualDashboardShell() {
   };
   const currencyFormatter = useMemo(
     () =>
-      new Intl.NumberFormat(language === "zh" ? "zh-CN" : language === "ja" ? "ja-JP" : "en-US", {
+      new Intl.NumberFormat(languageLocales[language], {
         compactDisplay: "short",
         currency: "CNY",
         maximumFractionDigits: 1,
@@ -192,13 +172,14 @@ export function VisualDashboardShell() {
   );
   const formatCurrency = (value: number) => currencyFormatter.format(value);
   const linkedToolCount = new Set(spotlightProjects.flatMap((project) => project.tools.map((tool) => tool.id))).size;
-  const clientReadyCount = spotlightProjects.filter((project) => project.shareSettings.isEnabled).length;
+  const sharedProjectCount = scopedProjects.filter((project) => project.shareSettings.isEnabled).length;
   const leadPeopleCount = atlasProject?.people.length ?? 0;
   const statusSegments = [
     { key: "active", label: t("statusActive"), color: "#f94622" },
     { key: "planning", label: t("statusPlanning"), color: "#e3f596" },
     { key: "completed", label: t("statusCompleted"), color: "#8edbe8" },
-    { key: "paused", label: t("statusPaused"), color: "#1c2328" }
+    { key: "paused", label: t("statusPaused"), color: "#1c2328" },
+    { key: "terminated", label: t("statusTerminated"), color: "#d4a1df" }
   ].map((segment) => ({
     ...segment,
     count: scopedProjects.filter((project) => project.status === segment.key).length
@@ -218,31 +199,30 @@ export function VisualDashboardShell() {
     : "conic-gradient(#e3f596 0% 100%)";
   const companyTree = (data?.companies ?? [])
     .map((company) => {
-      const groups = (data?.groups ?? [])
-        .filter((group) => group.companyId === company.id)
+      const companyProjects = scopedProjects.filter((project) => project.companyId === company.id);
+      const groupBranches = (data?.groups ?? [])
         .map((group) => ({
           group,
-          projects: scopedProjects.filter((project) => project.groupId === group.id)
+          projects: companyProjects.filter((project) => project.groupId === group.id)
         }))
         .filter((groupBranch) => groupBranch.projects.length > 0);
+      const unassignedProjects = companyProjects.filter(
+        (project) => !project.groupId || !groupById.has(project.groupId)
+      );
+      const groups = unassignedProjects.length
+        ? [...groupBranches, { group: null, projects: unassignedProjects }]
+        : groupBranches;
 
       return { company, groups };
     })
     .filter((companyBranch) => companyBranch.groups.length > 0);
   const opsItems = [
     {
-      bodyKey: "opsCashWatch",
-      detailKey: "opsCashWatchBody",
-      icon: CircleDollarSign,
-      tone: "bg-limepop",
-      value: formatCurrency(overview?.futureEstimatedCost ?? 0)
-    },
-    {
       bodyKey: "opsPipelineHealth",
       detailKey: "opsPipelineHealthBody",
       icon: Layers3,
       tone: "bg-aqua",
-      value: `${overview?.activeProjectCount ?? 0} / ${overview?.completedProjectCount ?? 0}`
+      value: `${overview?.activeProjectCount ?? 0} / ${scopedProjects.length}`
     },
     {
       bodyKey: "opsCrewLoad",
@@ -254,9 +234,9 @@ export function VisualDashboardShell() {
     {
       bodyKey: "opsClientReady",
       detailKey: "opsClientReadyBody",
-      icon: Share2,
+      icon: Network,
       tone: "bg-coral text-white",
-      value: `${clientReadyCount} / ${spotlightProjects.length}`
+      value: `${sharedProjectCount} / ${scopedProjects.length}`
     }
   ] as const;
   const chooseScopeType = (nextType: DashboardScope["type"]) => {
@@ -286,28 +266,26 @@ export function VisualDashboardShell() {
       : scope.type === "group"
         ? data?.groups ?? []
         : [];
-  const handleProjectCreated = (project: Project) => {
-    setCreateOpen(false);
-    router.push(`/projects/${project.id}`);
-  };
-
   return (
     <AppShell>
       <div className="studio-scroll flex-1 overflow-y-auto bg-white/[0.08] px-4 pb-8 backdrop-blur-sm sm:px-6 xl:px-8">
-        <section className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(340px,0.8fr)]">
+        <section>
           <motion.div
             initial={{ opacity: 0, y: 18 }}
             animate={{ opacity: 1, y: 0 }}
             transition={spring}
           >
-            <Card tone="aqua" className="relative min-h-[28rem] overflow-hidden p-6 sm:p-8 xl:min-h-[32rem]">
-              <div className="relative z-10 flex h-full flex-col justify-between gap-8">
+            <Card tone="aqua" className="relative min-h-[40rem] overflow-hidden bg-[#f6b56a] p-6 sm:p-8 xl:min-h-[44rem]">
+              <PixelHeroScene />
+              <div className="relative z-10 flex min-h-[36rem] flex-col justify-between gap-8 xl:min-h-[40rem]">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="flex flex-wrap items-center gap-3">
-                    <Pill tone="lime">{t("heroPillProduct")}</Pill>
+                    <Pill tone="lime" className="bg-transparent px-0 font-black">
+                      {t("dashboardLabel")}
+                    </Pill>
                   </div>
 
-                  <div className="flex flex-wrap items-center gap-2 rounded-full bg-white/70 p-1 shadow-soft">
+                  <div className="flex max-w-full flex-nowrap items-center gap-[clamp(2px,1vw,8px)] rounded-full bg-white/45 p-[clamp(2px,0.8vw,4px)] shadow-soft ring-1 ring-white/45 backdrop-blur-xl">
                     {[
                       { type: "all", label: t("scopeAll"), icon: Layers3 },
                       { type: "company", label: t("scopeCompany"), icon: Building2 },
@@ -323,11 +301,11 @@ export function VisualDashboardShell() {
                           aria-pressed={active}
                           onClick={() => chooseScopeType(item.type as DashboardScope["type"])}
                           className={cn(
-                            "inline-flex h-10 items-center gap-2 rounded-full px-4 text-sm font-black transition",
+                            "inline-flex h-[clamp(28px,8vw,40px)] min-w-0 shrink items-center gap-[clamp(2px,1vw,8px)] whitespace-nowrap rounded-full px-[clamp(3px,1.6vw,16px)] text-[clamp(8px,2.5vw,14px)] font-black leading-none transition",
                             active ? "bg-ink text-white" : "text-muted hover:bg-white hover:text-ink"
                           )}
                         >
-                          <Icon size={17} />
+                          <Icon className="size-[clamp(10px,3vw,17px)] shrink-0" />
                           {item.label}
                         </button>
                       );
@@ -335,19 +313,19 @@ export function VisualDashboardShell() {
                   </div>
                 </div>
 
-                <div className="max-w-3xl">
-                  <h1 className="max-w-3xl text-4xl font-black leading-[0.95] text-ink sm:text-6xl xl:text-7xl">
+                <div className="max-w-4xl">
+                  <h1 className="max-w-4xl text-[clamp(2rem,6vw,4.5rem)] font-black leading-[0.98] text-ink drop-shadow-[0_3px_0_rgba(255,238,181,0.42)]">
                     {t("heroTitle")}
                   </h1>
-                  <div className="mt-7 flex flex-wrap items-center gap-3">
-                    <Button size="lg" disabled={!data} onClick={() => setCreateOpen(true)}>
-                      <Plus size={19} />
-                      {t("newProject")}
-                    </Button>
-                  </div>
+                  <p className="mt-5 max-w-3xl text-[clamp(0.95rem,2vw,1.25rem)] font-bold leading-relaxed text-ink/76">
+                    {t("heroBody")}
+                  </p>
+                  <p className="mt-3 max-w-3xl text-[clamp(0.68rem,1.35vw,0.8rem)] font-semibold italic leading-relaxed text-ink/52">
+                    {t("demoCleanupNote")}
+                  </p>
                   {scope.type !== "all" ? (
-                    <div className="mt-4 flex flex-wrap items-center gap-2">
-                      <span className="text-sm font-black text-ink/55">
+                    <div className="mt-4 flex max-w-full flex-wrap items-center gap-x-[clamp(2px,1vw,8px)] gap-y-[clamp(4px,1.2vw,8px)] max-[360px]:gap-x-px max-[360px]:gap-y-1">
+                      <span className="whitespace-nowrap text-[clamp(8px,2.5vw,14px)] font-black leading-none text-ink/55 max-[360px]:text-[7px]">
                         {scope.type === "company" ? t("scopeChooseCompany") : t("scopeChooseGroup")}
                       </span>
                       {scopeItems.map((item) => {
@@ -367,11 +345,13 @@ export function VisualDashboardShell() {
                               }
                             }}
                             className={cn(
-                              "h-10 rounded-full px-4 text-sm font-black transition",
+                              "h-[clamp(28px,8vw,40px)] min-w-0 max-w-full truncate whitespace-nowrap rounded-full px-[clamp(3px,1.6vw,16px)] text-[clamp(8px,2.5vw,14px)] font-black leading-none transition max-[360px]:h-[26px] max-[360px]:px-0.5 max-[360px]:text-[7px]",
                               active ? "bg-coral text-white shadow-soft" : "bg-white/72 text-ink hover:bg-white"
                             )}
                           >
-                            {scope.type === "group" ? displayName(item.name, groupNameKeys) : item.name}
+                            {"colorTheme" in item
+                              ? getProjectGroupDisplayName(item, language, t)
+                              : formatDemoEntityName(item.name, item.id, "company", t)}
                           </button>
                         );
                       })}
@@ -379,8 +359,8 @@ export function VisualDashboardShell() {
                   ) : null}
                 </div>
 
-                <div className="grid grid-cols-3 gap-3 xl:grid-cols-4 xl:gap-4">
-                  {metrics.map((metric, index) => {
+                <div className="grid grid-cols-4 gap-[clamp(4px,1.6vw,12px)]">
+                  {metrics.map((metric) => {
                     const Icon = metric.icon;
                     const value = overview?.[metric.valueKey] ?? 0;
                     const formattedValue = formatMetricValue(metric, value);
@@ -389,34 +369,32 @@ export function VisualDashboardShell() {
                       <div
                         key={metric.labelKey}
                         className={cn(
-                          "relative min-h-[9.75rem] overflow-hidden rounded-studio-lg p-4 shadow-soft ring-1 ring-black/[0.04]",
-                          "xl:min-h-[15.75rem] xl:rounded-[2.15rem] xl:p-5",
-                          metricCardStyles[index]
+                          "dashboard-hero-metric-glass relative min-w-0 overflow-hidden rounded-studio p-[clamp(4px,1.6vw,14px)] text-ink shadow-soft ring-1 ring-white/[0.46]",
+                          "min-h-[clamp(96px,24vw,128px)]"
                         )}
                       >
-                        <div className="flex h-full flex-col justify-between gap-6">
-                          <div className="flex items-start justify-between gap-3">
+                        <div className="flex h-full min-w-0 flex-col justify-between gap-[clamp(6px,2vw,16px)]">
+                          <div className="flex min-w-0 items-start justify-between">
                             <span
                               className={cn(
-                                "grid size-9 shrink-0 place-items-center rounded-full xl:size-11",
-                                metricIconStyles[index]
+                                "grid size-[clamp(24px,6vw,36px)] shrink-0 place-items-center rounded-full shadow-sm ring-1 ring-white/40",
+                                metricIconToneStyles[metric.tone]
                               )}
                             >
-                              <Icon size={17} className="xl:size-5" />
+                              <Icon className="size-[clamp(12px,3vw,16px)]" />
                             </span>
                           </div>
 
-                          <div className="grid gap-3 xl:gap-6">
-                            <div>
-                              <h3 className="max-w-[8.5rem] text-sm font-black leading-tight text-current/80 xl:max-w-none xl:text-base">
+                          <div className="grid min-w-0 gap-[clamp(3px,1vw,8px)]">
+                            <div className="min-w-0">
+                              <h3 className="w-full whitespace-nowrap text-[clamp(4px,1.35vw,10px)] font-black leading-none tracking-[-0.04em] text-current/80">
                                 {t(metric.labelKey)}
                               </h3>
                             </div>
-                            <div>
-                              <p className="text-5xl font-black leading-[0.82] tracking-normal xl:text-7xl">
+                            <div className="min-w-0">
+                              <p className="max-w-full whitespace-nowrap text-[clamp(1rem,5vw,2rem)] font-black leading-none tracking-[-0.03em] tabular-nums">
                                 {formattedValue}
                               </p>
-                              <div className="mt-3 h-1 w-20 rounded-full bg-current/35 xl:w-24" />
                             </div>
                           </div>
                         </div>
@@ -425,95 +403,7 @@ export function VisualDashboardShell() {
                   })}
                 </div>
               </div>
-              <div className="absolute -right-20 -top-16 size-72 rounded-full bg-white/[0.35]" />
-              <div className="absolute bottom-12 right-7 hidden h-48 w-20 rounded-full bg-limepop sm:block" />
             </Card>
-          </motion.div>
-
-          <motion.div
-            className="grid self-start gap-3"
-            initial={{ opacity: 0, y: 22 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ ...spring, delay: 0.06 }}
-          >
-            <Card tone="dark" className="p-5 sm:p-6">
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <p className="text-sm font-bold text-white/60">{t("todayQueue")}</p>
-                  <h2 className="mt-2 text-3xl font-black leading-none">{t("deliverableFocus")}</h2>
-                </div>
-                <span className="grid size-12 place-items-center rounded-full bg-limepop text-ink">
-                  <BellRing size={21} />
-                </span>
-              </div>
-
-              <div className="mt-5 space-y-3">
-                {focusTasks.map((task) => {
-                  const isComplete = completedTaskIds.has(task.id);
-
-                  return (
-                    <motion.button
-                      key={task.id}
-                      type="button"
-                      aria-pressed={isComplete}
-                      onClick={() => {
-                        setCompletedTaskIds((current) => {
-                          const next = new Set(current);
-
-                          if (next.has(task.id)) {
-                            next.delete(task.id);
-                          } else {
-                            next.add(task.id);
-                          }
-
-                          return next;
-                        });
-                      }}
-                      className={cn(
-                        "flex w-full items-center gap-3 rounded-studio p-3 text-left transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-limepop",
-                        isComplete ? "bg-white/[0.07] text-white/56" : "bg-white/10 text-white hover:bg-white/[0.15]"
-                      )}
-                      whileHover={{ x: 4 }}
-                      transition={spring}
-                    >
-                      <span
-                        className={cn(
-                          "grid size-11 shrink-0 place-items-center rounded-full transition",
-                          isComplete ? "bg-limepop text-ink" : "bg-white/[0.12] text-white"
-                        )}
-                      >
-                        {isComplete ? <CheckCircle2 size={22} /> : <Clock3 size={21} />}
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <p
-                          className={cn(
-                            "truncate font-black decoration-limepop decoration-2 underline-offset-4",
-                            isComplete && "line-through"
-                          )}
-                        >
-                          {displayName(task.title, taskTitleKeys)}
-                        </p>
-                        <p className="mt-1 text-sm font-semibold text-white/60">
-                          {atlasProject?.people.find((person) => person.id === task.assigneeId)?.role ?? t("ownerProduction")}
-                        </p>
-                      </div>
-                      <WandSparkles size={19} className={cn("shrink-0", isComplete ? "text-white/32" : "text-white/60")} />
-                    </motion.button>
-                  );
-                })}
-              </div>
-
-              <div className="mt-5 rounded-studio bg-coral p-4">
-                <div className="flex items-center gap-3">
-                  <Users size={20} />
-                  <span className="font-black">{t("studioSync")}</span>
-                </div>
-                <p className="mt-2 text-sm font-semibold leading-6 text-white/80">
-                  {t("studioSyncBody")}
-                </p>
-              </div>
-            </Card>
-
           </motion.div>
         </section>
 
@@ -544,13 +434,20 @@ export function VisualDashboardShell() {
             >
               <ImageCard
                 imageUrl={project.coverImage}
-                title={displayName(project.name, projectNameKeys)}
-                meta={displayName(groupById.get(project.groupId)?.name ?? "", groupNameKeys)}
+                title={formatDemoEntityName(displayName(project.name, projectNameKeys), project.id, "project", t)}
+                meta={displayGroupName(groupById.get(project.groupId))}
                 className="shadow-none"
+                action={<ProjectReleaseBadges project={project} t={t} className="max-w-48" />}
               >
                 <div className="rounded-full bg-white/[0.88] p-1">
                   <ProgressBar value={project.progress} barClassName={index === 1 ? "bg-limepop" : "bg-coral"} />
                 </div>
+                <Pill
+                  tone={projectStatusTone[project.status]}
+                  className="mt-3 min-h-7 px-3 text-xs font-black"
+                >
+                  {t(statusKeys[project.status])}
+                </Pill>
               </ImageCard>
               </motion.div>
             </Link>
@@ -561,7 +458,7 @@ export function VisualDashboardShell() {
           <Card
             tone="white"
             className="p-5 shadow-lift ring-1 ring-white/[0.34] backdrop-blur-xl sm:p-6"
-            style={{ backgroundColor: "#98dbb1" }}
+            style={{ backgroundColor: "#75C3D1" }}
           >
             <SectionHeader
               eyebrow={t("studioSummary")}
@@ -572,12 +469,19 @@ export function VisualDashboardShell() {
                 </span>
               }
             />
-            <div className="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-7">
+            <div className="mt-6 grid gap-3 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-7">
               {opsItems.map((item) => {
                 const Icon = item.icon;
+                const isDeepBlueCard = item.bodyKey === "opsCrewLoad" || item.bodyKey === "opsClientReady";
 
                 return (
-                  <div key={item.bodyKey} className="rounded-studio bg-white/62 p-4 shadow-soft ring-1 ring-white/[0.38] backdrop-blur-xl xl:col-span-1">
+                  <div
+                    key={item.bodyKey}
+                    className={cn(
+                      "rounded-studio p-4 shadow-soft ring-1 ring-white/[0.38] backdrop-blur-xl",
+                      isDeepBlueCard ? "bg-[#3078A4] text-[#E5D4C5]" : "bg-[#FAFCD9] text-ink"
+                    )}
+                  >
                     <div className="mb-4 flex items-center justify-between gap-3">
                       <span className={cn("grid size-10 place-items-center rounded-full", item.tone)}>
                         <Icon size={18} />
@@ -585,12 +489,14 @@ export function VisualDashboardShell() {
                       <span className="text-xl font-black">{item.value}</span>
                     </div>
                     <h3 className="text-sm font-black">{t(item.bodyKey)}</h3>
-                    <p className="mt-2 text-xs font-semibold leading-5 text-muted">{t(item.detailKey)}</p>
+                    <p className={cn("mt-2 text-xs font-semibold leading-5", isDeepBlueCard ? "text-[#F2FFE9]" : "text-muted")}>
+                      {t(item.detailKey)}
+                    </p>
                   </div>
                 );
               })}
 
-              <div className="rounded-studio bg-ink p-4 text-white shadow-soft xl:col-span-1">
+              <div className="rounded-studio bg-ink p-4 text-white shadow-soft">
                 <div className="mb-4 flex items-center justify-between gap-3">
                   <span className="grid size-10 place-items-center rounded-full bg-limepop text-ink">
                     <CircleDollarSign size={18} />
@@ -601,7 +507,7 @@ export function VisualDashboardShell() {
                 <p className="mt-2 text-xs font-semibold leading-5 text-white/62">{t("costPulse")}</p>
               </div>
 
-              <div className="rounded-studio bg-ink p-4 text-white shadow-soft xl:col-span-1">
+              <div className="rounded-studio bg-ink p-4 text-white shadow-soft">
                 <div className="mb-4 flex items-center justify-between gap-3">
                   <span className="grid size-10 place-items-center rounded-full bg-aqua text-ink">
                     <CircleDollarSign size={18} />
@@ -612,7 +518,7 @@ export function VisualDashboardShell() {
                 <p className="mt-2 text-xs font-semibold leading-5 text-white/62">{t("costOverview")}</p>
               </div>
 
-              <div className="rounded-studio bg-coral p-4 text-white shadow-soft xl:col-span-1">
+              <div className="rounded-studio bg-coral p-4 text-white shadow-soft">
                 <div className="mb-4 flex items-center justify-between gap-3">
                   <span className="grid size-10 place-items-center rounded-full bg-white/18 text-white">
                     <AlertTriangle size={18} />
@@ -623,76 +529,89 @@ export function VisualDashboardShell() {
                 <p className="mt-2 text-xs font-semibold leading-5 text-white/76">{t("todayQueue")}</p>
               </div>
             </div>
-            <div className="mt-6 grid gap-4 xl:grid-cols-[minmax(300px,0.43fr)_minmax(0,1fr)]">
-              <div className="rounded-studio bg-white/64 p-5 shadow-soft ring-1 ring-white/[0.38] backdrop-blur-xl">
-                <div className="mb-5 flex items-center gap-3">
-                  <span className="grid size-11 place-items-center rounded-full bg-ink text-white">
-                    <ChartPie size={20} />
-                  </span>
-                  <div>
-                    <p className="text-sm font-black uppercase text-muted">{t("projectStatusPie")}</p>
-                    <h3 className="text-2xl font-black">{scopedProjects.length}</h3>
-                  </div>
-                </div>
-                <div className="grid place-items-center">
-                  <div
-                    className="grid size-56 place-items-center rounded-full shadow-soft ring-1 ring-black/[0.04]"
-                    style={{ background: pieGradient }}
-                  >
-                    <div className="grid size-28 place-items-center rounded-full bg-white text-center shadow-soft">
-                      <span className="text-4xl font-black leading-none">{overview?.averageProgress ?? 0}%</span>
-                      <span className="mt-1 text-xs font-black uppercase text-muted">{t("averageProgressShort")}</span>
+            <div className="mt-6 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4 xl:grid-cols-[minmax(300px,0.43fr)_minmax(0,1fr)]">
+              <div className="relative min-w-0 overflow-hidden rounded-studio bg-[#A33E43] p-3 text-white shadow-soft ring-1 ring-[#FAFCD9]/35 min-[400px]:p-5">
+                <div className="relative z-10 min-w-0">
+                  <div className="mb-4 flex min-w-0 items-center gap-2 min-[400px]:mb-5 min-[400px]:gap-3">
+                    <span className="grid size-9 shrink-0 place-items-center rounded-full bg-[#FAFCD9] text-ink min-[400px]:size-11">
+                      <ChartPie className="size-4 min-[400px]:size-5" />
+                    </span>
+                    <div className="min-w-0">
+                      <p className="text-xs font-black uppercase leading-tight text-white min-[400px]:text-sm">{t("projectStatusPie")}</p>
+                      <h3 className="text-xl font-black text-white min-[400px]:text-2xl">{scopedProjects.length}</h3>
                     </div>
                   </div>
-                </div>
-                <div className="mt-5 grid gap-2">
-                  {statusSegments.map((segment) => (
-                    <div key={segment.key} className="flex items-center justify-between gap-3 rounded-full bg-cloud/70 px-3 py-2 text-sm font-black">
-                      <span className="flex min-w-0 items-center gap-2">
-                        <span className="size-3 shrink-0 rounded-full" style={{ backgroundColor: segment.color }} />
-                        <span className="truncate">{segment.label}</span>
-                      </span>
-                      <span>{segment.count}</span>
+
+                  <div className="grid min-w-0 place-items-center">
+                    <div
+                      className="grid aspect-square w-full max-w-56 place-items-center rounded-full shadow-soft ring-1 ring-[#FAFCD9]/35"
+                      style={{ background: pieGradient }}
+                    >
+                      <div className="flex aspect-square w-1/2 max-w-28 flex-col items-center justify-center rounded-full bg-[#FAFCD9] text-center text-ink shadow-soft">
+                        <span className="whitespace-nowrap text-[clamp(1.5rem,8vw,2.25rem)] font-black leading-none">
+                          {overview?.averageProgress ?? 0}%
+                        </span>
+                        <span className="mt-1 max-w-[80%] text-[clamp(8px,2.6vw,12px)] font-black uppercase leading-tight text-ink/62">
+                          {t("averageProgressShort")}
+                        </span>
+                      </div>
                     </div>
-                  ))}
+                  </div>
+
+                  <div className="mt-5 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-2">
+                    {statusSegments.map((segment) => (
+                      <div key={segment.key} className="flex min-w-0 items-center justify-between gap-3 rounded-full bg-[#FAFCD9] px-3 py-2 text-sm font-black text-ink shadow-sm">
+                        <span className="flex min-w-0 items-center gap-2">
+                          <span className="size-3 shrink-0 rounded-full" style={{ backgroundColor: segment.color }} />
+                          <span className="truncate">{segment.label}</span>
+                        </span>
+                        <span className="shrink-0">{segment.count}</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
 
-              <div className="rounded-studio bg-white/64 p-5 shadow-soft ring-1 ring-white/[0.38] backdrop-blur-xl">
-                <div className="mb-5 flex items-center gap-3">
-                  <span className="grid size-11 place-items-center rounded-full bg-limepop text-ink">
-                    <Network size={20} />
+              <div className="min-w-0 overflow-hidden rounded-studio bg-[#FAFCD9] p-3 shadow-soft ring-1 ring-white/[0.38] backdrop-blur-xl min-[400px]:p-5">
+                <div className="mb-4 flex min-w-0 items-center gap-2 min-[400px]:mb-5 min-[400px]:gap-3">
+                  <span className="grid size-9 shrink-0 place-items-center rounded-full bg-limepop text-ink min-[400px]:size-11">
+                    <Network className="size-4 min-[400px]:size-5" />
                   </span>
-                  <div>
-                    <p className="text-sm font-black uppercase text-muted">{t("portfolioTree")}</p>
-                    <h3 className="text-2xl font-black">{t("creativeProjects")}</h3>
+                  <div className="min-w-0">
+                    <p className="truncate text-xs font-black uppercase text-muted min-[400px]:text-sm">{t("portfolioTree")}</p>
                   </div>
                 </div>
-                <div className="grid gap-4 lg:grid-cols-2">
+                <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4 lg:grid-cols-2">
                   {companyTree.map(({ company, groups }) => (
-                    <div key={company.id} className="rounded-studio bg-white/44 p-4">
-                      <div className="flex items-center gap-3">
-                        <span className="grid size-9 place-items-center rounded-full bg-ink text-white">
-                          <Building2 size={17} />
+                    <div key={company.id} className="min-w-0 overflow-hidden rounded-studio bg-white/44 p-3 min-[400px]:p-4">
+                      <div className="flex min-w-0 items-center gap-2 min-[400px]:gap-3">
+                        <span className="grid size-8 shrink-0 place-items-center rounded-full bg-ink text-white min-[400px]:size-9">
+                          <Building2 className="size-4 min-[400px]:size-[17px]" />
                         </span>
-                        <h3 className="min-w-0 truncate text-lg font-black">{company.name}</h3>
+                        <h3 className="min-w-0 truncate text-sm font-black min-[400px]:text-lg">
+                          {formatDemoEntityName(company.name, company.id, "company", t)}
+                        </h3>
                       </div>
-                      <div className="mt-4 grid gap-3 border-l-2 border-ink/10 pl-4">
+                      <div className="mt-3 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-2 border-l-2 border-ink/10 pl-2.5 min-[400px]:mt-4 min-[400px]:gap-3 min-[400px]:pl-4">
                         {groups.map(({ group, projects }) => (
-                          <div key={group.id} className="relative">
-                            <span className="absolute -left-[1.15rem] top-4 size-3 rounded-full bg-limepop ring-4 ring-white" />
-                            <div className="rounded-studio bg-white/76 p-3">
-                              <div className="mb-3 flex items-center justify-between gap-3">
-                                <span className="truncate font-black">{displayName(group.name, groupNameKeys)}</span>
-                                <span className="rounded-full bg-aqua px-3 py-1 text-xs font-black">{projects.length}</span>
+                          <div key={group?.id ?? "unassigned"} className="relative min-w-0">
+                            <span className="absolute -left-[0.85rem] top-3 size-2.5 rounded-full bg-limepop ring-[3px] ring-white min-[400px]:-left-[1.15rem] min-[400px]:top-4 min-[400px]:size-3 min-[400px]:ring-4" />
+                            <div className="min-w-0 rounded-studio bg-white/76 p-2 min-[400px]:p-3">
+                              <div className="mb-2 flex min-w-0 items-center justify-between gap-1.5 min-[400px]:mb-3 min-[400px]:gap-3">
+                                <span className="min-w-0 truncate text-xs font-black min-[400px]:text-base">
+                                  {group ? displayGroupName(group) : t("unassignedGroup")}
+                                </span>
+                                <span className="shrink-0 rounded-full bg-aqua px-2 py-1 text-[10px] font-black min-[400px]:px-3 min-[400px]:text-xs">
+                                  {projects.length}
+                                </span>
                               </div>
-                              <div className="grid gap-2">
+                              <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-2">
                                 {projects.map((project, projectIndex) => (
                                   <Link
                                     key={project.id}
                                     href={`/projects/${project.id}`}
                                     prefetch={false}
-                                    className="relative block overflow-hidden rounded-full bg-white/78 px-3 py-2 text-sm font-black shadow-sm transition hover:-translate-y-0.5 hover:shadow-soft"
+                                    className="relative block w-full min-w-0 max-w-full overflow-hidden rounded-full bg-white/78 px-2 py-1.5 text-[11px] font-black shadow-sm transition hover:-translate-y-0.5 hover:shadow-soft min-[400px]:px-3 min-[400px]:py-2 min-[400px]:text-sm"
                                   >
                                     <span
                                       className="absolute inset-y-0 left-0 rounded-full"
@@ -701,9 +620,19 @@ export function VisualDashboardShell() {
                                         width: `${project.progress}%`
                                       }}
                                     />
-                                    <span className="relative z-10 flex min-w-0 items-center justify-between gap-3">
-                                      <span className="min-w-0 truncate">{displayName(project.name, projectNameKeys)}</span>
-                                      <span className="shrink-0 text-ink/62">{project.progress}%</span>
+                                    <span className="relative z-10 flex min-w-0 items-center justify-between gap-1.5 min-[400px]:gap-3">
+                                      <span className="min-w-0 truncate">
+                                        {formatDemoEntityName(displayName(project.name, projectNameKeys), project.id, "project", t)}
+                                      </span>
+                                      <span className="flex shrink-0 items-center gap-1 text-ink/62 min-[400px]:gap-1.5">
+                                        <Pill
+                                          tone={projectStatusTone[project.status]}
+                                          className="min-h-5 px-1.5 text-[8px] font-black min-[400px]:min-h-6 min-[400px]:px-2 min-[400px]:text-[10px]"
+                                        >
+                                          {t(statusKeys[project.status])}
+                                        </Pill>
+                                        <span>{project.progress}%</span>
+                                      </span>
                                     </span>
                                   </Link>
                                 ))}
@@ -719,13 +648,6 @@ export function VisualDashboardShell() {
             </div>
           </Card>
         </section>
-        <ProjectCreateModal
-          open={createOpen}
-          companies={data?.companies ?? []}
-          groups={data?.groups ?? []}
-          onClose={() => setCreateOpen(false)}
-          onCreated={handleProjectCreated}
-        />
       </div>
     </AppShell>
   );

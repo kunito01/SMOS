@@ -19,6 +19,7 @@ import {
   costCategoryKeys,
   deliverableDescriptionKey,
   deliverableTitleKeys,
+  formatDemoEntityName,
   materialNameKeys,
   materialStatusKeys,
   materialTypeKeys,
@@ -32,21 +33,16 @@ import {
   versionStatusKeys,
   versionSummaryKeys
 } from "@/lib/i18n/domain-labels";
+import { formatLocalizedDate } from "@/lib/i18n/formatters";
+import { languageLocales } from "@/lib/i18n/translations";
 import type { Project, ShareLink } from "@/lib/types";
-import { toCny } from "@/lib/utils/money";
+import { formatCurrency, toCny } from "@/lib/utils/money";
 
 type SharedProjectData = {
   project: Project;
   shareLink: ShareLink;
   canShowCost: boolean;
 };
-
-const formatCurrency = (value: number) =>
-  new Intl.NumberFormat("zh-CN", {
-    currency: "CNY",
-    maximumFractionDigits: 0,
-    style: "currency"
-  }).format(value);
 
 const materialStatusTone = {
   draft: "cloud",
@@ -61,7 +57,7 @@ const versionStatusTone = {
 } as const;
 
 export function PublicSharePage({ token }: { token: string }) {
-  const { t } = useI18n();
+  const { language, t } = useI18n();
   const [data, setData] = useState<SharedProjectData | null>(null);
   const [failed, setFailed] = useState(false);
 
@@ -115,6 +111,7 @@ export function PublicSharePage({ token }: { token: string }) {
   }, [data?.project.people]);
 
   const personName = (personId: string) => peopleById.get(personId)?.name ?? t("ownerProduction");
+  const formatCost = (value: number) => formatCurrency(value, "CNY", languageLocales[language]);
 
   if (failed) {
     return (
@@ -125,7 +122,7 @@ export function PublicSharePage({ token }: { token: string }) {
               <h1 className="text-3xl font-black">{t("shareUnavailable")}</h1>
               <Link
                 href="/login"
-                className="mt-6 inline-flex h-12 items-center rounded-full bg-ink px-5 text-sm font-black text-white"
+                className="font-brand mt-6 inline-flex h-12 items-center rounded-full bg-ink px-5 text-sm text-white"
               >
                 Studio Map OS
               </Link>
@@ -147,7 +144,12 @@ export function PublicSharePage({ token }: { token: string }) {
               <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.42fr)]">
               <ImageCard
                 imageUrl={data.project.coverImage}
-                title={translateDomainLabel(data.project.name, projectNameKeys, t)}
+                title={formatDemoEntityName(
+                  translateDomainLabel(data.project.name, projectNameKeys, t),
+                  data.project.id,
+                  "project",
+                  t
+                )}
                 meta={t("publicReadOnly")}
                 heightClassName="min-h-[32rem]"
               >
@@ -159,7 +161,10 @@ export function PublicSharePage({ token }: { token: string }) {
               </ImageCard>
 
               <Card tone="white" className="grid gap-5 p-5">
-                <ProgressRing value={data.project.progress} />
+                <ProgressRing
+                  value={data.project.progress}
+                  label={`${t("averageProgressShort")} ${data.project.progress}%`}
+                />
                 <div>
                   <div className="flex items-center gap-2">
                     <Sparkles size={18} className="text-coral" />
@@ -179,9 +184,11 @@ export function PublicSharePage({ token }: { token: string }) {
                     {data.project.phases.map((phase) => (
                       <div key={phase.id} className="rounded-studio bg-cloud/70 p-4">
                         <div className="flex items-center justify-between gap-3">
-                          <h3 className="text-xl font-black">{translateDomainLabel(phase.name, phaseNameKeys, t)}</h3>
+                          <h3 className="text-xl font-black">
+                            {translateDomainLabel(phase.name, phaseNameKeys, t) || t("untitledStage")}
+                          </h3>
                           <Pill tone={phase.status === "completed" ? "lime" : phase.status === "active" ? "coral" : "cloud"}>
-                            {phase.endDate}
+                            {formatLocalizedDate(phase.endDate, language)}
                           </Pill>
                         </div>
                         <p className="mt-2 text-sm font-semibold leading-6 text-muted">{t(phaseDescriptionKey)}</p>
@@ -221,17 +228,17 @@ export function PublicSharePage({ token }: { token: string }) {
                     <div className="mt-4 grid gap-3">
                       <div className="rounded-studio bg-white/75 p-4">
                         <p className="text-sm font-bold text-muted">{t("actualCostSoFar")}</p>
-                        <p className="mt-1 text-2xl font-black">{formatCurrency(actualCost)}</p>
+                        <p className="mt-1 text-2xl font-black">{formatCost(actualCost)}</p>
                       </div>
                       <div className="rounded-studio bg-white/75 p-4">
                         <p className="text-sm font-bold text-muted">{t("futureEstimatedCost")}</p>
-                        <p className="mt-1 text-2xl font-black">{formatCurrency(estimatedCost)}</p>
+                        <p className="mt-1 text-2xl font-black">{formatCost(estimatedCost)}</p>
                       </div>
                       {Object.entries(categoryPreview).slice(0, 3).map(([category, value]) => (
                         <div key={category}>
                           <div className="mb-1 flex items-center justify-between text-xs font-black">
                             <span>{t(costCategoryKeys[category as keyof typeof costCategoryKeys])}</span>
-                            <span>{formatCurrency(value)}</span>
+                            <span>{formatCost(value)}</span>
                           </div>
                           <ProgressBar value={Math.min(100, value / 300)} className="bg-white/75" />
                         </div>
@@ -311,10 +318,10 @@ export function PublicSharePage({ token }: { token: string }) {
                     phase.deliverables.map((deliverable) => (
                       <Card key={deliverable.id} tone="white" className="p-5">
                         <p className="text-sm font-bold text-muted">
-                          {translateDomainLabel(phase.name, phaseNameKeys, t)}
+                          {translateDomainLabel(phase.name, phaseNameKeys, t) || t("untitledStage")}
                         </p>
                         <h3 className="mt-1 text-xl font-black">
-                          {translateDomainLabel(deliverable.title, deliverableTitleKeys, t)}
+                          {translateDomainLabel(deliverable.title, deliverableTitleKeys, t) || t("tasks")}
                         </h3>
                         <p className="mt-2 text-sm font-semibold leading-6 text-muted">
                           {t(deliverableDescriptionKey)}

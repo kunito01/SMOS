@@ -30,6 +30,7 @@ output/
 # local planning and reference artifacts
 Studio_Map_OS_Codex_Prompt.md
 UI 风格示意.jpg
+CODEX_HANDOFF.md
 
 # TypeScript
 *.tsbuildinfo

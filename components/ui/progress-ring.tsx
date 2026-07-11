@@ -24,7 +24,7 @@ export function ProgressRing({
     <div
       className={cn("relative inline-grid place-items-center", className)}
       style={{ width: size, height: size }}
-      aria-label={label ?? `${safeValue}% complete`}
+      aria-label={label ?? `${safeValue}%`}
     >
       <svg width={size} height={size} role="img" aria-hidden="true">
         <circle

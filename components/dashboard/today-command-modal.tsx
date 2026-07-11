@@ -5,15 +5,18 @@ import { CalendarDays, CheckCircle2, Clock3, X } from "lucide-react";
 import { useI18n } from "@/components/providers/app-providers";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { ModalPortal } from "@/components/ui/modal-portal";
 import { Pill } from "@/components/ui/pill";
 import { ProgressBar } from "@/components/ui/progress-bar";
 import {
+  formatDemoEntityName,
   phaseNameKeys,
   projectNameKeys,
   statusKeys,
   taskTitleKeys,
   translateDomainLabel
 } from "@/lib/i18n/domain-labels";
+import { formatLocalizedDate } from "@/lib/i18n/formatters";
 import type { Project, Task } from "@/lib/types";
 import { cn } from "@/lib/utils/cn";
 
@@ -25,7 +28,7 @@ type TodayCommandModalProps = {
 };
 
 export function TodayCommandModal({ open, project, tasks, onClose }: TodayCommandModalProps) {
-  const { t } = useI18n();
+  const { language, t } = useI18n();
 
   if (!open) {
     return null;
@@ -34,8 +37,9 @@ export function TodayCommandModal({ open, project, tasks, onClose }: TodayComman
   const currentPhase = project?.phases.find((phase) => phase.id === project.currentPhaseId);
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-ink/45 p-3 backdrop-blur-sm">
-      <Card tone="white" className="max-h-[92vh] w-full max-w-4xl overflow-hidden">
+    <ModalPortal>
+      <div className="fixed inset-0 z-50 flex min-h-dvh items-center justify-center overflow-y-auto bg-ink/45 p-3 backdrop-blur-sm">
+      <Card tone="white" className="max-h-[calc(100dvh-1.5rem)] w-full max-w-4xl overflow-hidden">
         <div className="flex items-start justify-between gap-4 border-b border-black/[0.06] p-5 sm:p-6">
           <div className="min-w-0">
             <div className="flex items-center gap-3">
@@ -58,11 +62,18 @@ export function TodayCommandModal({ open, project, tasks, onClose }: TodayComman
               <Card tone="dark" className="p-5">
                 <p className="text-sm font-bold text-white/60">{t("todayProjectSignal")}</p>
                 <h3 className="mt-2 text-3xl font-black leading-tight">
-                  {translateDomainLabel(project.name, projectNameKeys, t)}
+                  {formatDemoEntityName(
+                    translateDomainLabel(project.name, projectNameKeys, t),
+                    project.id,
+                    "project",
+                    t
+                  )}
                 </h3>
                 <div className="mt-4 flex flex-wrap gap-2">
                   <Pill tone="lime">{t(statusKeys[project.status])}</Pill>
-                  <Pill tone="cloud">{translateDomainLabel(currentPhase?.name ?? "", phaseNameKeys, t)}</Pill>
+                  <Pill tone="cloud">
+                    {translateDomainLabel(currentPhase?.name ?? "", phaseNameKeys, t) || t("untitledStage")}
+                  </Pill>
                 </div>
                 <div className="mt-5">
                   <div className="mb-2 flex items-center justify-between text-sm font-black text-white/70">
@@ -82,7 +93,7 @@ export function TodayCommandModal({ open, project, tasks, onClose }: TodayComman
                 <p className="text-sm font-bold text-ink/60">{t("todayDueSoon")}</p>
                 <h3 className="mt-2 text-3xl font-black">{tasks.filter((task) => !task.completed).length}</h3>
                 <p className="mt-3 text-sm font-bold leading-6 text-ink/70">
-                  {project.endDate}
+                  {formatLocalizedDate(project.endDate, language)}
                 </p>
               </Card>
 
@@ -102,9 +113,11 @@ export function TodayCommandModal({ open, project, tasks, onClose }: TodayComman
                         </span>
                         <div className="min-w-0">
                           <p className="truncate font-black">
-                            {translateDomainLabel(task.title, taskTitleKeys, t)}
+                            {translateDomainLabel(task.title, taskTitleKeys, t) || t("untitledTask")}
                           </p>
-                          <p className="mt-1 text-xs font-bold text-muted">{task.dueDate}</p>
+                          <p className="mt-1 text-xs font-bold text-muted">
+                            {formatLocalizedDate(task.dueDate ?? project.endDate, language)}
+                          </p>
                         </div>
                       </div>
                     ))
@@ -120,5 +133,6 @@ export function TodayCommandModal({ open, project, tasks, onClose }: TodayComman
         </div>
       </Card>
     </div>
+    </ModalPortal>
   );
 }

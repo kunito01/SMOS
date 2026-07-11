@@ -1,20 +1,21 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { FolderPlus, X } from "lucide-react";
 import { useI18n } from "@/components/providers/app-providers";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { ModalPortal } from "@/components/ui/modal-portal";
 import { Pill } from "@/components/ui/pill";
 import { librariesApi, projectsApi } from "@/lib/api";
 import {
   billingTypeKeys,
   costCategoryKeys,
-  groupNameKeys,
+  formatDemoEntityName,
+  getProjectGroupDisplayName,
   personTypeKeys,
   statusKeys,
-  toolCategoryKeys,
-  translateDomainLabel
+  toolCategoryKeys
 } from "@/lib/i18n/domain-labels";
 import type {
   Company,
@@ -37,7 +38,7 @@ type ProjectCreateModalProps = {
   onCreated: (project: Project) => void;
 };
 
-const statusOptions: ProjectStatus[] = ["planning", "active", "paused", "completed"];
+const statusOptions: ProjectStatus[] = ["planning", "active", "paused", "terminated", "completed"];
 
 const today = "2026-06-26";
 
@@ -48,7 +49,7 @@ const addMonths = (date: string, months: number) => {
 };
 
 export function ProjectCreateModal({ companies, groups, open, onClose, onCreated }: ProjectCreateModalProps) {
-  const { t } = useI18n();
+  const { language, t } = useI18n();
   const [people, setPeople] = useState<Person[]>([]);
   const [tools, setTools] = useState<Tool[]>([]);
   const [costTemplates, setCostTemplates] = useState<CostLibraryItem[]>([]);
@@ -106,16 +107,15 @@ export function ProjectCreateModal({ companies, groups, open, onClose, onCreated
     }
   }, [companies, form.companyId]);
 
-  const availableGroups = useMemo(
-    () => groups.filter((group) => group.companyId === form.companyId),
-    [form.companyId, groups]
-  );
-
   useEffect(() => {
-    if (availableGroups.length && !availableGroups.some((group) => group.id === form.groupId)) {
-      setForm((current) => ({ ...current, groupId: availableGroups[0].id }));
-    }
-  }, [availableGroups, form.groupId]);
+    setForm((current) => {
+      const nextGroupId = groups.some((group) => group.id === current.groupId)
+        ? current.groupId
+        : groups[0]?.id ?? "";
+
+      return nextGroupId === current.groupId ? current : { ...current, groupId: nextGroupId };
+    });
+  }, [groups]);
 
   if (!open) {
     return null;
@@ -139,9 +139,10 @@ export function ProjectCreateModal({ companies, groups, open, onClose, onCreated
   };
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-ink/45 p-3 backdrop-blur-sm">
-      <Card tone="white" className="max-h-[92vh] w-full max-w-5xl overflow-hidden">
-        <form onSubmit={submit} className="flex max-h-[92vh] flex-col">
+    <ModalPortal>
+      <div className="fixed inset-0 z-50 flex min-h-dvh items-center justify-center overflow-y-auto bg-ink/45 p-3 backdrop-blur-sm">
+      <Card tone="white" className="max-h-[calc(100dvh-1.5rem)] w-full max-w-5xl overflow-hidden">
+        <form onSubmit={submit} className="flex max-h-[calc(100dvh-1.5rem)] flex-col">
           <div className="flex items-start justify-between gap-4 border-b border-black/[0.06] p-5 sm:p-6">
             <div className="min-w-0">
               <div className="flex items-center gap-3">
@@ -178,12 +179,14 @@ export function ProjectCreateModal({ companies, groups, open, onClose, onCreated
                       <select
                         value={form.companyId}
                         onChange={(event) =>
-                          setForm((current) => ({ ...current, companyId: event.target.value, groupId: "" }))
+                          setForm((current) => ({ ...current, companyId: event.target.value }))
                         }
                         className="h-12 rounded-full border-0 bg-white px-4 text-sm font-bold text-ink outline-none ring-1 ring-black/[0.06]"
                       >
                         {companies.map((company) => (
-                          <option key={company.id} value={company.id}>{company.name}</option>
+                          <option key={company.id} value={company.id}>
+                            {formatDemoEntityName(company.name, company.id, "company", t)}
+                          </option>
                         ))}
                       </select>
                     </label>
@@ -194,9 +197,10 @@ export function ProjectCreateModal({ companies, groups, open, onClose, onCreated
                         onChange={(event) => setForm((current) => ({ ...current, groupId: event.target.value }))}
                         className="h-12 rounded-full border-0 bg-white px-4 text-sm font-bold text-ink outline-none ring-1 ring-black/[0.06]"
                       >
-                        {availableGroups.map((group) => (
+                        {groups.length === 0 ? <option value="">{t("unassignedGroup")}</option> : null}
+                        {groups.map((group) => (
                           <option key={group.id} value={group.id}>
-                            {translateDomainLabel(group.name, groupNameKeys, t)}
+                            {getProjectGroupDisplayName(group, language, t)}
                           </option>
                         ))}
                       </select>
@@ -319,5 +323,6 @@ export function ProjectCreateModal({ companies, groups, open, onClose, onCreated
         </form>
       </Card>
     </div>
+    </ModalPortal>
   );
 }

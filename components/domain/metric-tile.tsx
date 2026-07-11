@@ -1,5 +1,4 @@
 import type { LucideIcon } from "lucide-react";
-import { ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 
 type MetricTileTone = "aqua" | "lime" | "coral" | "dark";
@@ -22,11 +21,10 @@ const toneClasses: Record<MetricTileTone, string> = {
 export function MetricTile({ label, value, icon: Icon, tone = "lime", className }: MetricTileProps) {
   return (
     <div className={cn("rounded-studio bg-white/72 p-4 shadow-soft", className)}>
-      <div className="mb-5 flex items-center justify-between">
+      <div className="mb-5 flex items-center">
         <span className={cn("grid size-11 place-items-center rounded-full", toneClasses[tone])}>
           <Icon size={20} />
         </span>
-        <ChevronRight size={20} />
       </div>
       <p className="text-4xl font-black leading-none">{value}</p>
       <p className="mt-2 text-sm font-bold text-muted">{label}</p>

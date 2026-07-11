@@ -1,8 +1,11 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import {
   CalendarClock,
+  ChevronDown,
+  ChevronUp,
   CircleDollarSign,
   CreditCard,
   Link2,
@@ -16,28 +19,38 @@ import {
   Wrench,
   X
 } from "lucide-react";
-import { MetricTile } from "@/components/domain/metric-tile";
+import { PixelDesertScene } from "@/components/libraries/pixel-desert-scene";
 import { AppShell } from "@/components/layout/app-shell";
 import { useI18n } from "@/components/providers/app-providers";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { DeleteConfirmDialog } from "@/components/ui/delete-confirm-dialog";
 import { LoadingState } from "@/components/ui/loading-state";
 import { Pill } from "@/components/ui/pill";
+import { ProgressBar } from "@/components/ui/progress-bar";
 import { SectionHeader } from "@/components/ui/section-header";
 import { librariesApi } from "@/lib/api";
 import {
   billingTypeKeys,
   costCategoryKeys,
+  formatDemoEntityName,
+  getProjectGroupDisplayName,
   personTypeKeys,
+  projectNameKeys,
+  statusKeys,
+  translateDomainLabel,
   toolCategoryKeys
 } from "@/lib/i18n/domain-labels";
-import type { CostItem, CostLibraryItem, Person, Tool } from "@/lib/types";
+import { formatLocalizedDate } from "@/lib/i18n/formatters";
+import { languageLocales } from "@/lib/i18n/translations";
+import type { CostItem, CostLibraryItem, Person, PersonProjectParticipation, ProjectStatus, Tool } from "@/lib/types";
 import { formatCurrency, toCny } from "@/lib/utils/money";
 
 type LibrariesData = {
   people: Person[];
   tools: Tool[];
   costTemplates: CostLibraryItem[];
+  personProjects: PersonProjectParticipation[];
   subscriptionSummary: {
     activeSubscriptionCount: number;
     monthlyTotal: number;
@@ -58,6 +71,11 @@ type ToolForm = Pick<Tool, "name" | "category"> & {
   subscriptionAccountEmail: string;
 };
 
+type PendingLibraryDelete =
+  | { type: "person"; id: string; label: string }
+  | { type: "tool"; id: string; label: string }
+  | { type: "costTemplate"; id: string; label: string };
+
 const currencyOptions: CostItem["currency"][] = ["CNY", "USD", "JPY", "EUR"];
 
 const personTypeTone: Record<Person["type"], "aqua" | "lime" | "coral" | "dark"> = {
@@ -74,6 +92,14 @@ const toolCategoryTone: Record<Tool["category"], "aqua" | "lime" | "coral" | "da
   game: "coral",
   video: "aqua",
   other: "dark"
+};
+
+const projectStatusTone: Record<ProjectStatus, "aqua" | "lime" | "coral" | "dark" | "cloud"> = {
+  planning: "cloud",
+  active: "coral",
+  paused: "dark",
+  terminated: "cloud",
+  completed: "lime"
 };
 
 const defaultPerson: PersonForm = {
@@ -105,7 +131,7 @@ const defaultCost: Omit<CostLibraryItem, "id"> = {
 };
 
 export function LibrariesPage() {
-  const { t } = useI18n();
+  const { language, t } = useI18n();
   const [data, setData] = useState<LibrariesData | null>(null);
   const [personForm, setPersonForm] = useState(defaultPerson);
   const [editingPersonId, setEditingPersonId] = useState<string | null>(null);
@@ -114,15 +140,18 @@ export function LibrariesPage() {
   const [editingToolId, setEditingToolId] = useState<string | null>(null);
   const [editingToolForm, setEditingToolForm] = useState(defaultTool);
   const [costForm, setCostForm] = useState(defaultCost);
+  const [pendingDelete, setPendingDelete] = useState<PendingLibraryDelete | null>(null);
+  const [expandedPersonProjectsId, setExpandedPersonProjectsId] = useState<string | null>(null);
 
   const load = async () => {
-    const [people, tools, costTemplates, subscriptionSummary] = await Promise.all([
+    const [people, tools, costTemplates, personProjects, subscriptionSummary] = await Promise.all([
       librariesApi.listPeople(),
       librariesApi.listTools(),
       librariesApi.listCostTemplates(),
+      librariesApi.listPersonProjectParticipation(),
       librariesApi.getToolSubscriptionSummary()
     ]);
-    setData({ people, tools, costTemplates, subscriptionSummary });
+    setData({ people, tools, costTemplates, personProjects, subscriptionSummary });
   };
 
   useEffect(() => {
@@ -153,9 +182,14 @@ export function LibrariesPage() {
 
     return counts;
   }, [data?.people]);
+  const personProjectsById = useMemo(
+    () => new Map((data?.personProjects ?? []).map((summary) => [summary.personId, summary])),
+    [data?.personProjects]
+  );
 
   const formatMoney = (currency?: CostItem["currency"], amount?: number) =>
-    amount && currency ? `${currency} ${amount.toLocaleString()}` : t("noDailyCost");
+    amount && currency ? `${currency} ${amount.toLocaleString(languageLocales[language])}` : t("noDailyCost");
+  const formatCny = (value: number) => formatCurrency(value, "CNY", languageLocales[language]);
 
   const personToForm = (person: Person): PersonForm => ({
     name: person.name,
@@ -228,6 +262,7 @@ export function LibrariesPage() {
     }
     await librariesApi.addPerson(personPayload(personForm));
     setPersonForm(defaultPerson);
+    setExpandedPersonProjectsId(null);
     await load();
   };
 
@@ -253,10 +288,12 @@ export function LibrariesPage() {
 
   const removePerson = async (personId: string) => {
     await librariesApi.deletePerson(personId);
+    setExpandedPersonProjectsId((current) => (current === personId ? null : current));
     await load();
   };
 
   const startEditingPerson = (person: Person) => {
+    setExpandedPersonProjectsId(null);
     setEditingPersonId(person.id);
     setEditingPersonForm(personToForm(person));
   };
@@ -270,6 +307,7 @@ export function LibrariesPage() {
     await librariesApi.updatePerson(editingPersonId, personPayload(editingPersonForm));
     setEditingPersonId(null);
     setEditingPersonForm(defaultPerson);
+    setExpandedPersonProjectsId(null);
     await load();
   };
 
@@ -300,6 +338,26 @@ export function LibrariesPage() {
     await load();
   };
 
+  const confirmPendingDelete = async () => {
+    if (!pendingDelete) {
+      return;
+    }
+
+    if (pendingDelete.type === "person") {
+      await removePerson(pendingDelete.id);
+    }
+
+    if (pendingDelete.type === "tool") {
+      await removeTool(pendingDelete.id);
+    }
+
+    if (pendingDelete.type === "costTemplate") {
+      await removeCostTemplate(pendingDelete.id);
+    }
+
+    setPendingDelete(null);
+  };
+
   return (
     <AppShell>
       <div className="studio-scroll flex-1 overflow-y-auto px-4 pb-8 sm:px-6 xl:px-8">
@@ -307,34 +365,69 @@ export function LibrariesPage() {
           <LoadingState label={t("loading")} />
         ) : (
           <>
-            <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.45fr)]">
-              <Card tone="aqua" className="relative overflow-hidden p-6 sm:p-8">
-                <p className="text-sm font-black uppercase text-ink/60">{t("navLibraries")}</p>
-                <h1 className="mt-4 max-w-4xl text-4xl font-black leading-[0.96] sm:text-6xl">
-                  {t("librariesTitle")}
-                </h1>
-                <p className="mt-5 max-w-2xl text-base font-bold leading-7 text-ink/65">
-                  {t("librariesBody")}
-                </p>
-              </Card>
+            <section>
+              <Card tone="aqua" className="relative min-h-[30rem] overflow-hidden bg-[#73c6d5] p-6 sm:p-8">
+                <PixelDesertScene />
+                <div className="libraries-desert-copy-wash" />
+                <div className="relative z-10 flex min-h-[26rem] flex-col justify-between gap-8">
+                  <div className="max-w-4xl">
+                    <p className="text-sm font-black uppercase text-ink/68 drop-shadow-[0_1px_0_rgba(255,232,154,0.42)]">{t("navLibraries")}</p>
+                    <h1 className="mt-4 max-w-4xl text-4xl font-black leading-[0.96] drop-shadow-[0_3px_0_rgba(255,232,154,0.4)] sm:text-6xl">
+                      {t("librariesTitle")}
+                    </h1>
+                    <p className="mt-5 max-w-2xl text-base font-bold leading-7 text-ink/78 drop-shadow-[0_1px_0_rgba(255,232,154,0.3)]">
+                      {t("librariesBody")}
+                    </p>
+                  </div>
 
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-                <MetricTile label={t("peopleLibrary")} value={totals.people} icon={UserPlus} tone="lime" />
-                <MetricTile label={t("softwareLibrary")} value={totals.tools} icon={Wrench} tone="dark" />
-                <MetricTile
-                  label={t("monthlySubscriptionCost")}
-                  value={formatCurrency(data.subscriptionSummary.monthlyTotal)}
-                  icon={CreditCard}
-                  tone="aqua"
-                />
-                <MetricTile label={t("costTemplateLibrary")} value={totals.costs} icon={CircleDollarSign} tone="coral" />
-              </div>
+                  <div className="grid grid-cols-4 gap-[clamp(3px,1.2vw,12px)]">
+                    {[
+                      { label: t("peopleLibrary"), value: totals.people, icon: UserPlus },
+                      { label: t("softwareLibrary"), value: totals.tools, icon: Wrench },
+                      {
+                        label: t("monthlySubscriptionCost"),
+                        value: formatCny(data.subscriptionSummary.monthlyTotal),
+                        icon: CreditCard
+                      },
+                      { label: t("costTemplateLibrary"), value: totals.costs, icon: CircleDollarSign }
+                    ].map((item) => {
+                      const Icon = item.icon;
+
+                      return (
+                        <div
+                          key={item.label}
+                          className="companies-hero-metric-glass min-h-[clamp(84px,22vw,128px)] min-w-0 rounded-studio bg-white/[0.38] p-[clamp(3px,1.4vw,14px)] text-ink shadow-soft ring-1 ring-white/[0.56] backdrop-blur-xl"
+                        >
+                          <div className="flex h-full min-w-0 flex-col justify-between gap-[clamp(4px,1.6vw,16px)]">
+                            <span className="grid size-[clamp(20px,6vw,40px)] shrink-0 place-items-center rounded-full bg-white/58 text-ink shadow-sm ring-1 ring-white/50">
+                              <Icon className="size-[clamp(10px,3vw,18px)]" />
+                            </span>
+                            <div className="grid min-w-0 gap-[clamp(2px,0.8vw,8px)]">
+                              <p className="max-w-full whitespace-nowrap text-[clamp(0.6rem,3.1vw,2.25rem)] font-black leading-none tracking-[-0.04em] tabular-nums">{item.value}</p>
+                              <p className="min-h-[3em] max-w-full break-words text-[clamp(7px,1.1vw,12px)] font-black leading-[1.05] tracking-[-0.02em] text-current/70">{item.label}</p>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </Card>
             </section>
 
-            <section className="mt-6 grid gap-4 xl:grid-cols-3">
-              <Card tone="white" className="p-5 sm:p-6">
-                <SectionHeader eyebrow={t("templateReusable")} title={t("peopleLibrary")} />
-                <form onSubmit={submitPerson} className="mt-5 grid gap-3 rounded-studio bg-cloud/70 p-4">
+            <section className="mt-6 grid gap-4 xl:grid-cols-[minmax(0,1.24fr)_minmax(0,0.88fr)_minmax(0,0.88fr)]">
+              <Card tone="white" className="bg-[#fd0079] p-5 sm:p-6">
+                <div className="flex items-end justify-between gap-4">
+                  <div className="min-w-0">
+                    <p className="mb-2 text-sm font-bold text-white">{t("templateReusable")}</p>
+                    <h2 className="text-2xl font-black leading-none text-white sm:text-3xl">{t("peopleLibrary")}</h2>
+                  </div>
+                </div>
+                <form
+                  onSubmit={submitPerson}
+                  onFocusCapture={() => setExpandedPersonProjectsId(null)}
+                  className="mt-5 grid gap-3 rounded-studio bg-cloud/70 p-4"
+                >
                   <input
                     value={personForm.name}
                     onChange={(event) => setPersonForm((current) => ({ ...current, name: event.target.value }))}
@@ -405,6 +498,10 @@ export function LibrariesPage() {
                     const linkedTemplate = person.costTemplateId
                       ? costTemplateById.get(person.costTemplateId)
                       : undefined;
+                    const participation = personProjectsById.get(person.id);
+                    const projectRows = participation?.projects ?? [];
+                    const isProjectsExpanded = expandedPersonProjectsId === person.id;
+                    const ProjectChevron = isProjectsExpanded ? ChevronUp : ChevronDown;
 
                     return editingPersonId === person.id ? (
                       <form
@@ -493,6 +590,7 @@ export function LibrariesPage() {
                             onClick={() => {
                               setEditingPersonId(null);
                               setEditingPersonForm(defaultPerson);
+                              setExpandedPersonProjectsId(null);
                             }}
                           >
                             <X size={16} />
@@ -530,13 +628,131 @@ export function LibrariesPage() {
                             </button>
                             <button
                               type="button"
-                              onClick={() => removePerson(person.id)}
+                              onClick={() =>
+                                setPendingDelete({ type: "person", id: person.id, label: person.name })
+                              }
                               aria-label={`${t("delete")} ${person.name}`}
                               className="grid size-10 place-items-center rounded-full bg-white text-muted shadow-soft ring-1 ring-black/[0.04] transition hover:bg-coral hover:text-white"
                             >
                               <Trash2 size={17} />
                             </button>
                           </div>
+                        </div>
+
+                        <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                          <div className="rounded-2xl bg-white/70 p-3 ring-1 ring-white/70">
+                            <p className="text-2xl font-black leading-none">
+                              {participation?.totalProjectCount ?? 0}
+                            </p>
+                            <p className="mt-1 text-[0.68rem] font-black uppercase text-ink/52">
+                              {t("projectsCount")}
+                            </p>
+                          </div>
+                          <div className="rounded-2xl bg-white/70 p-3 ring-1 ring-white/70">
+                            <p className="text-2xl font-black leading-none">
+                              {participation?.averageProgress ?? 0}%
+                            </p>
+                            <p className="mt-1 text-[0.68rem] font-black uppercase text-ink/52">
+                              {t("averageCompletion")}
+                            </p>
+                          </div>
+                          <div className="rounded-2xl bg-white/70 p-3 ring-1 ring-white/70 sm:col-span-2">
+                            <p className="text-2xl font-black leading-none">
+                              {formatCny(participation?.actualCostTotal ?? 0)}
+                            </p>
+                            <p className="mt-1 text-[0.68rem] font-black uppercase text-ink/52">
+                              {t("actualCostSoFar")}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="mt-4 rounded-2xl bg-white/55 p-3 ring-1 ring-white/65">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setExpandedPersonProjectsId((current) => (current === person.id ? null : person.id))
+                            }
+                            aria-expanded={isProjectsExpanded}
+                            aria-controls={`person-projects-${person.id}`}
+                            className="flex w-full items-center justify-between gap-3 rounded-2xl bg-white/60 px-3 py-2 text-left transition hover:bg-white/85"
+                          >
+                            <span className="min-w-0">
+                              <span className="block text-xs font-black uppercase text-ink/58">
+                                {t("personProjectParticipation")}
+                              </span>
+                              <span className="mt-1 block text-xs font-bold text-ink/42">
+                                {projectRows.length} {t("projectsCount")}
+                              </span>
+                            </span>
+                            <span className="grid size-9 shrink-0 place-items-center rounded-full bg-cloud text-muted">
+                              <ProjectChevron size={18} />
+                            </span>
+                          </button>
+
+                          {isProjectsExpanded ? (
+                            <div id={`person-projects-${person.id}`} className="mt-3 grid gap-2">
+                              {projectRows.length ? (
+                                projectRows.map((project) => (
+                                  <Link
+                                    key={project.projectId}
+                                    href={`/projects/${project.projectId}`}
+                                    prefetch={false}
+                                    className="rounded-2xl bg-white/75 p-3 text-ink shadow-sm ring-1 ring-black/[0.04] transition hover:-translate-y-0.5 hover:bg-white"
+                                  >
+                                    <div className="flex items-start justify-between gap-3">
+                                      <div className="min-w-0">
+                                        <h4 className="truncate text-sm font-black">
+                                          {formatDemoEntityName(
+                                            translateDomainLabel(project.projectName, projectNameKeys, t),
+                                            project.projectId,
+                                            "project",
+                                            t
+                                          )}
+                                        </h4>
+                                        <p className="mt-1 truncate text-xs font-bold text-muted">
+                                          {project.groupId
+                                            ? getProjectGroupDisplayName(
+                                                {
+                                                  name: project.groupName,
+                                                  nameI18n: project.groupNameI18n
+                                                },
+                                                language,
+                                                t
+                                              )
+                                            : "—"}
+                                        </p>
+                                      </div>
+                                      <Pill
+                                        tone={projectStatusTone[project.status]}
+                                        className="min-h-7 shrink-0 px-2.5 text-[0.68rem]"
+                                      >
+                                        {t(statusKeys[project.status])}
+                                      </Pill>
+                                    </div>
+                                    <div className="mt-3 grid gap-2">
+                                      <div className="flex items-center justify-between gap-3 text-xs font-black">
+                                        <span>{t("averageCompletion")}</span>
+                                        <span>{project.progress}%</span>
+                                      </div>
+                                      <ProgressBar
+                                        value={project.progress}
+                                        className="h-2 bg-ink/10"
+                                        barClassName="bg-limepop"
+                                      />
+                                      <div className="flex items-center justify-between gap-3 text-xs font-black text-ink/58">
+                                        <span>{t("actualCostSoFar")}</span>
+                                        <span>{formatCny(project.actualCostSoFar)}</span>
+                                      </div>
+                                    </div>
+                                  </Link>
+                                ))
+                              ) : (
+                                <p className="rounded-2xl bg-white/70 p-3 text-sm font-bold text-muted">
+                                  {t("noPersonProjects")}
+                                </p>
+                              )}
+                            </div>
+                          ) : null}
                         </div>
                       </div>
                     );
@@ -545,7 +761,11 @@ export function LibrariesPage() {
               </Card>
 
               <Card tone="dark" className="p-5 sm:p-6">
-                <SectionHeader eyebrow={t("subscriptionManagement")} title={t("softwareLibrary")} />
+                <SectionHeader
+                  eyebrow={t("subscriptionManagement")}
+                  title={t("softwareLibrary")}
+                  eyebrowClassName="text-white"
+                />
                 <form onSubmit={submitTool} className="mt-5 grid gap-3 rounded-studio bg-white/10 p-4">
                   <input
                     value={toolForm.name}
@@ -630,7 +850,7 @@ export function LibrariesPage() {
                   <div className="flex items-center justify-between gap-3">
                     <span className="text-sm font-black">{t("monthlySubscriptionCost")}</span>
                     <span className="text-2xl font-black leading-none">
-                      {formatCurrency(data.subscriptionSummary.monthlyTotal)}
+                      {formatCny(data.subscriptionSummary.monthlyTotal)}
                     </span>
                   </div>
                   <p className="mt-2 text-xs font-bold leading-5 text-ink/62">{t("subscriptionCostRule")}</p>
@@ -761,18 +981,18 @@ export function LibrariesPage() {
                                 <>
                                   <span className="inline-flex items-center gap-2">
                                     <CreditCard size={14} />
-                                    {tool.subscription.currency} {tool.subscription.amount.toLocaleString()} ·{" "}
+                                    {tool.subscription.currency} {tool.subscription.amount.toLocaleString(languageLocales[language])} ·{" "}
                                     {tool.subscription.billingCycle === "monthly"
                                       ? t("billingTypeMonthly")
                                       : t("billingTypeYearly")}
                                   </span>
                                   <span className="inline-flex items-center gap-2">
                                     <Repeat size={14} />
-                                    {t("monthlyEquivalent")}: {formatCurrency(monthlyCost)}
+                                    {t("monthlyEquivalent")}: {formatCny(monthlyCost)}
                                   </span>
                                   <span className="inline-flex items-center gap-2">
                                     <CalendarClock size={14} />
-                                    {t("subscriptionExpiresAt")}: {tool.subscription.expiresAt}
+                                    {t("subscriptionExpiresAt")}: {formatLocalizedDate(tool.subscription.expiresAt, language)}
                                   </span>
                                   <span className="inline-flex min-w-0 items-center gap-2">
                                     <Mail size={14} className="shrink-0" />
@@ -797,7 +1017,9 @@ export function LibrariesPage() {
                             </button>
                             <button
                               type="button"
-                              onClick={() => removeTool(tool.id)}
+                              onClick={() =>
+                                setPendingDelete({ type: "tool", id: tool.id, label: tool.name })
+                              }
                               aria-label={`${t("delete")} ${tool.name}`}
                               className="grid size-10 place-items-center rounded-full bg-white/10 text-white/70 transition hover:bg-coral hover:text-white"
                             >
@@ -811,8 +1033,12 @@ export function LibrariesPage() {
                 </div>
               </Card>
 
-              <Card tone="lime" className="p-5 sm:p-6">
-                <SectionHeader eyebrow={t("templateReusable")} title={t("costTemplateLibrary")} />
+              <Card tone="lime" className="bg-[#ffc700] p-5 sm:p-6">
+                <SectionHeader
+                  eyebrow={t("templateReusable")}
+                  title={t("costTemplateLibrary")}
+                  eyebrowClassName="text-white"
+                />
                 <form onSubmit={submitCost} className="mt-5 grid gap-3 rounded-studio bg-white/55 p-4">
                   <input
                     value={costForm.name}
@@ -890,7 +1116,9 @@ export function LibrariesPage() {
                           </p>
                           <button
                             type="button"
-                            onClick={() => removeCostTemplate(cost.id)}
+                            onClick={() =>
+                              setPendingDelete({ type: "costTemplate", id: cost.id, label: cost.name })
+                            }
                             aria-label={`${t("delete")} ${cost.name}`}
                             className="grid size-10 place-items-center rounded-full bg-white text-muted shadow-soft ring-1 ring-black/[0.04] transition hover:bg-coral hover:text-white"
                           >
@@ -906,6 +1134,16 @@ export function LibrariesPage() {
           </>
         )}
       </div>
+      <DeleteConfirmDialog
+        open={Boolean(pendingDelete)}
+        title={t("deleteItemTitle")}
+        description={`${t("deleteItemDescription")}${pendingDelete?.label ? `: ${pendingDelete.label}` : ""}`}
+        warning={t("deleteIrreversibleWarning")}
+        cancelLabel={t("cancel")}
+        confirmLabel={t("confirmDelete")}
+        onCancel={() => setPendingDelete(null)}
+        onConfirm={confirmPendingDelete}
+      />
     </AppShell>
   );
 }

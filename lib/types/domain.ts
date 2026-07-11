@@ -1,3 +1,6 @@
+import type { Language } from "@/lib/i18n/translations";
+import type { MoneyCurrency } from "@/lib/utils/money";
+
 export type User = {
   id: string;
   name: string;
@@ -16,8 +19,8 @@ export type Company = {
 
 export type ProjectGroup = {
   id: string;
-  companyId: string;
   name: string;
+  nameI18n?: Partial<Record<Language, string>>;
   description: string;
   coverImage: string;
   colorTheme: string;
@@ -101,7 +104,7 @@ export type CostItem = {
   name: string;
   category: "software" | "people" | "outsourcing" | "asset" | "server" | "other";
   amount: number;
-  currency: "USD" | "JPY" | "CNY" | "EUR";
+  currency: MoneyCurrency;
   billingType: "one-time" | "monthly" | "yearly" | "hourly" | "daily";
   startDate: string;
   endDate?: string;
@@ -144,10 +147,13 @@ export type Material = {
 export type ProjectVersion = {
   id: string;
   projectId: string;
+  kind?: "demo" | "official" | "legacy";
   name: string;
   summary: string;
   status: "draft" | "review" | "released";
   createdAt: string;
+  versionNumber?: string;
+  releaseDate?: string;
 };
 
 export type ActivityEvent = {
@@ -180,7 +186,7 @@ export type ShareLink = {
   createdAt: string;
 };
 
-export type ProjectStatus = "planning" | "active" | "paused" | "completed";
+export type ProjectStatus = "planning" | "active" | "paused" | "terminated" | "completed";
 
 export type Project = {
   id: string;
@@ -189,6 +195,7 @@ export type Project = {
   name: string;
   description: string;
   coverImage: string;
+  archivedAt?: string | null;
   tools: Tool[];
   people: Person[];
   startDate: string;
@@ -225,12 +232,32 @@ export type ProjectGroupSummary = {
   privateCostTotal: number;
 };
 
+export type PersonProjectParticipation = {
+  personId: string;
+  totalProjectCount: number;
+  averageProgress: number;
+  actualCostTotal: number;
+  projects: Array<{
+    projectId: string;
+    projectName: string;
+    companyId: string;
+    companyName: string;
+    groupId: string;
+    groupName: string;
+    groupNameI18n?: ProjectGroup["nameI18n"];
+    progress: number;
+    status: ProjectStatus;
+    actualCostSoFar: number;
+  }>;
+};
+
 export type DashboardOverview = {
   totalProjectCount: number;
   activeProjectCount: number;
   completedProjectCount: number;
   pausedProjectCount: number;
   averageProgress: number;
+  releasedProjectCount: number;
   upcomingDeliverableCount: number;
   overdueTaskCount: number;
   actualCostSoFar: number;

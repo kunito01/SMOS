@@ -8,6 +8,7 @@ import type {
   PaymentItem,
   Phase,
   Project,
+  ProjectVersion,
   ProjectStatus,
   Task,
   TimelineCustomRow
@@ -52,6 +53,27 @@ export type ProjectPaymentInput = {
   notes?: string;
 };
 
+export type ProjectBasicsInput = {
+  name: string;
+  description: string;
+  coverImage?: string;
+  groupId: string;
+};
+
+export type ProjectReleaseInput = {
+  demoVersion: string;
+  demoReleaseDate: string;
+  officialVersion: string;
+  officialReleaseDate: string;
+};
+
+export type DashboardOverviewOptions = {
+  includeArchivedTotal?: boolean;
+};
+
+export const isArchivedProject = (project: Project) => Boolean(project.archivedAt);
+export const isActiveProject = (project: Project) => !isArchivedProject(project);
+
 const filterProjectsByScope = (scope: DashboardScope = { type: "all" }): Project[] => {
   if (scope.type === "company") {
     return mockDatabase.projects.filter((project) => project.companyId === scope.id);
@@ -66,7 +88,17 @@ const filterProjectsByScope = (scope: DashboardScope = { type: "all" }): Project
 
 export async function listProjects(scope: DashboardScope = { type: "all" }) {
   hydrateMockDatabase();
-  return mockApi(filterProjectsByScope(scope));
+  return mockApi(filterProjectsByScope(scope).filter(isActiveProject));
+}
+
+export async function listActiveProjects(scope: DashboardScope = { type: "all" }) {
+  hydrateMockDatabase();
+  return mockApi(filterProjectsByScope(scope).filter(isActiveProject));
+}
+
+export async function listArchivedProjects(scope: DashboardScope = { type: "all" }) {
+  hydrateMockDatabase();
+  return mockApi(filterProjectsByScope(scope).filter(isArchivedProject));
 }
 
 export async function getProject(projectId: string) {
@@ -79,15 +111,20 @@ export async function getProject(projectId: string) {
   return mockApi(project);
 }
 
-export async function getDashboardOverview(scope: DashboardScope = { type: "all" }) {
+export async function getDashboardOverview(
+  scope: DashboardScope = { type: "all" },
+  options: DashboardOverviewOptions = { includeArchivedTotal: true }
+) {
   hydrateMockDatabase();
-  return mockApi(createDashboardOverview(filterProjectsByScope(scope)));
+  return mockApi(createDashboardOverview(filterProjectsByScope(scope), options));
 }
 
 export async function createProject(input: CreateProjectInput) {
   hydrateMockDatabase();
   const projectIndex = mockDatabase.projects.length;
-  const project = createMockProject(input.companyId, input.groupId, input.name, projectIndex);
+  const requestedGroupId = input.groupId.trim();
+  const groupId = mockDatabase.groups.some((group) => group.id === requestedGroupId) ? requestedGroupId : "";
+  const project = createMockProject(input.companyId, groupId, input.name, projectIndex);
   const selectedTools = mockDatabase.tools.filter((tool) => input.toolIds.includes(tool.id));
   const selectedPeople = mockDatabase.people.filter((person) => input.personIds.includes(person.id));
   const selectedCostTemplates = mockDatabase.costLibrary.filter((cost) => input.costTemplateIds.includes(cost.id));
@@ -95,6 +132,7 @@ export async function createProject(input: CreateProjectInput) {
   project.startDate = input.startDate;
   project.endDate = input.endDate;
   project.status = input.status;
+  project.archivedAt = null;
   project.tools = selectedTools.length ? selectedTools : project.tools;
   project.people = selectedPeople.length ? selectedPeople : project.people;
 
@@ -129,6 +167,10 @@ const calculateProjectProgress = (project: Project) => {
 };
 
 const getProjectStatusFromProgress = (project: Project, progress: number): ProjectStatus => {
+  if (project.status === "terminated") {
+    return "terminated";
+  }
+
   if (progress >= 100) {
     return "completed";
   }
@@ -219,13 +261,13 @@ const createPhaseFromTimelineInput = (
           assigneeId: phaseInput.personIds[0] ?? project.people[0]?.id ?? "",
           completed: false,
           dueDate: phaseInput.endDate,
-          title: "New task"
+          title: ""
         }
       ];
   const tasks: Task[] = normalizedTasks.map((task, taskIndex) => ({
     id: task.id || `${phaseId}-task-${Date.now()}-${taskIndex + 1}`,
     deliverableId,
-    title: task.title.trim() || `Task ${taskIndex + 1}`,
+    title: task.title.trim(),
     completed: task.completed,
     assigneeId: task.assigneeId || phaseInput.personIds[0] || project.people[0]?.id || "",
     dueDate: task.dueDate || phaseInput.endDate,
@@ -238,7 +280,7 @@ const createPhaseFromTimelineInput = (
   return {
     id: phaseId,
     projectId: project.id,
-    name: phaseInput.name.trim() || `Stage ${index + 1}`,
+    name: phaseInput.name.trim(),
     description: phaseInput.description.trim(),
     startDate: phaseInput.startDate,
     endDate: phaseInput.endDate,
@@ -252,8 +294,8 @@ const createPhaseFromTimelineInput = (
       {
         id: deliverableId,
         phaseId,
-        title: `${phaseInput.name.trim() || `Stage ${index + 1}`} tasks`,
-        description: "Timeline task group.",
+        title: "",
+        description: "",
         assigneeId: phaseInput.personIds[0] || project.people[0]?.id || "",
         dueDate: phaseInput.endDate,
         tasks,
@@ -273,10 +315,10 @@ export async function updateProjectTimeline(projectId: string, input: UpdateProj
   const nextPhaseIds = new Set(nextPhases.map((phase) => phase.id));
 
   project.phases = nextPhases;
-  project.timelineTitle = input.title.trim() || "Timeline board";
+  project.timelineTitle = input.title.trim();
   project.timelineRows = input.rows.map((row, index) => ({
     id: row.id || `${project.id}-timeline-row-${Date.now()}-${index + 1}`,
-    label: row.label.trim() || `Custom row ${index + 1}`,
+    label: row.label.trim(),
     values: Object.fromEntries(
       Object.entries(row.values).filter(([phaseId]) => nextPhaseIds.has(phaseId))
     )
@@ -323,6 +365,172 @@ export async function updateProjectPayments(projectId: string, input: ProjectPay
       notes: payment.notes?.trim() || undefined
     }));
 
+  persistMockDatabase();
+
+  return mockApi(project);
+}
+
+export async function updateProjectBasics(projectId: string, input: ProjectBasicsInput) {
+  hydrateMockDatabase();
+  const project = requireEntity(
+    mockDatabase.projects.find((item) => item.id === projectId),
+    `Project not found: ${projectId}`
+  );
+  const groupId = input.groupId.trim();
+
+  if (groupId && !mockDatabase.groups.some((group) => group.id === groupId)) {
+    throw new Error(`Project group not found: ${groupId}`);
+  }
+
+  project.name = input.name.trim() || project.name;
+  project.description = input.description.trim() || project.description;
+  project.groupId = groupId;
+
+  if (input.coverImage) {
+    project.coverImage = input.coverImage;
+  }
+
+  persistMockDatabase();
+
+  return mockApi(project);
+}
+
+export async function updateProjectStatus(projectId: string, status: ProjectStatus) {
+  hydrateMockDatabase();
+  const project = requireEntity(
+    mockDatabase.projects.find((item) => item.id === projectId),
+    `Project not found: ${projectId}`
+  );
+
+  project.status = status;
+  persistMockDatabase();
+
+  return mockApi(project);
+}
+
+const releaseVersionId = (project: Project, kind: NonNullable<ProjectVersion["kind"]>) =>
+  `${project.id}-version-${kind}`;
+
+const findReleaseVersion = (project: Project, kind: NonNullable<ProjectVersion["kind"]>) =>
+  project.versions.find((version) => version.kind === kind || version.id === releaseVersionId(project, kind));
+
+const createReleaseVersion = (
+  project: Project,
+  kind: "demo" | "official",
+  versionNumber: string,
+  releaseDate: string,
+  existing?: ProjectVersion
+): ProjectVersion => {
+  const isReleased = Boolean(versionNumber && releaseDate);
+
+  return {
+    id: existing?.id ?? releaseVersionId(project, kind),
+    projectId: project.id,
+    kind,
+    name: kind === "demo" ? "Demo release" : "Official release",
+    summary: kind === "demo" ? "Demo publishing checkpoint." : "Formal release checkpoint.",
+    status: isReleased ? "released" : "draft",
+    createdAt: isReleased ? releaseDate : existing?.createdAt || (kind === "demo" ? project.startDate : project.endDate),
+    versionNumber: isReleased ? versionNumber : undefined,
+    releaseDate: isReleased ? releaseDate : undefined
+  };
+};
+
+export async function updateProjectReleasePlan(projectId: string, input: ProjectReleaseInput) {
+  hydrateMockDatabase();
+  const project = requireEntity(
+    mockDatabase.projects.find((item) => item.id === projectId),
+    `Project not found: ${projectId}`
+  );
+  const demoVersion = input.demoVersion.trim();
+  const demoReleaseDate = input.demoReleaseDate.trim();
+  const officialVersion = input.officialVersion.trim();
+  const officialReleaseDate = input.officialReleaseDate.trim();
+
+  project.versions = [
+    createReleaseVersion(project, "demo", demoVersion, demoReleaseDate, findReleaseVersion(project, "demo")),
+    createReleaseVersion(project, "official", officialVersion, officialReleaseDate, findReleaseVersion(project, "official"))
+  ];
+
+  persistMockDatabase();
+
+  return mockApi(project);
+}
+
+export async function archiveProject(projectId: string) {
+  hydrateMockDatabase();
+  const project = requireEntity(
+    mockDatabase.projects.find((item) => item.id === projectId),
+    `Project not found: ${projectId}`
+  );
+
+  project.archivedAt = new Date().toISOString();
+  persistMockDatabase();
+
+  return mockApi(project);
+}
+
+export async function restoreProject(projectId: string) {
+  hydrateMockDatabase();
+  const project = requireEntity(
+    mockDatabase.projects.find((item) => item.id === projectId),
+    `Project not found: ${projectId}`
+  );
+
+  project.archivedAt = null;
+  persistMockDatabase();
+
+  return mockApi(project);
+}
+
+const normalizeImportedProject = (projectId: string, importedProject: Project, currentProject?: Project): Project => ({
+  ...importedProject,
+  id: projectId,
+  archivedAt: importedProject.archivedAt ?? currentProject?.archivedAt ?? null,
+  phases: importedProject.phases.map((phase) => ({
+    ...phase,
+    projectId,
+    deliverables: phase.deliverables.map((deliverable) => ({
+      ...deliverable,
+      tasks: deliverable.tasks.map((task) => ({
+        ...task,
+        deliverableId: deliverable.id
+      }))
+    }))
+  })),
+  costs: importedProject.costs.map((cost) => ({ ...cost, projectId })),
+  payments: (importedProject.payments ?? []).map((payment) => ({ ...payment, projectId })),
+  materials: importedProject.materials.map((material) => ({ ...material, projectId })),
+  versions: (importedProject.versions ?? []).map((version) => ({ ...version, projectId })),
+  activity: importedProject.activity.map((event) => ({ ...event, projectId })),
+  shareSettings: {
+    ...importedProject.shareSettings,
+    token: importedProject.shareSettings.token
+  }
+});
+
+export async function replaceProject(projectId: string, importedProject: Project) {
+  hydrateMockDatabase();
+  const projectIndex = mockDatabase.projects.findIndex((item) => item.id === projectId);
+
+  requireEntity(projectIndex >= 0 ? mockDatabase.projects[projectIndex] : undefined, `Project not found: ${projectId}`);
+
+  const nextProject = normalizeImportedProject(projectId, importedProject, mockDatabase.projects[projectIndex]);
+  mockDatabase.projects[projectIndex] = nextProject;
+  persistMockDatabase();
+
+  return mockApi(nextProject);
+}
+
+export async function deleteProject(projectId: string) {
+  hydrateMockDatabase();
+  const project = requireEntity(
+    mockDatabase.projects.find((item) => item.id === projectId),
+    `Project not found: ${projectId}`
+  );
+
+  mockDatabase.projects = mockDatabase.projects.filter((item) => item.id !== projectId);
+  mockDatabase.shareLinks = mockDatabase.shareLinks.filter((link) => link.projectId !== projectId);
   persistMockDatabase();
 
   return mockApi(project);

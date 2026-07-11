@@ -1,6 +1,14 @@
 import type { Metadata } from "next";
+import { Notable } from "next/font/google";
 import { AppProviders } from "@/components/providers/app-providers";
 import "./globals.css";
+
+const notable = Notable({
+  display: "swap",
+  subsets: ["latin"],
+  variable: "--font-notable",
+  weight: "400"
+});
 
 export const metadata: Metadata = {
   title: "Studio Map OS",
@@ -14,7 +22,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body>
+      <body className={notable.variable}>
         <AppProviders>{children}</AppProviders>
       </body>
     </html>

@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { authApi } from "@/lib/api";
-import { Language, TranslationKey, languages, translations } from "@/lib/i18n/translations";
+import { Language, TranslationKey, languageLocales, languages, translations } from "@/lib/i18n/translations";
 
 type MockUser = {
   id: string;
@@ -54,6 +54,10 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
 
     setIsReady(true);
   }, []);
+
+  useEffect(() => {
+    document.documentElement.lang = languageLocales[language];
+  }, [language]);
 
   const setLanguage = useCallback((nextLanguage: Language) => {
     setLanguageState(nextLanguage);
