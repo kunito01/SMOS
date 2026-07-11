@@ -1,25 +1,36 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { useI18n } from "@/components/providers/app-providers";
-import { languageLocales } from "@/lib/i18n/translations";
+import { createContext, createElement, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { shareApi } from "@/lib/api";
 import {
   bundledExchangeRateSnapshot,
-  convertCurrency,
   formatCurrency,
   isExchangeRateSnapshot,
   isExchangeRateSnapshotRecent,
   isMoneyCurrency,
+  sumMoney,
   type ExchangeRateSnapshot,
   type MoneyCurrency
 } from "@/lib/utils/money";
 
 export type ExchangeRateBasis = "live" | "cached" | "fallback";
 
+type CostDisplayCurrencyContextValue = {
+  displayCurrency: MoneyCurrency;
+  exchangeRateBasis: ExchangeRateBasis;
+  exchangeRateSnapshot: ExchangeRateSnapshot;
+  formatAmount: (value: number, currency?: MoneyCurrency) => string;
+  isRateUpdating: boolean;
+  isReady: boolean;
+  setDisplayCurrency: (currency: MoneyCurrency) => void;
+  sumInDisplayCurrency: (items: ReadonlyArray<{ amount: number; currency: MoneyCurrency }>) => number;
+};
+
 const displayCurrencyStorageKey = "studio-map-os.display-currency";
 const exchangeRateSnapshotStorageKey = "studio-map-os.exchange-rate-snapshot";
 
 let exchangeRateRequest: Promise<ExchangeRateSnapshot> | null = null;
+const CostDisplayCurrencyContext = createContext<CostDisplayCurrencyContextValue | null>(null);
 
 const requestExchangeRates = () => {
   if (!exchangeRateRequest) {
@@ -87,8 +98,7 @@ const storeSnapshot = (snapshot: ExchangeRateSnapshot) => {
   }
 };
 
-export function useCostDisplayCurrency() {
-  const { language } = useI18n();
+export function CostDisplayCurrencyProvider({ children }: { children: React.ReactNode }) {
   const [displayCurrency, setDisplayCurrencyState] = useState<MoneyCurrency>("CNY");
   const [exchangeRateSnapshot, setExchangeRateSnapshot] = useState<ExchangeRateSnapshot>(
     bundledExchangeRateSnapshot
@@ -142,40 +152,54 @@ export function useCostDisplayCurrency() {
   const setDisplayCurrency = useCallback((currency: MoneyCurrency) => {
     setDisplayCurrencyState(currency);
     storeCurrency(currency);
+    void shareApi.updateShareDisplayCurrency(currency).catch(() => {
+      // Keep the local preference usable if public-link persistence is unavailable.
+    });
   }, []);
 
-  const locale = languageLocales[language];
-
   const formatAmount = useCallback(
-    (value: number, currency: MoneyCurrency = displayCurrency) => formatCurrency(value, currency, locale),
-    [displayCurrency, locale]
+    (value: number, currency: MoneyCurrency = displayCurrency) => formatCurrency(value, currency),
+    [displayCurrency]
   );
 
-  const convertToDisplayCurrency = useCallback(
-    (amount: number, sourceCurrency: MoneyCurrency) =>
-      convertCurrency(amount, sourceCurrency, displayCurrency, exchangeRateSnapshot),
+  const sumInDisplayCurrency = useCallback(
+    (items: ReadonlyArray<{ amount: number; currency: MoneyCurrency }>) =>
+      sumMoney(items, displayCurrency, exchangeRateSnapshot),
     [displayCurrency, exchangeRateSnapshot]
   );
 
-  const formatInDisplayCurrency = useCallback(
-    (amount: number, sourceCurrency: MoneyCurrency) =>
-      formatCurrency(
-        convertCurrency(amount, sourceCurrency, displayCurrency, exchangeRateSnapshot),
-        displayCurrency,
-        locale
-      ),
-    [displayCurrency, exchangeRateSnapshot, locale]
+  const value = useMemo<CostDisplayCurrencyContextValue>(
+    () => ({
+      displayCurrency,
+      exchangeRateBasis,
+      exchangeRateSnapshot,
+      formatAmount,
+      isRateUpdating,
+      isReady,
+      setDisplayCurrency,
+      sumInDisplayCurrency
+    }),
+    [
+      displayCurrency,
+      exchangeRateBasis,
+      exchangeRateSnapshot,
+      formatAmount,
+      isRateUpdating,
+      isReady,
+      setDisplayCurrency,
+      sumInDisplayCurrency
+    ]
   );
 
-  return {
-    convertToDisplayCurrency,
-    displayCurrency,
-    exchangeRateBasis,
-    exchangeRateSnapshot,
-    formatAmount,
-    formatInDisplayCurrency,
-    isRateUpdating,
-    isReady,
-    setDisplayCurrency
-  };
+  return createElement(CostDisplayCurrencyContext.Provider, { value }, children);
+}
+
+export function useCostDisplayCurrency() {
+  const context = useContext(CostDisplayCurrencyContext);
+
+  if (!context) {
+    throw new Error("useCostDisplayCurrency must be used inside CostDisplayCurrencyProvider");
+  }
+
+  return context;
 }

@@ -1,7 +1,12 @@
 import { mockApi, requireEntity } from "@/lib/api/mock-client";
 import { hydrateMockDatabase, persistMockDatabase } from "@/lib/api/mock-persistence";
-import { createDashboardOverview, getProjectActualCost, mockDatabase } from "@/lib/mock";
+import { createDashboardOverview, mockDatabase } from "@/lib/mock";
 import type { Company, CompanySummary } from "@/lib/types";
+import {
+  bundledExchangeRateSnapshot,
+  type ExchangeRateSnapshot,
+  type MoneyCurrency
+} from "@/lib/utils/money";
 
 type CreateCompanyInput = {
   coverImage?: string;
@@ -26,12 +31,12 @@ const slugify = (value: string) =>
     .replace(/^-+|-+$/g, "") || "brand";
 
 export async function listCompanies() {
-  hydrateMockDatabase();
+  await hydrateMockDatabase();
   return mockApi(mockDatabase.companies);
 }
 
 export async function getCompany(companyId: string) {
-  hydrateMockDatabase();
+  await hydrateMockDatabase();
   const company = requireEntity(
     mockDatabase.companies.find((item) => item.id === companyId),
     `Company not found: ${companyId}`
@@ -41,7 +46,7 @@ export async function getCompany(companyId: string) {
 }
 
 export async function createCompany(input: CreateCompanyInput) {
-  hydrateMockDatabase();
+  await hydrateMockDatabase();
 
   const now = new Date().toISOString();
   const company: Company = {
@@ -53,13 +58,13 @@ export async function createCompany(input: CreateCompanyInput) {
   };
 
   mockDatabase.companies = [company, ...mockDatabase.companies];
-  persistMockDatabase();
+  await persistMockDatabase();
 
   return mockApi(company);
 }
 
 export async function updateCompanyBasics(companyId: string, input: CompanyBasicsInput) {
-  hydrateMockDatabase();
+  await hydrateMockDatabase();
   const company = requireEntity(
     mockDatabase.companies.find((item) => item.id === companyId),
     `Company not found: ${companyId}`
@@ -72,13 +77,13 @@ export async function updateCompanyBasics(companyId: string, input: CompanyBasic
     company.coverImage = input.coverImage;
   }
 
-  persistMockDatabase();
+  await persistMockDatabase();
 
   return mockApi(company);
 }
 
 export async function listCompanyGroups(companyId: string) {
-  hydrateMockDatabase();
+  await hydrateMockDatabase();
   const groupIds = new Set(
     mockDatabase.projects
       .filter((project) => project.companyId === companyId && !project.archivedAt)
@@ -89,23 +94,32 @@ export async function listCompanyGroups(companyId: string) {
 }
 
 export async function listCompanyProjects(companyId: string) {
-  hydrateMockDatabase();
+  await hydrateMockDatabase();
   return mockApi(mockDatabase.projects.filter((project) => project.companyId === companyId && !project.archivedAt));
 }
 
-export async function listCompanySummaries(): Promise<CompanySummary[]> {
-  hydrateMockDatabase();
+export async function listCompanySummaries(
+  currency: MoneyCurrency = "CNY",
+  snapshot: ExchangeRateSnapshot = bundledExchangeRateSnapshot
+): Promise<CompanySummary[]> {
+  await hydrateMockDatabase();
   const summaries = mockDatabase.companies.map((company) => {
     const projects = mockDatabase.projects.filter((project) => project.companyId === company.id && !project.archivedAt);
-    const overview = createDashboardOverview(projects, { includeArchivedTotal: false });
+    const overview = createDashboardOverview(projects, {
+      includeArchivedTotal: false,
+      currency,
+      snapshot
+    });
 
     return {
       company,
+      currency,
       totalProjectCount: overview.totalProjectCount,
       activeProjectCount: overview.activeProjectCount,
       completedProjectCount: overview.completedProjectCount,
       averageProgress: overview.averageProgress,
-      privateCostTotal: projects.reduce((sum, project) => sum + getProjectActualCost(project), 0)
+      actualCostTotal: overview.actualCostSoFar,
+      budgetCostTotal: overview.budgetCostTotal
     };
   });
 

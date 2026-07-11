@@ -1,10 +1,40 @@
-import { createProjectPayments, mockDatabase } from "@/lib/mock";
+import { createMockDatabase, createProjectPayments, mockDatabase } from "@/lib/mock";
 import { languages, type Language } from "@/lib/i18n/translations";
+import {
+  buildEncryptedPublicShareRecords,
+  type EncryptedPublicSharePayload
+} from "@/lib/security/public-share-storage";
+import {
+  decryptWorkspaceRecord,
+  encryptWorkspaceRecord,
+  type WorkspaceMasterKey
+} from "@/lib/security/workspace-crypto";
+import {
+  captureEncryptedWorkspaceBundle,
+  deleteEncryptedWorkspaceBundle,
+  getEncryptedWorkspaceRecord,
+  replaceEncryptedWorkspaceBundle,
+  restoreEncryptedWorkspaceBundle,
+  type EncryptedWorkspaceBundleSnapshot
+} from "@/lib/storage/indexed-db";
 import type { Company, CostLibraryItem, Person, Project, ProjectGroup, ProjectVersion, ShareLink, Tool, User } from "@/lib/types";
 import { isMoneyCurrency, type MoneyCurrency } from "@/lib/utils/money";
+import { normalizeProjectBudgetForPhases } from "@/lib/utils/project-budget-normalize";
 
-const storageKey = "studio-map-os.mock-database";
+const legacyStorageKey = "studio-map-os.mock-database";
+const legacyClaimMarkerStorageKey = "studio-map-os.mock-database.claimed-workspace-id";
+const workspaceStorageKey = (workspaceId: string) =>
+  `studio-map-os.workspace.${workspaceId}.database`;
+
+let activeWorkspaceId: string | null = null;
+let activeWorkspaceMasterKey: WorkspaceMasterKey | null = null;
+let activeWorkspaceGeneration = 0;
 let hydrated = false;
+let hydrationFailed = false;
+let hydrationPromise: Promise<void> | null = null;
+let lastPersistedDatabase: PersistedMockDatabase | null = null;
+let persistenceQueue: Promise<void> = Promise.resolve();
+let persistenceFailureEpoch = 0;
 
 type PersistedProjectGroup = ProjectGroup & {
   companyId?: string;
@@ -33,6 +63,16 @@ export type MockDatabaseBackup = {
     language?: Language;
     displayCurrency?: MoneyCurrency;
   };
+};
+
+export type MockDatabaseWorkspaceStorageSnapshot = {
+  encryptedBundle: EncryptedWorkspaceBundleSnapshot<EncryptedPublicSharePayload>;
+  displayCurrency: string | null;
+  language: string | null;
+  legacyClaimMarker: string | null;
+  legacyRaw: string | null;
+  workspaceId: string;
+  workspaceRaw: string | null;
 };
 
 const languageStorageKey = "studio-map-os.language";
@@ -84,7 +124,85 @@ const isCostLibraryItem = (value: unknown) =>
 const isShareLink = (value: unknown) =>
   isRecord(value) &&
   hasStrings(value, ["id", "projectId", "token", "createdAt"]) &&
-  typeof value.allowCostPreview === "boolean";
+  typeof value.allowCostPreview === "boolean" &&
+  (value.displayCurrency === undefined || isMoneyCurrency(value.displayCurrency));
+
+const isFiniteNonNegativeNumber = (value: unknown): value is number =>
+  typeof value === "number" && Number.isFinite(value) && value >= 0;
+
+const isFiniteNonNegativeInteger = (value: unknown) =>
+  isFiniteNonNegativeNumber(value) && Number.isInteger(value);
+
+const isPercentage = (value: unknown) =>
+  isFiniteNonNegativeNumber(value) && value <= 100;
+
+const isProjectBudgetPersonnelLine = (value: unknown) =>
+  isRecord(value) &&
+  hasStrings(value, ["id", "roleLevel", "currency"]) &&
+  (value.personId === undefined || typeof value.personId === "string") &&
+  isMoneyCurrency(value.currency) &&
+  isFiniteNonNegativeInteger(value.headcount) &&
+  isFiniteNonNegativeNumber(value.hourlyRate) &&
+  isFiniteNonNegativeInteger(value.days);
+
+const isProjectBudgetTravel = (value: unknown) =>
+  isRecord(value) &&
+  typeof value.currency === "string" &&
+  isMoneyCurrency(value.currency) &&
+  isFiniteNonNegativeNumber(value.unitPrice) &&
+  isFiniteNonNegativeInteger(value.count);
+
+const isProjectBudgetDirectExpense = (value: unknown) =>
+  isRecord(value) &&
+  typeof value.currency === "string" &&
+  isMoneyCurrency(value.currency) &&
+  isFiniteNonNegativeNumber(value.amount);
+
+const isProjectBudgetDailyExpenseLine = (value: unknown) =>
+  isRecord(value) &&
+  hasStrings(value, ["id", "name", "currency"]) &&
+  isMoneyCurrency(value.currency) &&
+  isFiniteNonNegativeNumber(value.amount);
+
+const isProjectBudgetExtraCostLine = (value: unknown) =>
+  isRecord(value) &&
+  hasStrings(value, ["id", "name", "currency", "kind"]) &&
+  (value.costTemplateId === undefined || typeof value.costTemplateId === "string") &&
+  (value.kind === "outsourcing" || value.kind === "extra") &&
+  isMoneyCurrency(value.currency) &&
+  isFiniteNonNegativeNumber(value.amount);
+
+const isProjectBudgetSoftwareCostLine = (value: unknown) =>
+  isRecord(value) &&
+  hasStrings(value, ["id", "name", "currency", "billingCycle"]) &&
+  (value.toolId === undefined || typeof value.toolId === "string") &&
+  isMoneyCurrency(value.currency) &&
+  (value.billingCycle === "monthly" || value.billingCycle === "yearly") &&
+  isFiniteNonNegativeNumber(value.amount) &&
+  isFiniteNonNegativeInteger(value.periods);
+
+const isProjectPhaseBudget = (value: unknown) =>
+  isRecord(value) &&
+  typeof value.phaseId === "string" &&
+  Array.isArray(value.personnel) &&
+  value.personnel.every(isProjectBudgetPersonnelLine) &&
+  (value.travel === undefined || isProjectBudgetTravel(value.travel)) &&
+  (value.dailyExpenseLines === undefined || (
+    Array.isArray(value.dailyExpenseLines) &&
+    value.dailyExpenseLines.every(isProjectBudgetDailyExpenseLine)
+  )) &&
+  (value.dailyExpenses === undefined || isProjectBudgetDirectExpense(value.dailyExpenses)) &&
+  Array.isArray(value.extraCosts) &&
+  value.extraCosts.every(isProjectBudgetExtraCostLine) &&
+  Array.isArray(value.softwareCosts) &&
+  value.softwareCosts.every(isProjectBudgetSoftwareCostLine);
+
+const isProjectBudget = (value: unknown) =>
+  isRecord(value) &&
+  Array.isArray(value.phases) &&
+  value.phases.every(isProjectPhaseBudget) &&
+  isPercentage(value.contingencyPercent) &&
+  isPercentage(value.taxPercent);
 
 const isPhaseArray = (value: unknown) =>
   Array.isArray(value) &&
@@ -137,7 +255,9 @@ const isProject = (value: unknown) =>
   isEntityArray(value.materials) &&
   isEntityArray(value.versions) &&
   isEntityArray(value.activity) &&
+  (value.timelineConfigured === undefined || typeof value.timelineConfigured === "boolean") &&
   (value.timelineRows === undefined || isEntityArray(value.timelineRows)) &&
+  (value.budget === undefined || isProjectBudget(value.budget)) &&
   isShareSettings(value.shareSettings);
 
 const createPersistedDatabaseSnapshot = (): PersistedMockDatabase => ({
@@ -215,10 +335,6 @@ export function validateMockDatabaseBackup(value: unknown): MockDatabaseBackup {
   };
 }
 
-export function parseMockDatabaseBackup(content: string): MockDatabaseBackup {
-  return validateMockDatabaseBackup(JSON.parse(content) as unknown);
-}
-
 const normalizePersistedGroup = (group: PersistedProjectGroup, seedGroup?: ProjectGroup): ProjectGroup => {
   const normalizedGroup = { ...group };
   delete normalizedGroup.companyId;
@@ -269,83 +385,554 @@ const normalizePersistedVersions = (project: Project, projectIndex: number): Pro
   });
 };
 
-export function hydrateMockDatabase() {
-  if (hydrated || !canUseStorage()) {
-    return;
+const normalizePersistedProject = (
+  project: Project,
+  projectIndex: number,
+  tools: ReadonlyArray<Tool>
+): Project => {
+  const phases = Array.isArray(project.phases) ? project.phases : [];
+  const projectTools = Array.isArray(project.tools) ? project.tools : [];
+  const toolsById = new Map<string, Tool>();
+
+  projectTools.forEach((tool) => toolsById.set(tool.id, tool));
+  tools.forEach((tool) => toolsById.set(tool.id, tool));
+
+  return {
+    ...project,
+    archivedAt: project.archivedAt ?? null,
+    budget: normalizeProjectBudgetForPhases(project.budget, phases, [...toolsById.values()]),
+    payments: Array.isArray(project.payments)
+      ? project.payments
+      : createProjectPayments(project.id, projectIndex),
+    versions: normalizePersistedVersions(project, projectIndex)
+  };
+};
+
+const resetMockDatabase = () => {
+  Object.assign(mockDatabase, createMockDatabase());
+};
+
+const normalizeWorkspaceId = (workspaceId: string) => workspaceId.trim();
+
+const normalizePersistedDatabase = (
+  value: unknown,
+  options: { allowLegacyProjectShape?: boolean } = {}
+): PersistedMockDatabase => {
+  if (!isRecord(value)) {
+    throw new Error("Invalid persisted database");
   }
 
-  hydrated = true;
-  const raw = window.localStorage.getItem(storageKey);
+  const collectionKeys = [
+    "users",
+    "companies",
+    "groups",
+    "projects",
+    "people",
+    "tools",
+    "costLibrary",
+    "shareLinks"
+  ] as const;
 
-  if (!raw) {
-    return;
+  if (!collectionKeys.every((key) => Array.isArray(value[key]))) {
+    throw new Error("Invalid persisted database collections");
   }
 
-  try {
-    const persisted = JSON.parse(raw) as Partial<PersistedMockDatabase>;
-    const seededGroupsById = new Map(mockDatabase.groups.map((group) => [group.id, group]));
-    const seededToolsById = new Map(mockDatabase.tools.map((tool) => [tool.id, tool]));
+  const persisted = value as unknown as PersistedMockDatabase;
+  const seedDatabase = createMockDatabase();
+  const seededGroupsById = new Map(seedDatabase.groups.map((group) => [group.id, group]));
+  const seededToolsById = new Map(seedDatabase.tools.map((tool) => [tool.id, tool]));
+  const normalizedTools = persisted.tools.map((tool) => ({
+    ...tool,
+    subscription: tool.subscription ?? seededToolsById.get(tool.id)?.subscription
+  }));
+  const hydratedDatabase: PersistedMockDatabase = {
+    users: persisted.users,
+    companies: persisted.companies,
+    groups: persisted.groups.map((group) =>
+      normalizePersistedGroup(group, seededGroupsById.get(group.id))
+    ),
+    projects: persisted.projects.map((project, index) =>
+      normalizePersistedProject(project, index, normalizedTools)
+    ),
+    people: persisted.people,
+    tools: normalizedTools,
+    costLibrary: persisted.costLibrary,
+    shareLinks: persisted.shareLinks
+  };
 
-    if (Array.isArray(persisted.users)) {
-      mockDatabase.users = persisted.users;
-    }
-
-    if (Array.isArray(persisted.companies)) {
-      mockDatabase.companies = persisted.companies;
-    }
-
-    if (Array.isArray(persisted.groups)) {
-      mockDatabase.groups = persisted.groups.map((group) =>
-        normalizePersistedGroup(group, seededGroupsById.get(group.id))
-      );
-    }
-
-    if (Array.isArray(persisted.projects)) {
-      mockDatabase.projects = persisted.projects;
-      mockDatabase.projects = mockDatabase.projects.map((project, index) => ({
-        ...project,
-        archivedAt: project.archivedAt ?? null,
-        payments: Array.isArray(project.payments) ? project.payments : createProjectPayments(project.id, index),
-        versions: normalizePersistedVersions(project, index)
-      }));
-    }
-
-    if (Array.isArray(persisted.people)) {
-      mockDatabase.people = persisted.people;
-    }
-
-    if (Array.isArray(persisted.tools)) {
-      mockDatabase.tools = persisted.tools.map((tool) => ({
-        ...tool,
-        subscription: tool.subscription ?? seededToolsById.get(tool.id)?.subscription
-      }));
-    }
-
-    if (Array.isArray(persisted.costLibrary)) {
-      mockDatabase.costLibrary = persisted.costLibrary;
-    }
-
-    if (Array.isArray(persisted.shareLinks)) {
-      mockDatabase.shareLinks = persisted.shareLinks;
-    }
-  } catch {
-    window.localStorage.removeItem(storageKey);
+  if (!options.allowLegacyProjectShape) {
+    validatePersistedDatabase(value);
   }
-}
 
-export function persistMockDatabase() {
+  return structuredClone(validatePersistedDatabase(hydratedDatabase));
+};
+
+const cloneDatabaseSnapshot = (database: PersistedMockDatabase) =>
+  structuredClone(database);
+
+const applyDatabaseSnapshot = (database: PersistedMockDatabase) => {
+  Object.assign(mockDatabase, cloneDatabaseSnapshot(database));
+};
+
+const getRequiredActiveWorkspace = () => {
+  if (!activeWorkspaceId || !activeWorkspaceMasterKey) {
+    throw new Error("No encrypted database workspace is active");
+  }
+
+  return {
+    generation: activeWorkspaceGeneration,
+    masterKey: new Uint8Array(activeWorkspaceMasterKey) as WorkspaceMasterKey,
+    workspaceId: activeWorkspaceId
+  };
+};
+
+const readLegacyWorkspaceRaw = (workspaceId: string) =>
+  canUseStorage() ? window.localStorage.getItem(workspaceStorageKey(workspaceId)) : null;
+
+const removeVerifiedLegacyPlaintextCopies = (workspaceId: string) => {
   if (!canUseStorage()) {
     return;
   }
 
-  window.localStorage.setItem(
-    storageKey,
-    JSON.stringify(createPersistedDatabaseSnapshot())
+  window.localStorage.removeItem(workspaceStorageKey(workspaceId));
+  if (window.localStorage.getItem(legacyClaimMarkerStorageKey) === workspaceId) {
+    window.localStorage.removeItem(legacyStorageKey);
+  }
+};
+
+const persistEncryptedDatabaseSnapshot = async (
+  database: PersistedMockDatabase,
+  workspaceId: string,
+  masterKey: WorkspaceMasterKey
+) => {
+  const normalizedDatabase = normalizePersistedDatabase(database);
+  const [workspaceRecord, publicShareRecords] = await Promise.all([
+    encryptWorkspaceRecord({
+      workspaceId,
+      payload: normalizedDatabase,
+      masterKey
+    }),
+    buildEncryptedPublicShareRecords(normalizedDatabase, workspaceId)
+  ]);
+
+  await replaceEncryptedWorkspaceBundle({
+    workspaceRecord,
+    publicShareRecords
+  });
+
+  return normalizedDatabase;
+};
+
+const claimLegacyMockDatabase = (workspaceId: string) => {
+  const targetKey = workspaceStorageKey(workspaceId);
+
+  if (
+    window.localStorage.getItem(legacyClaimMarkerStorageKey) !== null ||
+    window.localStorage.getItem(targetKey) !== null
+  ) {
+    return;
+  }
+
+  const legacyRaw = window.localStorage.getItem(legacyStorageKey);
+
+  if (legacyRaw === null) {
+    return;
+  }
+
+  try {
+    const parsed = JSON.parse(legacyRaw) as unknown;
+
+    if (!isRecord(parsed)) {
+      return;
+    }
+  } catch {
+    return;
+  }
+
+  window.localStorage.setItem(targetKey, legacyRaw);
+
+  try {
+    window.localStorage.setItem(legacyClaimMarkerStorageKey, workspaceId);
+  } catch (error) {
+    window.localStorage.removeItem(targetKey);
+    throw error;
+  }
+};
+
+export function getActiveMockDatabaseWorkspaceId() {
+  return activeWorkspaceId;
+}
+
+export function hasLegacyMockDatabase() {
+  return canUseStorage() && window.localStorage.getItem(legacyStorageKey) !== null;
+}
+
+export async function hasWorkspaceMockDatabase(workspaceId: string) {
+  const normalizedWorkspaceId = normalizeWorkspaceId(workspaceId);
+
+  if (!normalizedWorkspaceId) {
+    return false;
+  }
+
+  return Boolean(
+    (await getEncryptedWorkspaceRecord(normalizedWorkspaceId)) ||
+      readLegacyWorkspaceRaw(normalizedWorkspaceId)
   );
 }
 
-export function createMockDatabaseBackup(): MockDatabaseBackup {
-  hydrateMockDatabase();
+/**
+ * Reads one workspace directly from its persisted browser record without
+ * activating it, hydrating the shared in-memory database, or applying seed
+ * fallbacks. Public capability links use this strict read path so another
+ * signed-in workspace can never influence the result.
+ */
+export async function readMockDatabaseWorkspaceSnapshot(
+  workspaceId: string,
+  masterKey: WorkspaceMasterKey
+): Promise<PersistedMockDatabase | null> {
+  const normalizedWorkspaceId = normalizeWorkspaceId(workspaceId);
+
+  if (!normalizedWorkspaceId) {
+    throw new Error("A browser database workspace is required");
+  }
+
+  const encryptedRecord = await getEncryptedWorkspaceRecord(normalizedWorkspaceId);
+
+  if (encryptedRecord) {
+    const decrypted = await decryptWorkspaceRecord<unknown>(
+      encryptedRecord,
+      masterKey,
+      normalizedWorkspaceId
+    );
+    return normalizePersistedDatabase(decrypted);
+  }
+
+  const raw = readLegacyWorkspaceRaw(normalizedWorkspaceId);
+
+  if (raw === null) {
+    return null;
+  }
+
+  return normalizePersistedDatabase(JSON.parse(raw) as unknown, {
+    allowLegacyProjectShape: true
+  });
+}
+
+export async function captureMockDatabaseWorkspaceStorage(
+  workspaceId: string,
+  options: { discardCorruptBundleForVerifiedRecovery?: boolean } = {}
+): Promise<MockDatabaseWorkspaceStorageSnapshot> {
+  const normalizedWorkspaceId = normalizeWorkspaceId(workspaceId);
+
+  if (!normalizedWorkspaceId || !canUseStorage()) {
+    throw new Error("A browser database workspace is required");
+  }
+
+  let encryptedBundle: EncryptedWorkspaceBundleSnapshot<EncryptedPublicSharePayload>;
+
+  try {
+    encryptedBundle = await captureEncryptedWorkspaceBundle<EncryptedPublicSharePayload>(
+      normalizedWorkspaceId
+    );
+  } catch (error) {
+    if (!options.discardCorruptBundleForVerifiedRecovery) {
+      throw error;
+    }
+
+    await deleteEncryptedWorkspaceBundle(normalizedWorkspaceId);
+    encryptedBundle = await captureEncryptedWorkspaceBundle<EncryptedPublicSharePayload>(
+      normalizedWorkspaceId
+    );
+  }
+
+  return {
+    encryptedBundle,
+    displayCurrency: window.localStorage.getItem(displayCurrencyStorageKey),
+    language: window.localStorage.getItem(languageStorageKey),
+    legacyClaimMarker: window.localStorage.getItem(legacyClaimMarkerStorageKey),
+    legacyRaw: window.localStorage.getItem(legacyStorageKey),
+    workspaceId: normalizedWorkspaceId,
+    workspaceRaw: window.localStorage.getItem(workspaceStorageKey(normalizedWorkspaceId))
+  };
+}
+
+export async function restoreMockDatabaseWorkspaceStorage(
+  snapshot: MockDatabaseWorkspaceStorageSnapshot
+) {
+  if (!canUseStorage()) {
+    throw new Error("Browser storage is unavailable");
+  }
+
+  const restoreValue = (key: string, value: string | null) => {
+    if (value === null) {
+      window.localStorage.removeItem(key);
+    } else {
+      window.localStorage.setItem(key, value);
+    }
+  };
+
+  const currentValues = {
+    displayCurrency: window.localStorage.getItem(displayCurrencyStorageKey),
+    language: window.localStorage.getItem(languageStorageKey),
+    legacyClaimMarker: window.localStorage.getItem(legacyClaimMarkerStorageKey),
+    legacyRaw: window.localStorage.getItem(legacyStorageKey),
+    workspaceRaw: window.localStorage.getItem(workspaceStorageKey(snapshot.workspaceId))
+  };
+
+  try {
+    restoreValue(workspaceStorageKey(snapshot.workspaceId), snapshot.workspaceRaw);
+    restoreValue(legacyClaimMarkerStorageKey, snapshot.legacyClaimMarker);
+    restoreValue(legacyStorageKey, snapshot.legacyRaw);
+    restoreValue(languageStorageKey, snapshot.language);
+    restoreValue(displayCurrencyStorageKey, snapshot.displayCurrency);
+    await restoreEncryptedWorkspaceBundle(snapshot.encryptedBundle);
+  } catch (error) {
+    restoreValue(workspaceStorageKey(snapshot.workspaceId), currentValues.workspaceRaw);
+    restoreValue(legacyClaimMarkerStorageKey, currentValues.legacyClaimMarker);
+    restoreValue(legacyStorageKey, currentValues.legacyRaw);
+    restoreValue(languageStorageKey, currentValues.language);
+    restoreValue(displayCurrencyStorageKey, currentValues.displayCurrency);
+    throw error;
+  }
+}
+
+export async function finalizeLegacyMockDatabaseClaim(workspaceId: string) {
+  if (!canUseStorage()) {
+    return;
+  }
+
+  const normalizedWorkspaceId = normalizeWorkspaceId(workspaceId);
+  const claimedWorkspaceId = window.localStorage.getItem(legacyClaimMarkerStorageKey);
+  const encryptedRecord = normalizedWorkspaceId
+    ? await getEncryptedWorkspaceRecord(normalizedWorkspaceId)
+    : null;
+
+  if (claimedWorkspaceId === normalizedWorkspaceId && encryptedRecord !== null) {
+    // The workspace-scoped copy is now authoritative. Keeping the old global
+    // copy would leave a second, stale plaintext database available forever.
+    window.localStorage.removeItem(legacyStorageKey);
+    window.localStorage.removeItem(workspaceStorageKey(normalizedWorkspaceId));
+  }
+}
+
+export async function activateMockDatabaseWorkspace(
+  workspaceId: string,
+  masterKey: WorkspaceMasterKey,
+  options: {
+    allowCreate?: boolean;
+    allowRecoveryOverwrite?: boolean;
+    claimLegacy?: boolean;
+  } = {}
+) {
+  const normalizedWorkspaceId = normalizeWorkspaceId(workspaceId);
+
+  if (!normalizedWorkspaceId) {
+    throw new Error("A database workspace ID is required");
+  }
+
+  const generation = activeWorkspaceGeneration + 1;
+  activeWorkspaceGeneration = generation;
+  activeWorkspaceMasterKey?.fill(0);
+  activeWorkspaceMasterKey = new Uint8Array(masterKey) as WorkspaceMasterKey;
+  activeWorkspaceId = normalizedWorkspaceId;
+  hydrated = false;
+  hydrationFailed = false;
+  lastPersistedDatabase = null;
+  resetMockDatabase();
+
+  if (!canUseStorage()) {
+    throw new Error("Browser storage is unavailable");
+  }
+
+  if (options.claimLegacy) {
+    claimLegacyMockDatabase(normalizedWorkspaceId);
+  }
+
+  const activationKey = new Uint8Array(masterKey) as WorkspaceMasterKey;
+  const currentHydration = (async () => {
+    try {
+      let encryptedRecord;
+
+      try {
+        encryptedRecord = await getEncryptedWorkspaceRecord(normalizedWorkspaceId);
+      } catch (error) {
+        if (!options.allowRecoveryOverwrite) {
+          throw error;
+        }
+        encryptedRecord = null;
+      }
+
+      if (generation !== activeWorkspaceGeneration) {
+        throw new Error("Workspace activation was superseded");
+      }
+
+      if (encryptedRecord) {
+        try {
+          const decrypted = await decryptWorkspaceRecord<unknown>(
+            encryptedRecord,
+            activationKey,
+            normalizedWorkspaceId
+          );
+          const database = normalizePersistedDatabase(decrypted);
+
+          applyDatabaseSnapshot(database);
+          lastPersistedDatabase = cloneDatabaseSnapshot(database);
+          hydrated = true;
+          removeVerifiedLegacyPlaintextCopies(normalizedWorkspaceId);
+          return;
+        } catch (error) {
+          if (!options.allowRecoveryOverwrite) {
+            throw error;
+          }
+        }
+      }
+
+      const legacyRaw = readLegacyWorkspaceRaw(normalizedWorkspaceId);
+
+      if (legacyRaw !== null) {
+        const database = normalizePersistedDatabase(JSON.parse(legacyRaw) as unknown, {
+          allowLegacyProjectShape: true
+        });
+
+        if (generation !== activeWorkspaceGeneration) {
+          throw new Error("Workspace activation was superseded");
+        }
+
+        await persistEncryptedDatabaseSnapshot(database, normalizedWorkspaceId, activationKey);
+        const verificationRecord = await getEncryptedWorkspaceRecord(normalizedWorkspaceId);
+
+        if (!verificationRecord) {
+          throw new Error("The encrypted IndexedDB migration could not be verified");
+        }
+
+        const verifiedDatabase = normalizePersistedDatabase(
+          await decryptWorkspaceRecord<unknown>(
+            verificationRecord,
+            activationKey,
+            normalizedWorkspaceId
+          )
+        );
+
+        if (generation !== activeWorkspaceGeneration) {
+          throw new Error("Workspace activation was superseded");
+        }
+
+        applyDatabaseSnapshot(verifiedDatabase);
+        lastPersistedDatabase = cloneDatabaseSnapshot(verifiedDatabase);
+        hydrated = true;
+        removeVerifiedLegacyPlaintextCopies(normalizedWorkspaceId);
+        return;
+      }
+
+      if (!options.allowCreate && !options.allowRecoveryOverwrite) {
+        throw new Error("The encrypted workspace database is missing");
+      }
+
+      const seedDatabase = normalizePersistedDatabase(createMockDatabase());
+      applyDatabaseSnapshot(seedDatabase);
+      lastPersistedDatabase = cloneDatabaseSnapshot(seedDatabase);
+      hydrated = true;
+    } catch (error) {
+      if (generation === activeWorkspaceGeneration) {
+        hydrationFailed = true;
+      }
+      throw error;
+    } finally {
+      activationKey.fill(0);
+    }
+  })();
+
+  hydrationPromise = currentHydration;
+
+  try {
+    await currentHydration;
+  } finally {
+    if (hydrationPromise === currentHydration) {
+      hydrationPromise = null;
+    }
+  }
+}
+
+export function deactivateMockDatabaseWorkspace() {
+  activeWorkspaceGeneration += 1;
+  activeWorkspaceMasterKey?.fill(0);
+  activeWorkspaceMasterKey = null;
+  activeWorkspaceId = null;
+  hydrated = false;
+  hydrationFailed = false;
+  hydrationPromise = null;
+  lastPersistedDatabase = null;
+  resetMockDatabase();
+}
+
+export async function hydrateMockDatabase() {
+  if (hydrationPromise) {
+    await hydrationPromise;
+  }
+
+  if (!activeWorkspaceId || !activeWorkspaceMasterKey) {
+    throw new Error("No encrypted database workspace is active");
+  }
+
+  if (!hydrated || hydrationFailed) {
+    throw new Error("The active encrypted workspace database is unavailable");
+  }
+}
+
+export async function persistMockDatabase() {
+  await hydrateMockDatabase();
+
+  const database = normalizePersistedDatabase(createPersistedDatabaseSnapshot());
+  const identity = getRequiredActiveWorkspace();
+  const failureEpoch = persistenceFailureEpoch;
+  const operation = persistenceQueue.then(async () => {
+    try {
+      if (
+        identity.generation !== activeWorkspaceGeneration ||
+        failureEpoch !== persistenceFailureEpoch
+      ) {
+        throw new Error("The workspace changed before its encrypted save completed");
+      }
+
+      try {
+        const persistedDatabase = await persistEncryptedDatabaseSnapshot(
+          database,
+          identity.workspaceId,
+          identity.masterKey
+        );
+
+        if (identity.generation === activeWorkspaceGeneration) {
+          lastPersistedDatabase = cloneDatabaseSnapshot(persistedDatabase);
+          removeVerifiedLegacyPlaintextCopies(identity.workspaceId);
+        }
+      } catch (error) {
+        if (identity.generation === activeWorkspaceGeneration) {
+          persistenceFailureEpoch += 1;
+          if (lastPersistedDatabase) {
+            applyDatabaseSnapshot(lastPersistedDatabase);
+          }
+        }
+        throw error;
+      }
+    } finally {
+      identity.masterKey.fill(0);
+    }
+  });
+
+  persistenceQueue = operation.catch(() => undefined);
+  await operation;
+}
+
+export async function createMockDatabaseBackup(): Promise<MockDatabaseBackup> {
+  if (!canUseStorage()) {
+    throw new Error("Database backup creation requires browser storage");
+  }
+
+  await hydrateMockDatabase();
+
+  if (hydrationFailed) {
+    throw new Error("The active workspace database is corrupt and cannot be exported");
+  }
 
   return structuredClone({
     schema: mockDatabaseBackupSchema,
@@ -362,35 +949,75 @@ export function createMockDatabaseBackup(): MockDatabaseBackup {
   } satisfies MockDatabaseBackup);
 }
 
-export function restoreMockDatabaseBackup(value: unknown) {
+export async function restoreMockDatabaseBackup(value: unknown) {
   if (!canUseStorage()) {
     throw new Error("Database backup restore requires browser storage");
   }
 
+  await hydrateMockDatabase();
+  const identity = getRequiredActiveWorkspace();
+  identity.masterKey.fill(0);
+
   const backup = validateMockDatabaseBackup(value);
-  const restoredDatabase = structuredClone({
+  const restoredDatabase = normalizePersistedDatabase({
     ...backup.database,
-    groups: backup.database.groups.map((group) => normalizePersistedGroup(group))
+    groups: backup.database.groups.map((group) => normalizePersistedGroup(group)),
+    projects: backup.database.projects.map((project, index) =>
+      normalizePersistedProject(project, index, backup.database.tools)
+    ),
+    shareLinks: backup.database.shareLinks.map((link) => ({
+      ...link,
+      displayCurrency: backup.preferences?.displayCurrency ?? link.displayCurrency ?? "CNY"
+    }))
   } satisfies PersistedMockDatabase);
-  const serializedDatabase = JSON.stringify(restoredDatabase);
+  const previousDatabase = cloneDatabaseSnapshot(
+    lastPersistedDatabase ?? normalizePersistedDatabase(createPersistedDatabaseSnapshot())
+  );
+  const previousBundle = await captureEncryptedWorkspaceBundle<EncryptedPublicSharePayload>(
+    identity.workspaceId
+  );
+  const previousLanguage = window.localStorage.getItem(languageStorageKey);
+  const previousDisplayCurrency = window.localStorage.getItem(displayCurrencyStorageKey);
 
-  window.localStorage.setItem(storageKey, serializedDatabase);
+  const restoreStoredValue = (key: string, previousValue: string | null) => {
+    if (previousValue === null) {
+      window.localStorage.removeItem(key);
+    } else {
+      window.localStorage.setItem(key, previousValue);
+    }
+  };
 
-  if (backup.preferences?.language) {
-    window.localStorage.setItem(languageStorageKey, backup.preferences.language);
+  let encryptedWorkspacePersisted = false;
+
+  try {
+    applyDatabaseSnapshot(restoredDatabase);
+    await persistMockDatabase();
+    encryptedWorkspacePersisted = true;
+
+    if (backup.preferences?.language) {
+      window.localStorage.setItem(languageStorageKey, backup.preferences.language);
+    }
+
+    if (backup.preferences?.displayCurrency) {
+      window.localStorage.setItem(displayCurrencyStorageKey, backup.preferences.displayCurrency);
+    }
+  } catch (error) {
+    if (encryptedWorkspacePersisted) {
+      try {
+        await restoreEncryptedWorkspaceBundle(previousBundle);
+        restoreStoredValue(languageStorageKey, previousLanguage);
+        restoreStoredValue(displayCurrencyStorageKey, previousDisplayCurrency);
+        applyDatabaseSnapshot(previousDatabase);
+        lastPersistedDatabase = cloneDatabaseSnapshot(previousDatabase);
+      } catch {
+        // The caller also holds an outer workspace snapshot and will make one
+        // more rollback attempt before reporting the restore failure.
+      }
+    }
+
+    throw error;
   }
 
-  if (backup.preferences?.displayCurrency) {
-    window.localStorage.setItem(displayCurrencyStorageKey, backup.preferences.displayCurrency);
-  }
-
-  mockDatabase.users = restoredDatabase.users;
-  mockDatabase.companies = restoredDatabase.companies;
-  mockDatabase.groups = restoredDatabase.groups;
-  mockDatabase.projects = restoredDatabase.projects;
-  mockDatabase.people = restoredDatabase.people;
-  mockDatabase.tools = restoredDatabase.tools;
-  mockDatabase.costLibrary = restoredDatabase.costLibrary;
-  mockDatabase.shareLinks = restoredDatabase.shareLinks;
   hydrated = true;
+  hydrationFailed = false;
 }

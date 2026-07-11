@@ -7,6 +7,7 @@ import {
   AlertTriangle,
   ArrowRight,
   Building2,
+  Calculator,
   CalendarDays,
   ChartPie,
   CheckCircle2,
@@ -19,6 +20,7 @@ import {
 } from "lucide-react";
 import { ImageCard } from "@/components/cards/image-card";
 import { PixelHeroScene } from "@/components/auth/pixel-hero-scene";
+import { useCostDisplayCurrency } from "@/components/costs/use-cost-display-currency";
 import { AppShell } from "@/components/layout/app-shell";
 import { ProjectReleaseBadges } from "@/components/projects/project-release-badges";
 import { useI18n } from "@/components/providers/app-providers";
@@ -35,9 +37,10 @@ import {
   statusKeys,
   translateDomainLabel
 } from "@/lib/i18n/domain-labels";
-import { languageLocales, type TranslationKey } from "@/lib/i18n/translations";
+import type { TranslationKey } from "@/lib/i18n/translations";
 import type { Company, DashboardOverview, DashboardScope, Project, ProjectGroup } from "@/lib/types";
 import { cn } from "@/lib/utils/cn";
+import { fixedNumericLocale } from "@/lib/utils/money";
 
 const spring = {
   type: "spring",
@@ -82,6 +85,11 @@ type DashboardData = {
 
 export function VisualDashboardShell() {
   const { language, t } = useI18n();
+  const {
+    displayCurrency,
+    exchangeRateSnapshot,
+    isReady: isCurrencyReady
+  } = useCostDisplayCurrency();
   const [data, setData] = useState<DashboardData | null>(null);
   const [overview, setOverview] = useState<DashboardOverview | null>(null);
   const [scope, setScope] = useState<DashboardScope>({ type: "all" });
@@ -111,10 +119,17 @@ export function VisualDashboardShell() {
   const scopeId = scope.type === "all" ? "" : scope.id;
 
   useEffect(() => {
+    if (!isCurrencyReady) {
+      return;
+    }
+
     let isMounted = true;
 
     async function loadDashboardOverview() {
-      const nextOverview = await projectsApi.getDashboardOverview(scope);
+      const nextOverview = await projectsApi.getDashboardOverview(scope, {
+        currency: displayCurrency,
+        snapshot: exchangeRateSnapshot
+      });
 
       if (isMounted) {
         setOverview(nextOverview);
@@ -126,7 +141,7 @@ export function VisualDashboardShell() {
     return () => {
       isMounted = false;
     };
-  }, [scope, scopeId]);
+  }, [displayCurrency, exchangeRateSnapshot, isCurrencyReady, scope, scopeId]);
 
   const groupById = useMemo(
     () => new Map((data?.groups ?? []).map((group) => [group.id, group])),
@@ -159,16 +174,17 @@ export function VisualDashboardShell() {
 
     return String(value).padStart(2, "0");
   };
+  const overviewCurrency = overview?.currency ?? displayCurrency;
   const currencyFormatter = useMemo(
     () =>
-      new Intl.NumberFormat(languageLocales[language], {
+      new Intl.NumberFormat(fixedNumericLocale, {
         compactDisplay: "short",
-        currency: "CNY",
+        currency: overviewCurrency,
         maximumFractionDigits: 1,
         notation: "compact",
         style: "currency"
       }),
-    [language]
+    [overviewCurrency]
   );
   const formatCurrency = (value: number) => currencyFormatter.format(value);
   const linkedToolCount = new Set(spotlightProjects.flatMap((project) => project.tools.map((tool) => tool.id))).size;
@@ -510,12 +526,12 @@ export function VisualDashboardShell() {
               <div className="rounded-studio bg-ink p-4 text-white shadow-soft">
                 <div className="mb-4 flex items-center justify-between gap-3">
                   <span className="grid size-10 place-items-center rounded-full bg-aqua text-ink">
-                    <CircleDollarSign size={18} />
+                    <Calculator size={18} />
                   </span>
-                  <span className="text-xl font-black">{formatCurrency(overview?.futureEstimatedCost ?? 0)}</span>
+                  <span className="text-xl font-black">{formatCurrency(overview?.budgetCostTotal ?? 0)}</span>
                 </div>
-                <h3 className="text-sm font-black">{t("futureEstimatedCost")}</h3>
-                <p className="mt-2 text-xs font-semibold leading-5 text-white/62">{t("costOverview")}</p>
+                <h3 className="text-sm font-black">{t("projectBudgetTotal")}</h3>
+                <p className="mt-2 text-xs font-semibold leading-5 text-white/62">{t("projectBudgetPlannerBody")}</p>
               </div>
 
               <div className="rounded-studio bg-coral p-4 text-white shadow-soft">

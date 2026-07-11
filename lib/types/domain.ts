@@ -92,6 +92,68 @@ export type Phase = {
   deliverables: Deliverable[];
 };
 
+export type ProjectBudgetPersonnelLine = {
+  id: string;
+  personId?: string;
+  roleLevel: string;
+  headcount: number;
+  hourlyRate: number;
+  currency: MoneyCurrency;
+  days: number;
+};
+
+export type ProjectBudgetTravel = {
+  unitPrice: number;
+  currency: MoneyCurrency;
+  count: number;
+};
+
+export type ProjectBudgetDirectExpense = {
+  amount: number;
+  currency: MoneyCurrency;
+};
+
+export type ProjectBudgetDailyExpenseLine = ProjectBudgetDirectExpense & {
+  id: string;
+  name: string;
+};
+
+export type ProjectBudgetExtraCostLine = ProjectBudgetDirectExpense & {
+  id: string;
+  costTemplateId?: string;
+  name: string;
+  kind: "outsourcing" | "extra";
+};
+
+export type ProjectBudgetSoftwareCostLine = {
+  id: string;
+  toolId?: string;
+  name: string;
+  amount: number;
+  currency: MoneyCurrency;
+  billingCycle: "monthly" | "yearly";
+  periods: number;
+};
+
+export type ProjectPhaseBudget = {
+  phaseId: string;
+  personnel: ProjectBudgetPersonnelLine[];
+  travel?: ProjectBudgetTravel;
+  /** Itemized daily and miscellaneous expenses. */
+  dailyExpenseLines: ProjectBudgetDailyExpenseLine[];
+  /** @deprecated Kept only so older backup files can be migrated safely. */
+  dailyExpenses?: ProjectBudgetDirectExpense;
+  extraCosts: ProjectBudgetExtraCostLine[];
+  /** Frozen subscription rows imported from the library or entered manually. */
+  softwareCosts: ProjectBudgetSoftwareCostLine[];
+};
+
+export type ProjectBudget = {
+  phases: ProjectPhaseBudget[];
+  contingencyPercent: number;
+  taxPercent: number;
+};
+
 export type TimelineCustomRow = {
   id: string;
   label: string;
@@ -183,6 +245,7 @@ export type ShareLink = {
   token: string;
   expiresAt?: string;
   allowCostPreview: boolean;
+  displayCurrency?: MoneyCurrency;
   createdAt: string;
 };
 
@@ -201,11 +264,14 @@ export type Project = {
   startDate: string;
   endDate: string;
   timelineTitle?: string;
+  /** False only for newly-created projects until the timeline is explicitly saved. */
+  timelineConfigured?: boolean;
   timelineRows?: TimelineCustomRow[];
   currentPhaseId: string;
   progress: number;
   status: ProjectStatus;
   phases: Phase[];
+  budget?: ProjectBudget;
   costs: CostItem[];
   payments: PaymentItem[];
   materials: Material[];
@@ -216,24 +282,29 @@ export type Project = {
 
 export type CompanySummary = {
   company: Company;
+  currency: MoneyCurrency;
   totalProjectCount: number;
   activeProjectCount: number;
   completedProjectCount: number;
   averageProgress: number;
-  privateCostTotal: number;
+  actualCostTotal: number;
+  budgetCostTotal: number;
 };
 
 export type ProjectGroupSummary = {
   group: ProjectGroup;
+  currency: MoneyCurrency;
   totalProjectCount: number;
   activeProjectCount: number;
   completedProjectCount: number;
   averageProgress: number;
-  privateCostTotal: number;
+  actualCostTotal: number;
+  budgetCostTotal: number;
 };
 
 export type PersonProjectParticipation = {
   personId: string;
+  currency: MoneyCurrency;
   totalProjectCount: number;
   averageProgress: number;
   actualCostTotal: number;
@@ -252,6 +323,7 @@ export type PersonProjectParticipation = {
 };
 
 export type DashboardOverview = {
+  currency: MoneyCurrency;
   totalProjectCount: number;
   activeProjectCount: number;
   completedProjectCount: number;
@@ -261,7 +333,7 @@ export type DashboardOverview = {
   upcomingDeliverableCount: number;
   overdueTaskCount: number;
   actualCostSoFar: number;
-  futureEstimatedCost: number;
+  budgetCostTotal: number;
   stageDistribution: Array<{
     name: string;
     value: number;

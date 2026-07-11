@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, ExternalLink, Share2, ShieldCheck } from "lucide-react";
 import { AppShell } from "@/components/layout/app-shell";
+import { useCostDisplayCurrency } from "@/components/costs/use-cost-display-currency";
 import { useI18n } from "@/components/providers/app-providers";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -39,6 +40,7 @@ const settingLabelKeys = {
 
 export function ProjectShareSettingsPage({ projectId }: { projectId: string }) {
   const { t } = useI18n();
+  const { displayCurrency } = useCostDisplayCurrency();
   const [project, setProject] = useState<Project | null>(null);
   const [settings, setSettings] = useState<ShareSettings | null>(null);
   const [origin, setOrigin] = useState("");
@@ -75,13 +77,17 @@ export function ProjectShareSettingsPage({ projectId }: { projectId: string }) {
     }
 
     if (!settings.token) {
-      await shareApi.createShareLink(projectId, settings.allowCostPreview);
+      await shareApi.createShareLink(projectId, settings.allowCostPreview, displayCurrency);
     }
 
-    await shareApi.updateShareSettings(projectId, {
-      ...settings,
-      isEnabled: true
-    });
+    await shareApi.updateShareSettings(
+      projectId,
+      {
+        ...settings,
+        isEnabled: true
+      },
+      displayCurrency
+    );
     await loadProject();
   };
 

@@ -3,20 +3,27 @@
 import { useEffect, useMemo, useState } from "react";
 import { Banknote, ChevronDown, ChevronUp, CircleDollarSign, Plus, ReceiptText, Save, Trash2, TrendingUp } from "lucide-react";
 import { projectsApi } from "@/lib/api";
-import { useI18n } from "@/components/providers/app-providers";
 import type { ProjectPaymentInput } from "@/lib/api/projects";
-import { getProjectSubscriptionCost } from "@/lib/mock";
+import { getProjectActualCost, getProjectBudgetCost } from "@/lib/mock";
 import type { CostItem, PaymentItem, Project } from "@/lib/types";
-import { languageLocales, type TranslationKey } from "@/lib/i18n/translations";
-import { formatCurrency, toCny } from "@/lib/utils/money";
+import type { TranslationKey } from "@/lib/i18n/translations";
+import {
+  sumMoney,
+  type ExchangeRateSnapshot,
+  type MoneyCurrency
+} from "@/lib/utils/money";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { DeleteConfirmDialog } from "@/components/ui/delete-confirm-dialog";
 import { ProgressBar } from "@/components/ui/progress-bar";
 import { SectionHeader } from "@/components/ui/section-header";
+import { Select } from "@/components/ui/select";
 import { cn } from "@/lib/utils/cn";
 
 type ProjectPaymentSettingsProps = {
+  currency: MoneyCurrency;
+  exchangeRateSnapshot: ExchangeRateSnapshot;
+  formatAmount: (value: number, currency?: MoneyCurrency) => string;
   project: Project;
   t: (key: TranslationKey) => string;
   onSaved: (project: Project) => void;
@@ -56,17 +63,25 @@ const createPaymentDraft = (project: Project, type: PaymentItem["type"], title: 
   notes: ""
 });
 
-const sumPayments = (payments: ProjectPaymentInput[], type: PaymentItem["type"]) =>
-  payments
-    .filter((payment) => payment.type === type)
-    .reduce((sum, payment) => sum + toCny(payment.amount || 0, payment.currency), 0);
+const sumPayments = (
+  payments: ProjectPaymentInput[],
+  type: PaymentItem["type"],
+  currency: MoneyCurrency,
+  snapshot: ExchangeRateSnapshot
+) =>
+  sumMoney(
+    payments
+      .filter((payment) => payment.type === type)
+      .map((payment) => ({ amount: payment.amount || 0, currency: payment.currency })),
+    currency,
+    snapshot
+  );
 
-const sumCosts = (project: Project, isActual: boolean) =>
-  project.costs
-    .filter((cost) => cost.isActual === isActual)
-    .reduce((sum, cost) => sum + toCny(cost.amount, cost.currency), 0);
-
-const getActualProjectCost = (project: Project) => sumCosts(project, true) + getProjectSubscriptionCost(project);
+const getActualProjectCost = (
+  project: Project,
+  currency: MoneyCurrency,
+  snapshot: ExchangeRateSnapshot
+) => getProjectActualCost(project, currency, snapshot);
 
 const formatProfitRate = (profit: number, revenueBase: number) => {
   if (revenueBase <= 0) {
@@ -78,8 +93,14 @@ const formatProfitRate = (profit: number, revenueBase: number) => {
   return `${percent}%`;
 };
 
-export function ProjectPaymentSettings({ project, t, onSaved }: ProjectPaymentSettingsProps) {
-  const { language } = useI18n();
+export function ProjectPaymentSettings({
+  currency,
+  exchangeRateSnapshot,
+  formatAmount,
+  project,
+  t,
+  onSaved
+}: ProjectPaymentSettingsProps) {
   const [payments, setPayments] = useState<PaymentDraft[]>(() => (project.payments ?? []).map(paymentToDraft));
   const [paymentDetailsOpen, setPaymentDetailsOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -91,12 +112,12 @@ export function ProjectPaymentSettings({ project, t, onSaved }: ProjectPaymentSe
   }, [project]);
 
   const summary = useMemo(() => {
-    const plannedReceivable = sumPayments(payments, "planned");
-    const receivedRevenue = sumPayments(payments, "received");
-    const actualCost = getActualProjectCost(project);
-    const futureCost = sumCosts(project, false);
+    const plannedReceivable = sumPayments(payments, "planned", currency, exchangeRateSnapshot);
+    const receivedRevenue = sumPayments(payments, "received", currency, exchangeRateSnapshot);
+    const actualCost = getActualProjectCost(project, currency, exchangeRateSnapshot);
+    const budgetCost = getProjectBudgetCost(project, currency, exchangeRateSnapshot);
     const actualProfit = receivedRevenue - actualCost;
-    const projectedProfit = plannedReceivable - actualCost - futureCost;
+    const projectedProfit = plannedReceivable - budgetCost;
     const actualProfitRate = formatProfitRate(actualProfit, receivedRevenue);
     const projectedProfitRate = formatProfitRate(projectedProfit, plannedReceivable);
     const collectionProgress = plannedReceivable > 0 ? Math.min(100, Math.round((receivedRevenue / plannedReceivable) * 100)) : 0;
@@ -105,14 +126,14 @@ export function ProjectPaymentSettings({ project, t, onSaved }: ProjectPaymentSe
       actualCost,
       actualProfit,
       actualProfitRate,
+      budgetCost,
       collectionProgress,
-      futureCost,
       plannedReceivable,
       projectedProfit,
       projectedProfitRate,
       receivedRevenue
     };
-  }, [payments, project]);
+  }, [currency, exchangeRateSnapshot, payments, project]);
 
   const updatePayment = (localId: string, patch: Partial<PaymentDraft>) => {
     setPayments((current) =>
@@ -164,7 +185,7 @@ export function ProjectPaymentSettings({ project, t, onSaved }: ProjectPaymentSe
 
   const profitTone = summary.actualProfit >= 0 ? "text-ink" : "text-coral";
   const projectedTone = summary.projectedProfit >= 0 ? "text-ink" : "text-coral";
-  const formatCny = (value: number) => formatCurrency(value, "CNY", languageLocales[language]);
+  const formatTotal = (value: number) => formatAmount(value, currency);
 
   return (
     <section className="mt-6">
@@ -201,13 +222,13 @@ export function ProjectPaymentSettings({ project, t, onSaved }: ProjectPaymentSe
 
         <div className="mt-5 grid min-w-0 gap-3 max-[560px]:mt-4 max-[560px]:gap-2 md:grid-cols-2 xl:grid-cols-5">
           {[
-            { label: t("plannedReceivable"), value: formatCny(summary.plannedReceivable), icon: ReceiptText, tone: "bg-limepop" },
-            { label: t("receivedPayment"), value: formatCny(summary.receivedRevenue), icon: Banknote, tone: "bg-aqua" },
-            { label: t("actualCostSoFar"), value: formatCny(summary.actualCost), icon: CircleDollarSign, tone: "bg-cloud" },
+            { label: t("plannedReceivable"), value: formatTotal(summary.plannedReceivable), icon: ReceiptText, tone: "bg-limepop" },
+            { label: t("receivedPayment"), value: formatTotal(summary.receivedRevenue), icon: Banknote, tone: "bg-aqua" },
+            { label: t("actualCostSoFar"), value: formatTotal(summary.actualCost), icon: CircleDollarSign, tone: "bg-cloud" },
             {
               label: t("currentProfit"),
               helper: t("currentProfitFormula"),
-              value: formatCny(summary.actualProfit),
+              value: formatTotal(summary.actualProfit),
               icon: TrendingUp,
               tone: "bg-white",
               valueClass: profitTone,
@@ -216,8 +237,8 @@ export function ProjectPaymentSettings({ project, t, onSaved }: ProjectPaymentSe
             },
             {
               label: t("projectedProfit"),
-              helper: t("projectedProfitFormula"),
-              value: formatCny(summary.projectedProfit),
+              helper: t("projectedProfitBudgetFormula"),
+              value: formatTotal(summary.projectedProfit),
               icon: TrendingUp,
               tone: "bg-white",
               valueClass: projectedTone,
@@ -258,7 +279,7 @@ export function ProjectPaymentSettings({ project, t, onSaved }: ProjectPaymentSe
           </div>
           <ProgressBar value={summary.collectionProgress} className="bg-white/80" barClassName="bg-ink" />
           <p className="mt-3 text-sm font-bold leading-6 text-ink/65 [overflow-wrap:anywhere] max-[560px]:text-xs max-[560px]:leading-5 max-[360px]:mt-2 max-[360px]:text-[10px] max-[360px]:leading-4">
-            {t("paymentStatusBody")}
+            {t("paymentStatusBudgetBody")}
           </p>
         </div>
 
@@ -294,14 +315,14 @@ export function ProjectPaymentSettings({ project, t, onSaved }: ProjectPaymentSe
                     </label>
                     <label className="grid min-w-0 gap-1">
                       <span className={labelClass}>{t("type")}</span>
-                      <select
+                      <Select
                         value={payment.type}
                         onChange={(event) => updatePayment(payment.localId, { type: event.target.value as PaymentItem["type"] })}
                         className={inputClass}
                       >
                         <option value="planned">{t("plannedReceivable")}</option>
                         <option value="received">{t("receivedPayment")}</option>
-                      </select>
+                      </Select>
                     </label>
                     <label className="grid min-w-0 gap-1">
                       <span className={labelClass}>{t("amount")}</span>
@@ -315,7 +336,7 @@ export function ProjectPaymentSettings({ project, t, onSaved }: ProjectPaymentSe
                     </label>
                     <label className="grid min-w-0 gap-1">
                       <span className={labelClass}>{t("currency")}</span>
-                      <select
+                      <Select
                         value={payment.currency}
                         onChange={(event) => updatePayment(payment.localId, { currency: event.target.value as CostItem["currency"] })}
                         className={inputClass}
@@ -323,7 +344,7 @@ export function ProjectPaymentSettings({ project, t, onSaved }: ProjectPaymentSe
                         {currencies.map((currency) => (
                           <option key={currency} value={currency}>{currency}</option>
                         ))}
-                      </select>
+                      </Select>
                     </label>
                     <div className="grid min-w-0 gap-3 max-[560px]:gap-2 sm:grid-cols-2 xl:grid-cols-1">
                       <label className="grid min-w-0 gap-1">

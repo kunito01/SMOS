@@ -5,6 +5,7 @@ import { ImagePlus, Save, Upload, X } from "lucide-react";
 import { useI18n } from "@/components/providers/app-providers";
 import { Button } from "@/components/ui/button";
 import { ModalPortal } from "@/components/ui/modal-portal";
+import { Select } from "@/components/ui/select";
 import { projectsApi } from "@/lib/api";
 import type { ProjectBasicsInput } from "@/lib/api/projects";
 import {
@@ -162,7 +163,7 @@ export function ProjectBasicsEditModal({
 
               <label className="grid gap-2">
                 <span className={fieldLabelClass}>{t("chooseGroup")}</span>
-                <select
+                <Select
                   className={inputClass}
                   value={groupId}
                   onChange={(event) => setGroupId(event.target.value)}
@@ -173,7 +174,7 @@ export function ProjectBasicsEditModal({
                       {getProjectGroupDisplayName(group, language, t)}
                     </option>
                   ))}
-                </select>
+                </Select>
               </label>
 
               <label className="grid gap-2">

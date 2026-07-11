@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { ModalPortal } from "@/components/ui/modal-portal";
 
 type DeleteConfirmDialogProps = {
+  busy?: boolean;
   cancelLabel: string;
   confirmLabel: string;
   description: string;
@@ -17,6 +18,7 @@ type DeleteConfirmDialogProps = {
 };
 
 export function DeleteConfirmDialog({
+  busy = false,
   cancelLabel,
   confirmLabel,
   description,
@@ -38,6 +40,7 @@ export function DeleteConfirmDialog({
       <div
         role="alertdialog"
         aria-modal="true"
+        aria-busy={busy}
         aria-labelledby="delete-confirm-title"
         aria-describedby="delete-confirm-description"
         className="w-full max-w-lg rounded-studio-lg bg-white p-6 text-ink shadow-lift"
@@ -49,8 +52,9 @@ export function DeleteConfirmDialog({
           <button
             type="button"
             onClick={onCancel}
+            disabled={busy}
             aria-label={t("close")}
-            className="grid size-10 place-items-center rounded-full bg-cloud text-muted transition hover:bg-ink hover:text-white"
+            className="grid size-10 place-items-center rounded-full bg-cloud text-muted transition hover:bg-ink hover:text-white disabled:cursor-not-allowed disabled:opacity-45"
           >
             <X size={19} />
           </button>
@@ -65,10 +69,16 @@ export function DeleteConfirmDialog({
           {warning}
         </div>
         <div className="mt-6 grid gap-3 sm:grid-cols-2">
-          <Button variant="ghost" size="lg" onClick={onCancel}>
+          <Button variant="ghost" size="lg" onClick={onCancel} disabled={busy}>
             {cancelLabel}
           </Button>
-          <Button variant="primary" size="lg" onClick={onConfirm} className="bg-coral text-white">
+          <Button
+            variant="primary"
+            size="lg"
+            onClick={onConfirm}
+            disabled={busy}
+            className="bg-coral text-white"
+          >
             {confirmLabel}
           </Button>
         </div>

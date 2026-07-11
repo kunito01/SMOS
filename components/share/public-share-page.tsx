@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { FileStack, GitBranch, Sparkles, Wrench } from "lucide-react";
 import { ImageCard } from "@/components/cards/image-card";
+import { useCostDisplayCurrency } from "@/components/costs/use-cost-display-currency";
 import { AppShell } from "@/components/layout/app-shell";
 import { AvatarStack } from "@/components/ui/avatar-stack";
 import { Card } from "@/components/ui/card";
@@ -14,8 +15,9 @@ import { ProgressRing } from "@/components/ui/progress-ring";
 import { SectionHeader } from "@/components/ui/section-header";
 import { useI18n } from "@/components/providers/app-providers";
 import { shareApi } from "@/lib/api";
-import { createProjectSubscriptionCostItems } from "@/lib/mock";
+import { createProjectSubscriptionCostItems, getProjectBudgetCalculation } from "@/lib/mock";
 import {
+  budgetCostCategoryKeys,
   costCategoryKeys,
   deliverableDescriptionKey,
   deliverableTitleKeys,
@@ -34,9 +36,8 @@ import {
   versionSummaryKeys
 } from "@/lib/i18n/domain-labels";
 import { formatLocalizedDate } from "@/lib/i18n/formatters";
-import { languageLocales } from "@/lib/i18n/translations";
 import type { Project, ShareLink } from "@/lib/types";
-import { formatCurrency, toCny } from "@/lib/utils/money";
+import { sumMoney } from "@/lib/utils/money";
 
 type SharedProjectData = {
   project: Project;
@@ -58,8 +59,13 @@ const versionStatusTone = {
 
 export function PublicSharePage({ token }: { token: string }) {
   const { language, t } = useI18n();
+  const {
+    exchangeRateSnapshot,
+    formatAmount
+  } = useCostDisplayCurrency();
   const [data, setData] = useState<SharedProjectData | null>(null);
   const [failed, setFailed] = useState(false);
+  const displayCurrency = data?.shareLink.displayCurrency ?? "CNY";
 
   useEffect(() => {
     let isMounted = true;
@@ -88,30 +94,52 @@ export function PublicSharePage({ token }: { token: string }) {
   const actualCost = useMemo(
     () =>
       data?.project
-        ? [...data.project.costs, ...createProjectSubscriptionCostItems(data.project)]
-            .filter((cost) => cost.isActual)
-            .reduce((sum, cost) => sum + toCny(cost.amount, cost.currency), 0)
+        ? sumMoney(
+            [...data.project.costs, ...createProjectSubscriptionCostItems(data.project)].filter(
+              (cost) => cost.isActual
+            ),
+            displayCurrency,
+            exchangeRateSnapshot
+          )
         : 0,
-    [data?.project]
+    [data?.project, displayCurrency, exchangeRateSnapshot]
   );
-  const estimatedCost = useMemo(
-    () => data?.project.costs.filter((cost) => !cost.isActual).reduce((sum, cost) => sum + toCny(cost.amount, cost.currency), 0) ?? 0,
-    [data?.project.costs]
+  const budgetCalculation = useMemo(
+    () => data?.project
+      ? getProjectBudgetCalculation(data.project, displayCurrency, exchangeRateSnapshot)
+      : null,
+    [data?.project, displayCurrency, exchangeRateSnapshot]
   );
   const categoryPreview = useMemo(() => {
+    if (budgetCalculation?.source === "structured") {
+      return {
+        ...(budgetCalculation.byCategory ?? {}),
+        ...(budgetCalculation.contingency ? { contingency: budgetCalculation.contingency } : {}),
+        ...(budgetCalculation.tax ? { tax: budgetCalculation.tax } : {})
+      };
+    }
+
     const costs = data?.project ? [...data.project.costs, ...createProjectSubscriptionCostItems(data.project)] : [];
 
-    return costs.reduce<Record<string, number>>((acc, cost) => {
-      acc[cost.category] = (acc[cost.category] ?? 0) + toCny(cost.amount, cost.currency);
-      return acc;
-    }, {});
-  }, [data?.project]);
+    return [...new Set(costs.map((cost) => cost.category))].reduce<Record<string, number>>(
+      (totals, category) => {
+        totals[category] = sumMoney(
+          costs.filter((cost) => cost.category === category),
+          displayCurrency,
+          exchangeRateSnapshot
+        );
+        return totals;
+      },
+      {}
+    );
+  }, [budgetCalculation, data?.project, displayCurrency, exchangeRateSnapshot]);
+  const maxBudgetCategory = Math.max(1, ...Object.values(categoryPreview));
   const peopleById = useMemo(() => {
     return new Map((data?.project.people ?? []).map((person) => [person.id, person]));
   }, [data?.project.people]);
 
   const personName = (personId: string) => peopleById.get(personId)?.name ?? t("ownerProduction");
-  const formatCost = (value: number) => formatCurrency(value, "CNY", languageLocales[language]);
+  const formatCost = (value: number) => formatAmount(value, displayCurrency);
 
   if (failed) {
     return (
@@ -231,16 +259,16 @@ export function PublicSharePage({ token }: { token: string }) {
                         <p className="mt-1 text-2xl font-black">{formatCost(actualCost)}</p>
                       </div>
                       <div className="rounded-studio bg-white/75 p-4">
-                        <p className="text-sm font-bold text-muted">{t("futureEstimatedCost")}</p>
-                        <p className="mt-1 text-2xl font-black">{formatCost(estimatedCost)}</p>
+                        <p className="text-sm font-bold text-muted">{t("projectBudgetCost")}</p>
+                        <p className="mt-1 text-2xl font-black">{formatCost(budgetCalculation?.total ?? 0)}</p>
                       </div>
                       {Object.entries(categoryPreview).slice(0, 3).map(([category, value]) => (
                         <div key={category}>
                           <div className="mb-1 flex items-center justify-between text-xs font-black">
-                            <span>{t(costCategoryKeys[category as keyof typeof costCategoryKeys])}</span>
+                            <span>{t(budgetCostCategoryKeys[category] ?? costCategoryKeys[category as keyof typeof costCategoryKeys] ?? "costCategoryOther")}</span>
                             <span>{formatCost(value)}</span>
                           </div>
-                          <ProgressBar value={Math.min(100, value / 300)} className="bg-white/75" />
+                          <ProgressBar value={(value / maxBudgetCategory) * 100} className="bg-white/75" />
                         </div>
                       ))}
                     </div>

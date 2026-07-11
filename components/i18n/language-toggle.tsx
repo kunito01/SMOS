@@ -26,6 +26,8 @@ export function LanguageToggle({ compact = false, className, variant = "segmente
     pt: { compact: "PT", full: "Português" },
     de: { compact: "DE", full: "Deutsch" },
     fr: { compact: "FR", full: "Français" },
+    ru: { compact: "RU", full: "Русский" },
+    tr: { compact: "TR", full: "Türkçe" },
     ko: { compact: "KO", full: "한국어" },
     th: { compact: "TH", full: "ไทย" }
   };
@@ -120,7 +122,7 @@ export function LanguageToggle({ compact = false, className, variant = "segmente
           <div
             role="menu"
             aria-label={t("languageSwitch")}
-            className="studio-scroll absolute right-0 top-[calc(100%+0.5rem)] z-[130] grid max-h-[min(28rem,calc(100dvh-9rem))] w-20 gap-1 overflow-y-auto rounded-[1.4rem] bg-[#e9e5df]/95 p-1.5 shadow-[0_18px_45px_rgba(28,35,40,0.2)] ring-1 ring-white/70 backdrop-blur-xl"
+            className="smos-dropdown-panel smos-dropdown-enter studio-scroll absolute right-0 top-[calc(100%+0.5rem)] z-[130] grid max-h-[min(28rem,calc(100dvh-9rem))] w-20 gap-1 overflow-y-auto p-1.5"
           >
             {languages.map((item, index) => (
               <button

@@ -1,8 +1,8 @@
 "use client";
 
-import { ChevronDown } from "lucide-react";
 import { useI18n } from "@/components/providers/app-providers";
 import type { ExchangeRateBasis } from "@/components/costs/use-cost-display-currency";
+import { Select } from "@/components/ui/select";
 import { formatLocalizedDate } from "@/lib/i18n/formatters";
 import {
   isMoneyCurrency,
@@ -59,27 +59,21 @@ export function CostCurrencySelector({
         <span className="text-xs font-black uppercase tracking-wide text-white/70">
           {t("finalDisplayCurrency")}
         </span>
-        <span className="relative block">
-          <select
-            value={currency}
-            onChange={(event) => {
-              if (isMoneyCurrency(event.target.value)) {
-                onCurrencyChange(event.target.value);
-              }
-            }}
-            className="h-11 w-full appearance-none rounded-full border-0 bg-white px-4 pr-10 text-sm font-black text-ink outline-none ring-1 ring-white/30 transition focus:ring-2 focus:ring-aqua"
-          >
-            {supportedCurrencies.map((option) => (
-              <option key={option} value={option}>
-                {option}
-              </option>
-            ))}
-          </select>
-          <ChevronDown
-            aria-hidden="true"
-            className="pointer-events-none absolute right-4 top-1/2 size-4 -translate-y-1/2 text-muted"
-          />
-        </span>
+        <Select
+          value={currency}
+          onChange={(event) => {
+            if (isMoneyCurrency(event.target.value)) {
+              onCurrencyChange(event.target.value);
+            }
+          }}
+          className="h-11 w-full appearance-none rounded-full border-0 bg-white px-4 pr-10 text-sm font-black text-ink outline-none ring-1 ring-white/30 transition focus:ring-2 focus:ring-aqua"
+        >
+          {supportedCurrencies.map((option) => (
+            <option key={option} value={option}>
+              {option}
+            </option>
+          ))}
+        </Select>
       </label>
       <p aria-live="polite" className="mt-2 text-[11px] font-bold leading-4 text-white/65">
         {rateDetails.join(" · ")}

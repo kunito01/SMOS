@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Building2, Layers3, Rocket, Sparkles } from "lucide-react";
+import { ArrowLeft, Building2, Calculator, Layers3, Rocket, Sparkles } from "lucide-react";
 import { ImageCard } from "@/components/cards/image-card";
+import { useCostDisplayCurrency } from "@/components/costs/use-cost-display-currency";
 import { MetricTile } from "@/components/domain/metric-tile";
 import { ProjectCard } from "@/components/domain/project-card";
 import { AppShell } from "@/components/layout/app-shell";
@@ -25,9 +26,19 @@ type GroupDetailData = {
 
 export function GroupDetailPage({ groupId }: { groupId: string }) {
   const { language, t } = useI18n();
+  const {
+    displayCurrency,
+    exchangeRateSnapshot,
+    formatAmount,
+    isReady: isCurrencyReady
+  } = useCostDisplayCurrency();
   const [data, setData] = useState<GroupDetailData | null>(null);
 
   useEffect(() => {
+    if (!isCurrencyReady) {
+      return;
+    }
+
     let isMounted = true;
 
     async function load() {
@@ -35,7 +46,14 @@ export function GroupDetailPage({ groupId }: { groupId: string }) {
       const [groups, projects, overview] = await Promise.all([
         groupsApi.listGroups(),
         groupsApi.listGroupProjects(groupId),
-        projectsApi.getDashboardOverview({ type: "group", id: groupId }, { includeArchivedTotal: false })
+        projectsApi.getDashboardOverview(
+          { type: "group", id: groupId },
+          {
+            includeArchivedTotal: false,
+            currency: displayCurrency,
+            snapshot: exchangeRateSnapshot
+          }
+        )
       ]);
 
       if (isMounted) {
@@ -54,7 +72,7 @@ export function GroupDetailPage({ groupId }: { groupId: string }) {
     return () => {
       isMounted = false;
     };
-  }, [groupId]);
+  }, [displayCurrency, exchangeRateSnapshot, groupId, isCurrencyReady]);
 
   return (
     <AppShell>
@@ -88,6 +106,7 @@ export function GroupDetailPage({ groupId }: { groupId: string }) {
                 <MetricTile label={t("activeCount")} value={data.overview.activeProjectCount} icon={Rocket} tone="aqua" />
                 <MetricTile label={t("averageProgressShort")} value={`${data.overview.averageProgress}%`} icon={Sparkles} tone="coral" />
                 <MetricTile label={t("companiesCount")} value={data.associatedCompanyCount} icon={Building2} tone="dark" />
+                <MetricTile label={t("projectBudgetTotal")} value={formatAmount(data.overview.budgetCostTotal, data.overview.currency)} icon={Calculator} tone="lime" />
               </div>
             </section>
 

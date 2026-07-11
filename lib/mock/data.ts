@@ -22,10 +22,15 @@ import type {
 } from "@/lib/types";
 import {
   bundledExchangeRateSnapshot,
-  convertCurrency,
+  sumMoney,
   type ExchangeRateSnapshot,
   type MoneyCurrency
 } from "@/lib/utils/money";
+import {
+  calculateProjectBudget,
+  type ProjectBudgetCalculation
+} from "@/lib/utils/project-budget";
+import { defaultProjectPhaseNames } from "@/lib/utils/project-phases";
 import { hasProjectPublishedRelease } from "@/lib/utils/project-release";
 
 const projectImages = [
@@ -55,7 +60,7 @@ const groupCovers = [
   "https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?auto=format&fit=crop&w=1400&q=80"
 ];
 
-const phaseNames = ["Planning", "Design", "Asset Production", "Development", "Launch"];
+const phaseNames = [...defaultProjectPhaseNames];
 const phaseColors = ["#e3f596", "#8edbe8", "#f94a22", "#1c2328", "#d4a1df"];
 
 const toolPool: Tool[] = [
@@ -583,7 +588,7 @@ export const createMockProject = (
   };
 };
 
-const createDatabase = (): MockDatabase => {
+export const createMockDatabase = (): MockDatabase => {
   const companies: Company[] = companySeeds.map((company, index) => ({
     ...company,
     coverImage: companyCovers[index],
@@ -617,10 +622,11 @@ const createDatabase = (): MockDatabase => {
       token: project.shareSettings.token as string,
       expiresAt: index === 0 ? "2026-12-31T23:59:59.000Z" : undefined,
       allowCostPreview: project.shareSettings.allowCostPreview,
+      displayCurrency: "CNY",
       createdAt: "2026-06-20T10:00:00.000Z"
     }));
 
-  return {
+  return structuredClone({
     users: [user],
     companies,
     groups,
@@ -629,12 +635,12 @@ const createDatabase = (): MockDatabase => {
     tools: toolPool,
     costLibrary: costLibrarySeed,
     shareLinks
-  };
+  });
 };
 
-export const mockDatabase = createDatabase();
+export const mockDatabase = createMockDatabase();
 
-const getToolMonthlySubscriptionMoney = (tool: Tool) => {
+export const getToolMonthlySubscriptionMoney = (tool: Tool) => {
   const subscription = tool.subscription;
 
   if (!subscription || subscription.amount <= 0) {
@@ -654,14 +660,22 @@ export const getToolMonthlySubscriptionCost = (
 ) => {
   const monthly = getToolMonthlySubscriptionMoney(tool);
 
-  return monthly ? convertCurrency(monthly.amount, monthly.currency, currency, snapshot) : 0;
+  return monthly ? sumMoney([monthly], currency, snapshot) : 0;
 };
 
 export const getTotalMonthlySubscriptionCost = (
   tools: Tool[] = mockDatabase.tools,
   currency: MoneyCurrency = "CNY",
   snapshot: ExchangeRateSnapshot = bundledExchangeRateSnapshot
-) => tools.reduce((sum, tool) => sum + getToolMonthlySubscriptionCost(tool, currency, snapshot), 0);
+) =>
+  sumMoney(
+    tools.flatMap((tool) => {
+      const monthly = getToolMonthlySubscriptionMoney(tool);
+      return monthly ? [monthly] : [];
+    }),
+    currency,
+    snapshot
+  );
 
 export const getProjectSubscriptionTools = (project: Project, tools: Tool[] = mockDatabase.tools) => {
   const usedToolIds = new Set([
@@ -678,9 +692,13 @@ export const getProjectSubscriptionCost = (
   currency: MoneyCurrency = "CNY",
   snapshot: ExchangeRateSnapshot = bundledExchangeRateSnapshot
 ) =>
-  getProjectSubscriptionTools(project, tools).reduce(
-    (sum, tool) => sum + getToolMonthlySubscriptionCost(tool, currency, snapshot),
-    0
+  sumMoney(
+    getProjectSubscriptionTools(project, tools).flatMap((tool) => {
+      const monthly = getToolMonthlySubscriptionMoney(tool);
+      return monthly ? [monthly] : [];
+    }),
+    currency,
+    snapshot
   );
 
 export const createProjectSubscriptionCostItems = (project: Project, tools: Tool[] = mockDatabase.tools): CostItem[] =>
@@ -721,37 +739,107 @@ export const getProjectActualCost = (
   currency: MoneyCurrency = "CNY",
   snapshot: ExchangeRateSnapshot = bundledExchangeRateSnapshot
 ) =>
-  project.costs
-    .filter((cost) => cost.isActual)
-    .reduce((sum, cost) => sum + convertCurrency(cost.amount, cost.currency, currency, snapshot), 0) +
-  getProjectSubscriptionCost(project, mockDatabase.tools, currency, snapshot);
+  sumMoney(
+    [
+      ...project.costs.filter((cost) => cost.isActual),
+      ...createProjectSubscriptionCostItems(project, mockDatabase.tools)
+    ],
+    currency,
+    snapshot
+  );
 
 export const getProjectFutureCost = (
   project: Project,
   currency: MoneyCurrency = "CNY",
   snapshot: ExchangeRateSnapshot = bundledExchangeRateSnapshot
 ) =>
-  project.costs
-    .filter((cost) => !cost.isActual)
-    .reduce((sum, cost) => sum + convertCurrency(cost.amount, cost.currency, currency, snapshot), 0);
+  sumMoney(project.costs.filter((cost) => !cost.isActual), currency, snapshot);
+
+/**
+ * Returns the project's complete budget independently from its actual-cost
+ * reporting. Projects created before structured budgets retain the exact old
+ * `actual + future` total by passing those already-rounded display-currency
+ * buckets through the legacy adapter.
+ */
+export const getProjectBudgetCalculation = (
+  project: Project,
+  currency: MoneyCurrency = "CNY",
+  snapshot: ExchangeRateSnapshot = bundledExchangeRateSnapshot
+): ProjectBudgetCalculation => {
+  if (project.timelineConfigured === false) {
+    return calculateProjectBudget({
+      budget: undefined,
+      phases: project.phases,
+      tools: project.tools
+    }, {
+      currency,
+      snapshot,
+      tools: mockDatabase.tools
+    });
+  }
+
+  if (project.budget) {
+    return calculateProjectBudget(project, {
+      currency,
+      snapshot,
+      tools: mockDatabase.tools
+    });
+  }
+
+  const legacyActualCost = getProjectActualCost(project, currency, snapshot);
+  const legacyFutureCost = getProjectFutureCost(project, currency, snapshot);
+
+  return calculateProjectBudget(project, {
+    currency,
+    snapshot,
+    tools: mockDatabase.tools,
+    legacyFallback: {
+      projectCosts: [
+        {
+          id: `${project.id}-legacy-actual-total`,
+          name: "Legacy actual-cost total",
+          amount: legacyActualCost,
+          currency
+        },
+        {
+          id: `${project.id}-legacy-future-total`,
+          name: "Legacy future-cost total",
+          amount: legacyFutureCost,
+          currency
+        }
+      ],
+      subscriptionCosts: []
+    }
+  });
+};
+
+export const getProjectBudgetCost = (
+  project: Project,
+  currency: MoneyCurrency = "CNY",
+  snapshot: ExchangeRateSnapshot = bundledExchangeRateSnapshot
+) => getProjectBudgetCalculation(project, currency, snapshot).total;
 
 export const getProjectPlannedReceivable = (
   project: Project,
   currency: MoneyCurrency = "CNY",
   snapshot: ExchangeRateSnapshot = bundledExchangeRateSnapshot
 ) =>
-  (project.payments ?? [])
-    .filter((payment) => payment.type === "planned")
-    .reduce((sum, payment) => sum + convertCurrency(payment.amount, payment.currency, currency, snapshot), 0);
+  sumMoney(
+    (project.payments ?? []).filter((payment) => payment.type === "planned"),
+    currency,
+    snapshot
+  );
 
 export const getProjectReceivedRevenue = (
   project: Project,
   currency: MoneyCurrency = "CNY",
   snapshot: ExchangeRateSnapshot = bundledExchangeRateSnapshot
 ) =>
-  (project.payments ?? [])
-    .filter((payment) => payment.type === "received")
-    .reduce((sum, payment) => sum + convertCurrency(payment.amount, payment.currency, currency, snapshot), 0);
+  sumMoney(
+    (project.payments ?? []).filter((payment) => payment.type === "received"),
+    currency,
+    snapshot
+  );
 
 export const getProjectActualProfit = (
   project: Project,
@@ -765,13 +853,18 @@ export const getProjectProjectedProfit = (
   snapshot: ExchangeRateSnapshot = bundledExchangeRateSnapshot
 ) =>
   getProjectPlannedReceivable(project, currency, snapshot) -
-  getProjectActualCost(project, currency, snapshot) -
-  getProjectFutureCost(project, currency, snapshot);
+  getProjectBudgetCost(project, currency, snapshot);
 
 export const createDashboardOverview = (
   projects: Project[] = mockDatabase.projects,
-  options: { includeArchivedTotal?: boolean } = { includeArchivedTotal: true }
+  options: {
+    includeArchivedTotal?: boolean;
+    currency?: MoneyCurrency;
+    snapshot?: ExchangeRateSnapshot;
+  } = { includeArchivedTotal: true }
 ): DashboardOverview => {
+  const currency = options.currency ?? "CNY";
+  const snapshot = options.snapshot ?? bundledExchangeRateSnapshot;
   const operationalProjects = projects.filter((project) => !project.archivedAt);
   const countedProjects = options.includeArchivedTotal === false ? operationalProjects : projects;
   const deliverables = getAllDeliverables(operationalProjects);
@@ -787,6 +880,7 @@ export const createDashboardOverview = (
   ].slice(0, 4);
 
   return {
+    currency,
     totalProjectCount: projectCount,
     activeProjectCount: operationalProjects.filter((project) => project.status === "active").length,
     completedProjectCount: operationalProjects.filter((project) => project.status === "completed").length,
@@ -799,8 +893,14 @@ export const createDashboardOverview = (
     ).length,
     upcomingDeliverableCount: deliverables.filter((deliverable) => !deliverable.completed).length,
     overdueTaskCount: tasks.filter((task) => !task.completed && task.priority === "high").length,
-    actualCostSoFar: operationalProjects.reduce((sum, project) => sum + getProjectActualCost(project), 0),
-    futureEstimatedCost: operationalProjects.reduce((sum, project) => sum + getProjectFutureCost(project), 0),
+    actualCostSoFar: operationalProjects.reduce(
+      (sum, project) => sum + getProjectActualCost(project, currency, snapshot),
+      0
+    ),
+    budgetCostTotal: operationalProjects.reduce(
+      (sum, project) => sum + getProjectBudgetCost(project, currency, snapshot),
+      0
+    ),
     stageDistribution: phaseNames.map((phaseName) => {
       const phaseTasks = operationalProjects.flatMap((project) =>
         project.phases

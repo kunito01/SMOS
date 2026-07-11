@@ -2,6 +2,11 @@ import { mockApi } from "@/lib/api/mock-client";
 import { hydrateMockDatabase, persistMockDatabase } from "@/lib/api/mock-persistence";
 import { getProjectActualCost, getTotalMonthlySubscriptionCost, mockDatabase } from "@/lib/mock";
 import type { CostLibraryItem, Person, PersonProjectParticipation, Project, Tool, ToolSubscription } from "@/lib/types";
+import {
+  bundledExchangeRateSnapshot,
+  type ExchangeRateSnapshot,
+  type MoneyCurrency
+} from "@/lib/utils/money";
 
 type AddPersonInput = Pick<Person, "name" | "role" | "type"> & {
   costTemplateId?: string;
@@ -23,30 +28,37 @@ type UpdateToolInput = Partial<AddToolInput>;
 type AddCostTemplateInput = Omit<CostLibraryItem, "id">;
 
 export async function listPeople() {
-  hydrateMockDatabase();
+  await hydrateMockDatabase();
   return mockApi(mockDatabase.people);
 }
 
 export async function listTools() {
-  hydrateMockDatabase();
+  await hydrateMockDatabase();
   return mockApi(mockDatabase.tools);
 }
 
-export async function getToolSubscriptionSummary() {
-  hydrateMockDatabase();
+export async function getToolSubscriptionSummary(
+  currency: MoneyCurrency = "CNY",
+  snapshot: ExchangeRateSnapshot = bundledExchangeRateSnapshot
+) {
+  await hydrateMockDatabase();
   return mockApi({
-    monthlyTotal: getTotalMonthlySubscriptionCost(mockDatabase.tools),
+    monthlyTotal: getTotalMonthlySubscriptionCost(mockDatabase.tools, currency, snapshot),
+    currency,
     activeSubscriptionCount: mockDatabase.tools.filter((tool) => tool.subscription?.amount).length
   });
 }
 
 export async function listCostTemplates() {
-  hydrateMockDatabase();
+  await hydrateMockDatabase();
   return mockApi(mockDatabase.costLibrary);
 }
 
-export async function listPersonProjectParticipation(): Promise<PersonProjectParticipation[]> {
-  hydrateMockDatabase();
+export async function listPersonProjectParticipation(
+  currency: MoneyCurrency = "CNY",
+  snapshot: ExchangeRateSnapshot = bundledExchangeRateSnapshot
+): Promise<PersonProjectParticipation[]> {
+  await hydrateMockDatabase();
   const companyById = new Map(mockDatabase.companies.map((company) => [company.id, company]));
   const groupById = new Map(mockDatabase.groups.map((group) => [group.id, group]));
 
@@ -68,13 +80,14 @@ export async function listPersonProjectParticipation(): Promise<PersonProjectPar
             groupNameI18n: group?.nameI18n,
             progress: project.progress,
             status: project.status,
-            actualCostSoFar: getProjectActualCost(project)
+            actualCostSoFar: getProjectActualCost(project, currency, snapshot)
           };
         });
       const actualCostTotal = projects.reduce((sum, project) => sum + project.actualCostSoFar, 0);
 
       return {
         personId: person.id,
+        currency,
         totalProjectCount: projects.length,
         averageProgress: projects.length
           ? Math.round(projects.reduce((sum, project) => sum + project.progress, 0) / projects.length)
@@ -87,7 +100,7 @@ export async function listPersonProjectParticipation(): Promise<PersonProjectPar
 }
 
 export async function addPerson(input: AddPersonInput) {
-  hydrateMockDatabase();
+  await hydrateMockDatabase();
   const person: Person = {
     id: `person-library-${mockDatabase.people.length + 1}`,
     name: input.name,
@@ -101,34 +114,34 @@ export async function addPerson(input: AddPersonInput) {
   };
 
   mockDatabase.people.unshift(person);
-  persistMockDatabase();
+  await persistMockDatabase();
 
   return mockApi(person);
 }
 
 export async function updatePerson(personId: string, input: UpdatePersonInput) {
-  hydrateMockDatabase();
+  await hydrateMockDatabase();
   const person = mockDatabase.people.find((item) => item.id === personId);
 
   if (person) {
     Object.assign(person, input);
   }
 
-  persistMockDatabase();
+  await persistMockDatabase();
 
   return mockApi(person);
 }
 
 export async function deletePerson(personId: string) {
-  hydrateMockDatabase();
+  await hydrateMockDatabase();
   mockDatabase.people = mockDatabase.people.filter((person) => person.id !== personId);
-  persistMockDatabase();
+  await persistMockDatabase();
 
   return mockApi({ id: personId });
 }
 
 export async function addTool(input: AddToolInput) {
-  hydrateMockDatabase();
+  await hydrateMockDatabase();
   const tool: Tool = {
     id: `tool-library-${mockDatabase.tools.length + 1}`,
     name: input.name,
@@ -137,13 +150,13 @@ export async function addTool(input: AddToolInput) {
   };
 
   mockDatabase.tools.unshift(tool);
-  persistMockDatabase();
+  await persistMockDatabase();
 
   return mockApi(tool);
 }
 
 export async function updateTool(toolId: string, input: UpdateToolInput) {
-  hydrateMockDatabase();
+  await hydrateMockDatabase();
   const tool = mockDatabase.tools.find((item) => item.id === toolId);
 
   if (tool) {
@@ -153,15 +166,15 @@ export async function updateTool(toolId: string, input: UpdateToolInput) {
     });
   }
 
-  persistMockDatabase();
+  await persistMockDatabase();
 
   return mockApi(tool);
 }
 
 export async function deleteTool(toolId: string) {
-  hydrateMockDatabase();
+  await hydrateMockDatabase();
   mockDatabase.tools = mockDatabase.tools.filter((tool) => tool.id !== toolId);
-  persistMockDatabase();
+  await persistMockDatabase();
 
   return mockApi({ id: toolId });
 }
@@ -170,7 +183,7 @@ const normalizeSubscription = (subscription?: ToolSubscriptionInput): ToolSubscr
   const amount = Number(subscription?.amount);
   const accountEmail = subscription?.accountEmail?.trim();
 
-  if (!subscription || amount <= 0 || !accountEmail) {
+  if (!subscription || amount <= 0) {
     return undefined;
   }
 
@@ -179,27 +192,27 @@ const normalizeSubscription = (subscription?: ToolSubscriptionInput): ToolSubscr
     currency: subscription.currency ?? "CNY",
     billingCycle: subscription.billingCycle ?? "monthly",
     expiresAt: subscription.expiresAt || "2026-12-31",
-    accountEmail
+    accountEmail: accountEmail ?? ""
   };
 };
 
 export async function addCostTemplate(input: AddCostTemplateInput) {
-  hydrateMockDatabase();
+  await hydrateMockDatabase();
   const costTemplate: CostLibraryItem = {
     id: `cost-template-library-${mockDatabase.costLibrary.length + 1}`,
     ...input
   };
 
   mockDatabase.costLibrary.unshift(costTemplate);
-  persistMockDatabase();
+  await persistMockDatabase();
 
   return mockApi(costTemplate);
 }
 
 export async function deleteCostTemplate(costTemplateId: string) {
-  hydrateMockDatabase();
+  await hydrateMockDatabase();
   mockDatabase.costLibrary = mockDatabase.costLibrary.filter((cost) => cost.id !== costTemplateId);
-  persistMockDatabase();
+  await persistMockDatabase();
 
   return mockApi({ id: costTemplateId });
 }

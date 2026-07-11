@@ -20,8 +20,9 @@ export function ImageCard({
 }: ImageCardProps) {
   return (
     <div
+      data-jelly-card="true"
       className={cn(
-        "image-vignette flex min-w-0 flex-col justify-end rounded-studio-xl bg-cover bg-center p-5 text-white shadow-soft",
+        "image-vignette smos-game-card flex min-w-0 flex-col justify-end rounded-studio-xl bg-cover bg-center p-5 text-white shadow-soft",
         heightClassName,
         className
       )}

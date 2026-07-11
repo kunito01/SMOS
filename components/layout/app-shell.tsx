@@ -10,6 +10,7 @@ import {
   Building2,
   CheckCircle2,
   CircleDollarSign,
+  Fingerprint,
   FolderKanban,
   LayoutDashboard,
   LogOut,
@@ -41,6 +42,7 @@ const responsiveHeaderControlClass =
   "max-[482px]:size-10 max-[482px]:[&_svg]:size-[18px] max-[400px]:size-9 max-[400px]:[&_svg]:size-4 max-[370px]:size-[30px] max-[370px]:[&_svg]:size-3.5";
 
 type AppShellProps = {
+  beforeNavigate?: () => boolean;
   children: React.ReactNode;
 };
 
@@ -54,14 +56,15 @@ type DueTodayItem = {
   taskTitle: string;
 };
 
-const dismissedDueTodayStorageKey = "studio-map-os-dismissed-due-today-items";
+const dismissedDueTodayStorageKey = (workspaceId: string) =>
+  `studio-map-os.workspace.${workspaceId}.dismissed-due-today-items`;
 
 const createDueTodayReminderId = (projectId: string, taskId: string, dueDate: string) =>
   `${projectId}:${taskId}:${dueDate}`;
 
-const readDismissedDueTodayItems = () => {
+const readDismissedDueTodayItems = (workspaceId: string) => {
   try {
-    const stored = window.localStorage.getItem(dismissedDueTodayStorageKey);
+    const stored = window.localStorage.getItem(dismissedDueTodayStorageKey(workspaceId));
     const parsed = stored ? (JSON.parse(stored) as unknown) : [];
 
     return new Set(Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : []);
@@ -78,10 +81,10 @@ const toDateKey = (date: Date) => {
   return `${year}-${month}-${day}`;
 };
 
-export function AppShell({ children }: AppShellProps) {
+export function AppShell({ beforeNavigate, children }: AppShellProps) {
   const pathname = usePathname();
   const router = useRouter();
-  const { signOut } = useAuth();
+  const { signOut, user } = useAuth();
   const { language, t } = useI18n();
   const mobileNavRef = useRef<HTMLDivElement | null>(null);
   const mobileNavDragRef = useRef({
@@ -95,16 +98,36 @@ export function AppShell({ children }: AppShellProps) {
   const [showMobileDock, setShowMobileDock] = useState(false);
   const [dueTodayItems, setDueTodayItems] = useState<DueTodayItem[]>([]);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const workspaceId = user?.workspaceId;
+
+  const canNavigate = () => beforeNavigate?.() ?? true;
+
+  const handleLinkNavigate = (event: { preventDefault: () => void }) => {
+    if (!canNavigate()) {
+      event.preventDefault();
+    }
+  };
 
   const handleSignOut = async () => {
+    if (!canNavigate()) {
+      return;
+    }
+
     await signOut();
     router.replace("/login");
   };
 
   const handleDueTodayDismiss = (item: DueTodayItem) => {
-    const dismissed = readDismissedDueTodayItems();
+    if (!workspaceId) {
+      return;
+    }
+
+    const dismissed = readDismissedDueTodayItems(workspaceId);
     dismissed.add(item.reminderId);
-    window.localStorage.setItem(dismissedDueTodayStorageKey, JSON.stringify([...dismissed]));
+    window.localStorage.setItem(
+      dismissedDueTodayStorageKey(workspaceId),
+      JSON.stringify([...dismissed])
+    );
     setDueTodayItems((current) => current.filter((currentItem) => currentItem.reminderId !== item.reminderId));
   };
 
@@ -236,31 +259,45 @@ export function AppShell({ children }: AppShellProps) {
   useEffect(() => {
     let isMounted = true;
 
-    async function loadDueTodayItems() {
-      const todayKey = toDateKey(new Date());
-      const dismissedItems = readDismissedDueTodayItems();
-      const projects = await projectsApi.listProjects();
-      const nextItems = projects.flatMap((project) =>
-        project.phases.flatMap((phase) =>
-          phase.deliverables.flatMap((deliverable) =>
-            deliverable.tasks
-              .filter((task) => task.dueDate === todayKey)
-              .map((task) => ({
-                completed: task.completed,
-                dueDate: task.dueDate ?? todayKey,
-                projectId: project.id,
-                projectName: project.name,
-                reminderId: createDueTodayReminderId(project.id, task.id, task.dueDate ?? todayKey),
-                taskId: task.id,
-                taskTitle: task.title
-              }))
-              .filter((item) => !dismissedItems.has(item.reminderId))
-          )
-        )
-      );
+    if (!workspaceId) {
+      setDueTodayItems([]);
+      return () => {
+        isMounted = false;
+      };
+    }
+    const activeWorkspaceId = workspaceId;
 
-      if (isMounted) {
-        setDueTodayItems(nextItems);
+    async function loadDueTodayItems() {
+      try {
+        const todayKey = toDateKey(new Date());
+        const dismissedItems = readDismissedDueTodayItems(activeWorkspaceId);
+        const projects = await projectsApi.listProjects();
+        const nextItems = projects.flatMap((project) =>
+          project.phases.flatMap((phase) =>
+            phase.deliverables.flatMap((deliverable) =>
+              deliverable.tasks
+                .filter((task) => task.dueDate === todayKey)
+                .map((task) => ({
+                  completed: task.completed,
+                  dueDate: task.dueDate ?? todayKey,
+                  projectId: project.id,
+                  projectName: project.name,
+                  reminderId: createDueTodayReminderId(project.id, task.id, task.dueDate ?? todayKey),
+                  taskId: task.id,
+                  taskTitle: task.title
+                }))
+                .filter((item) => !dismissedItems.has(item.reminderId))
+            )
+          )
+        );
+
+        if (isMounted) {
+          setDueTodayItems(nextItems);
+        }
+      } catch {
+        if (isMounted) {
+          setDueTodayItems([]);
+        }
       }
     }
 
@@ -269,7 +306,7 @@ export function AppShell({ children }: AppShellProps) {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [workspaceId]);
 
   return (
     <div className="relative isolate min-h-screen overflow-x-hidden p-3 sm:p-5 xl:p-6">
@@ -292,6 +329,7 @@ export function AppShell({ children }: AppShellProps) {
                     key={item.labelKey}
                     href={item.href}
                     prefetch={false}
+                    onNavigate={handleLinkNavigate}
                     aria-label={t(item.labelKey)}
                     className={cn(
                       "grid size-[3.25rem] place-items-center rounded-full transition duration-200",
@@ -311,11 +349,25 @@ export function AppShell({ children }: AppShellProps) {
 
         <main className="relative z-0 flex min-w-0 flex-1 flex-col overflow-hidden rounded-studio-xl bg-white/[0.34] shadow-soft ring-1 ring-white/[0.34] backdrop-blur-xl">
           <header className="flex items-center justify-between gap-3 px-4 py-4 max-[482px]:gap-2 max-[370px]:gap-1.5 sm:px-6 xl:px-8">
-            <Link href="/dashboard" prefetch={false} className="min-w-0">
+            <Link href="/dashboard" prefetch={false} onNavigate={handleLinkNavigate} className="min-w-0">
               <BrandLockup subtitle={t("loginEyebrow")} size="shell" />
             </Link>
 
             <div className="ml-auto flex items-center gap-2 max-[482px]:gap-1 max-[370px]:gap-[3px]">
+              {user ? (
+                <div
+                  className="hidden min-w-0 items-center gap-2 rounded-full bg-white/62 px-3 py-2 text-ink shadow-sm ring-1 ring-white/60 lg:inline-flex"
+                  title={`${t("workspaceIdentity")} · ${user.workspaceFingerprint}`}
+                >
+                  <Fingerprint size={16} className="shrink-0 text-coral" />
+                  <span className="max-w-40 truncate text-[11px] font-black uppercase tracking-[0.08em] text-ink/55">
+                    {t("workspaceIdentity")}
+                  </span>
+                  <strong className="whitespace-nowrap font-mono text-xs tracking-[0.08em]">
+                    {user.workspaceFingerprint}
+                  </strong>
+                </div>
+              ) : null}
               <LanguageToggle compact variant="dropdown" />
               <Button
                 variant="ghost"
@@ -334,12 +386,33 @@ export function AppShell({ children }: AppShellProps) {
                 size="icon"
                 aria-label={t("goBack")}
                 className={responsiveHeaderControlClass}
-                onClick={() => router.back()}
+                onClick={() => {
+                  if (canNavigate()) {
+                    router.back();
+                  }
+                }}
               >
                 <Undo2 size={24} strokeWidth={1.9} />
               </Button>
             </div>
           </header>
+
+          {user ? (
+            <div className="px-4 pb-3 sm:px-6 lg:hidden">
+              <div
+                className="inline-flex max-w-full items-center gap-2 rounded-full bg-white/62 px-3 py-1.5 text-ink shadow-sm ring-1 ring-white/60"
+                title={`${t("workspaceIdentity")} · ${user.workspaceFingerprint}`}
+              >
+                <Fingerprint size={15} className="shrink-0 text-coral" />
+                <span className="hidden truncate text-[10px] font-black uppercase tracking-[0.08em] text-ink/55 min-[390px]:inline">
+                  {t("workspaceIdentity")}
+                </span>
+                <strong className="whitespace-nowrap font-mono text-[11px] tracking-[0.08em]">
+                  {user.workspaceFingerprint}
+                </strong>
+              </div>
+            </div>
+          ) : null}
 
           <div
             ref={mobileNavRef}
@@ -360,6 +433,7 @@ export function AppShell({ children }: AppShellProps) {
                   key={item.labelKey}
                   href={item.href}
                   prefetch={false}
+                  onNavigate={handleLinkNavigate}
                   className={cn(
                     "inline-flex h-11 shrink-0 items-center gap-2 rounded-full px-4 text-sm font-bold",
                     active ? "bg-[#ffc700] text-ink" : "bg-white text-muted"
@@ -401,6 +475,7 @@ export function AppShell({ children }: AppShellProps) {
                 key={item.labelKey}
                 href={item.href}
                 prefetch={false}
+                onNavigate={handleLinkNavigate}
                 aria-label={t(item.labelKey)}
                 tabIndex={showMobileDock ? undefined : -1}
                 className={cn(
@@ -458,6 +533,10 @@ export function AppShell({ children }: AppShellProps) {
                     );
                     const taskTitle = translateDomainLabel(item.taskTitle, taskTitleKeys, t) || t("untitledTask");
                     const openProject = () => {
+                      if (!canNavigate()) {
+                        return;
+                      }
+
                       setNotificationsOpen(false);
                       router.push(`/projects/${item.projectId}`);
                     };

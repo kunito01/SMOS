@@ -1,4 +1,5 @@
 export const supportedCurrencies = ["CNY", "USD", "JPY", "EUR"] as const;
+export const fixedNumericLocale = "zh-CN" as const;
 
 export type MoneyCurrency = (typeof supportedCurrencies)[number];
 
@@ -95,25 +96,72 @@ export const convertCurrency = (
   return (amount / fromRate) * toRate;
 };
 
+export const roundMoneyAmount = (value: number) => {
+  if (!Number.isFinite(value)) {
+    throw new Error("Money amount must be finite");
+  }
+
+  const rounded = value < 0 ? -Math.round(Math.abs(value)) : Math.round(value);
+  return Object.is(rounded, -0) ? 0 : rounded;
+};
+
 export const sumMoney = (
   items: ReadonlyArray<{ amount: number; currency: MoneyCurrency }>,
   currency: MoneyCurrency,
   snapshot: ExchangeRateSnapshot = bundledExchangeRateSnapshot
-) => items.reduce((sum, item) => sum + convertCurrency(item.amount, item.currency, currency, snapshot), 0);
+) => {
+  const nativeTotals: Record<MoneyCurrency, number> = {
+    CNY: 0,
+    USD: 0,
+    JPY: 0,
+    EUR: 0
+  };
+
+  items.forEach((item) => {
+    if (!isMoneyCurrency(item.currency)) {
+      throw new Error(`Unsupported money currency: ${String(item.currency)}`);
+    }
+
+    if (!Number.isFinite(item.amount)) {
+      throw new Error("Money amount must be finite");
+    }
+
+    const nextSubtotal = nativeTotals[item.currency] + item.amount;
+    if (!Number.isFinite(nextSubtotal)) {
+      throw new Error("Money subtotal must be finite");
+    }
+
+    nativeTotals[item.currency] = nextSubtotal;
+  });
+
+  return supportedCurrencies.reduce((total, sourceCurrency) => {
+    const nativeSubtotal = nativeTotals[sourceCurrency];
+
+    return nativeSubtotal === 0
+      ? total
+      : total + roundMoneyAmount(convertCurrency(nativeSubtotal, sourceCurrency, currency, snapshot));
+  }, 0);
+};
 
 export const toCny = (
   amount: number,
   currency: MoneyCurrency,
   snapshot: ExchangeRateSnapshot = bundledExchangeRateSnapshot
-) => convertCurrency(amount, currency, "CNY", snapshot);
+) => sumMoney([{ amount, currency }], "CNY", snapshot);
 
 export const formatCurrency = (
   value: number,
-  currency: MoneyCurrency = "CNY",
-  locale = "zh-CN"
+  currency: MoneyCurrency = "CNY"
 ) =>
-  new Intl.NumberFormat(locale, {
+  new Intl.NumberFormat(fixedNumericLocale, {
     currency,
+    minimumFractionDigits: 0,
     maximumFractionDigits: 0,
     style: "currency"
-  }).format(value);
+  }).format(roundMoneyAmount(value));
+
+export const formatNumber = (value: number) =>
+  new Intl.NumberFormat(fixedNumericLocale, {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0
+  }).format(roundMoneyAmount(value));

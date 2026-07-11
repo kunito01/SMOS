@@ -262,6 +262,115 @@ body {
   }
 }
 
+/*
+ * Game-feel interaction layer translated from refs/ui_jelly_effects.
+ * JavaScript owns the interruptible squash/stretch sequences; CSS owns
+ * card lift and pointer tilt so existing page motion can stay on wrappers.
+ */
+.smos-game-motion-active {
+  transform-origin: center;
+  will-change: transform;
+}
+
+.smos-game-motion-active svg {
+  transform-origin: center;
+  will-change: transform;
+}
+
+.smos-dropdown-panel {
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  border-radius: 1.4rem;
+  background: rgba(233, 229, 223, 0.95);
+  box-shadow: 0 18px 45px rgba(28, 35, 40, 0.2);
+  -webkit-backdrop-filter: blur(24px);
+  backdrop-filter: blur(24px);
+}
+
+@keyframes smos-dropdown-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.smos-dropdown-enter {
+  animation: smos-dropdown-enter 140ms ease-out both;
+  will-change: opacity, transform;
+}
+
+.smos-game-card {
+  --smos-card-lift: 0px;
+  --smos-card-scale: 1;
+  --smos-card-tilt-x: 0deg;
+  --smos-card-tilt-y: 0deg;
+  --smos-card-turn: 0deg;
+}
+
+:is(a[href], button:not(:disabled), [role="button"], [data-jelly-control="true"]) .smos-game-card,
+.smos-game-card[data-jelly-interactive="true"] {
+  backface-visibility: hidden;
+  transform:
+    perspective(900px)
+    translate3d(0, var(--smos-card-lift), 0)
+    rotateX(var(--smos-card-tilt-x))
+    rotateY(var(--smos-card-tilt-y))
+    rotateZ(var(--smos-card-turn));
+  scale: var(--smos-card-scale);
+  transform-origin: center;
+  transform-style: preserve-3d;
+  transition:
+    transform 171ms cubic-bezier(0.34, 1.2, 0.64, 1),
+    scale 171ms cubic-bezier(0.34, 1.2, 0.64, 1),
+    rotate 171ms cubic-bezier(0.34, 1.2, 0.64, 1),
+    box-shadow 171ms ease-out;
+}
+
+:is(a[href], button:not(:disabled), [role="button"], [data-jelly-control="true"]):focus-visible .smos-game-card,
+.smos-game-card[data-jelly-interactive="true"]:focus-visible {
+  --smos-card-lift: -0.225rem;
+  --smos-card-scale: 1.0175;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  :is(a[href], button:not(:disabled), [role="button"], [data-jelly-control="true"]):hover .smos-game-card,
+  .smos-game-card[data-jelly-interactive="true"]:hover {
+    --smos-card-lift: -0.225rem;
+    --smos-card-scale: 1.0175;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .smos-dropdown-enter {
+    animation: none !important;
+  }
+
+  .smos-game-motion-active,
+  .smos-game-motion-active svg {
+    animation: none !important;
+    rotate: 0deg !important;
+    scale: 1 !important;
+    transition: none !important;
+  }
+
+  :is(a[href], button:not(:disabled), [role="button"], [data-jelly-control="true"]) .smos-game-card,
+  .smos-game-card[data-jelly-interactive="true"] {
+    --smos-card-lift: 0px;
+    --smos-card-scale: 1;
+    --smos-card-tilt-x: 0deg;
+    --smos-card-tilt-y: 0deg;
+    --smos-card-turn: 0deg;
+    rotate: 0deg !important;
+    scale: 1 !important;
+    transform: none !important;
+    transition: none !important;
+  }
+}
+
 a {
   color: inherit;
   text-decoration: none;

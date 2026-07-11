@@ -3,6 +3,7 @@ node_modules/
 
 # next.js
 .next/
+.next-pwa/
 out/
 
 # production
@@ -26,6 +27,12 @@ pnpm-debug.log*
 # local verification artifacts
 .playwright-cli/
 output/
+
+# generated PWA worker bundles
+public/sw.js
+public/sw.js.map
+public/swe-worker-*.js
+public/swe-worker-*.js.map
 
 # local planning and reference artifacts
 Studio_Map_OS_Codex_Prompt.md

@@ -23,6 +23,7 @@ import {
   Wrench
 } from "lucide-react";
 import { ImageCard } from "@/components/cards/image-card";
+import { useCostDisplayCurrency } from "@/components/costs/use-cost-display-currency";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { DeleteConfirmDialog } from "@/components/ui/delete-confirm-dialog";
@@ -39,8 +40,8 @@ import { ProjectBasicsEditModal } from "@/components/projects/project-basics-edi
 import { ProjectReleaseBadges } from "@/components/projects/project-release-badges";
 import { ProjectSaveControls } from "@/components/projects/project-save-controls";
 import { ProjectSummaryTimeline } from "@/components/projects/project-summary-timeline";
-import { groupsApi, projectsApi } from "@/lib/api";
-import { getProjectSubscriptionCost } from "@/lib/mock";
+import { costsApi, groupsApi, projectsApi } from "@/lib/api";
+import type { ProjectCostSummary } from "@/lib/api/costs";
 import {
   formatDemoEntityName,
   getProjectGroupDisplayName,
@@ -52,13 +53,12 @@ import {
   translateDomainLabel
 } from "@/lib/i18n/domain-labels";
 import { formatLocalizedDate } from "@/lib/i18n/formatters";
-import { languageLocales } from "@/lib/i18n/translations";
 import type { Project, ProjectGroup, ProjectStatus, ProjectVersion } from "@/lib/types";
 import { cn } from "@/lib/utils/cn";
-import { formatCurrency, toCny } from "@/lib/utils/money";
 import { findProjectReleaseVersion } from "@/lib/utils/project-release";
 
 type ProjectDetailData = {
+  costSummary: ProjectCostSummary;
   project: Project;
   groups: ProjectGroup[];
 };
@@ -107,6 +107,12 @@ const releaseDateValue = (version?: ProjectVersion) =>
 export function ProjectDetailPage({ projectId }: { projectId: string }) {
   const router = useRouter();
   const { language, t } = useI18n();
+  const {
+    displayCurrency,
+    exchangeRateSnapshot,
+    formatAmount,
+    isReady: isCurrencyReady
+  } = useCostDisplayCurrency();
   const [data, setData] = useState<ProjectDetailData | null>(null);
   const [notice, setNotice] = useState("");
   const [timelineOpen, setTimelineOpen] = useState(false);
@@ -117,24 +123,30 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
   const [statusSaving, setStatusSaving] = useState<ProjectStatus | null>(null);
 
   const loadProject = async () => {
-    const [project, groups] = await Promise.all([
+    const [project, groups, costSummary] = await Promise.all([
       projectsApi.getProject(projectId),
-      groupsApi.listGroups()
+      groupsApi.listGroups(),
+      costsApi.getProjectCostSummary(projectId, displayCurrency, exchangeRateSnapshot)
     ]);
-    setData({ project, groups });
+    setData({ project, groups, costSummary });
   };
 
   useEffect(() => {
+    if (!isCurrencyReady) {
+      return;
+    }
+
     let isMounted = true;
 
     async function load() {
-      const [project, groups] = await Promise.all([
+      const [project, groups, costSummary] = await Promise.all([
         projectsApi.getProject(projectId),
-        groupsApi.listGroups()
+        groupsApi.listGroups(),
+        costsApi.getProjectCostSummary(projectId, displayCurrency, exchangeRateSnapshot)
       ]);
 
       if (isMounted) {
-        setData({ project, groups });
+        setData({ project, groups, costSummary });
       }
     }
 
@@ -143,7 +155,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
     return () => {
       isMounted = false;
     };
-  }, [projectId]);
+  }, [displayCurrency, exchangeRateSnapshot, isCurrencyReady, projectId]);
 
   useEffect(() => {
     if (!data?.project) {
@@ -168,7 +180,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
   const projectTasks = projectDeliverables.flatMap((deliverable) => deliverable.tasks);
   const completedTaskCount = projectTasks.filter((task) => task.completed).length;
   const paymentSummary = useMemo(() => {
-    if (!data?.project) {
+    if (!data?.costSummary) {
       return {
         actualCost: 0,
         actualProfit: 0,
@@ -177,23 +189,13 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
       };
     }
 
-    const plannedReceivable = (data.project.payments ?? [])
-      .filter((payment) => payment.type === "planned")
-      .reduce((sum, payment) => sum + toCny(payment.amount, payment.currency), 0);
-    const receivedRevenue = (data.project.payments ?? [])
-      .filter((payment) => payment.type === "received")
-      .reduce((sum, payment) => sum + toCny(payment.amount, payment.currency), 0);
-    const actualCost = data.project.costs
-      .filter((cost) => cost.isActual)
-      .reduce((sum, cost) => sum + toCny(cost.amount, cost.currency), 0) + getProjectSubscriptionCost(data.project);
-
     return {
-      actualCost,
-      actualProfit: receivedRevenue - actualCost,
-      plannedReceivable,
-      receivedRevenue
+      actualCost: data.costSummary.actualCostSoFar,
+      actualProfit: data.costSummary.actualProfit,
+      plannedReceivable: data.costSummary.plannedReceivable,
+      receivedRevenue: data.costSummary.receivedRevenue
     };
-  }, [data?.project]);
+  }, [data?.costSummary]);
 
   const handleTaskToggle = async (taskId: string, completed: boolean) => {
     await projectsApi.updateTaskCompletion(taskId, completed);
@@ -210,6 +212,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
 
   const handlePaymentsSaved = (project: Project) => {
     setData((current) => (current ? { ...current, project } : current));
+    void loadProject();
     setNotice(t("paymentStatusUpdated"));
     window.setTimeout(() => setNotice(""), 1600);
   };
@@ -418,8 +421,8 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
                         backgroundColor: summaryLightMetricColor
                       },
                       { label: t("tasks"), value: `${completedTaskCount} / ${projectTasks.length}`, icon: CheckCircle2, backgroundColor: summaryLightMetricColor },
-                      { label: t("receivedPayment"), value: formatCurrency(paymentSummary.receivedRevenue, "CNY", languageLocales[language]), icon: Banknote, backgroundColor: summaryFinanceMetricColor },
-                      { label: t("currentProfit"), value: formatCurrency(paymentSummary.actualProfit, "CNY", languageLocales[language]), icon: TrendingUp, backgroundColor: summaryFinanceMetricColor }
+                      { label: t("receivedPayment"), value: formatAmount(paymentSummary.receivedRevenue, data.costSummary.currency), icon: Banknote, backgroundColor: summaryFinanceMetricColor },
+                      { label: t("currentProfit"), value: formatAmount(paymentSummary.actualProfit, data.costSummary.currency), icon: TrendingUp, backgroundColor: summaryFinanceMetricColor }
                     ].map((item, index) => {
                       const Icon = item.icon;
 
@@ -515,7 +518,14 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
               onClose={() => setTimelineOpen(false)}
               onSaved={handleTimelineSaved}
             />
-            <ProjectPaymentSettings project={data.project} t={t} onSaved={handlePaymentsSaved} />
+            <ProjectPaymentSettings
+              project={data.project}
+              currency={displayCurrency}
+              exchangeRateSnapshot={exchangeRateSnapshot}
+              formatAmount={formatAmount}
+              t={t}
+              onSaved={handlePaymentsSaved}
+            />
             <ProjectBasicsEditModal
               open={basicsOpen}
               project={data.project}

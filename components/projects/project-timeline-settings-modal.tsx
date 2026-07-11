@@ -8,6 +8,7 @@ import type { Project, Task, TimelineCustomRow } from "@/lib/types";
 import type { TranslationKey } from "@/lib/i18n/translations";
 import { DeleteConfirmDialog } from "@/components/ui/delete-confirm-dialog";
 import { ModalPortal } from "@/components/ui/modal-portal";
+import { Select } from "@/components/ui/select";
 import { cn } from "@/lib/utils/cn";
 
 type TimelineSettingsModalProps = {
@@ -113,7 +114,14 @@ export function ProjectTimelineSettingsModal({
   const [phases, setPhases] = useState<PhaseDraft[]>(initialDraft.phases);
   const [rows, setRows] = useState<RowDraft[]>(initialDraft.rows);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
   const [pendingDelete, setPendingDelete] = useState<PendingTimelineDelete | null>(null);
+  const timelineIsValid = useMemo(
+    () => phases.length > 0 && phases.every((phase) => (
+      Boolean(phase.startDate) && Boolean(phase.endDate) && phase.endDate >= phase.startDate
+    )),
+    [phases]
+  );
 
   useEffect(() => {
     if (!open) {
@@ -124,6 +132,7 @@ export function ProjectTimelineSettingsModal({
     setTitle(nextDraft.title);
     setPhases(nextDraft.phases);
     setRows(nextDraft.rows);
+    setSaveError("");
   }, [open, project]);
 
   if (!open) {
@@ -266,12 +275,24 @@ export function ProjectTimelineSettingsModal({
   };
 
   const save = async () => {
+    if (!timelineIsValid) {
+      setSaveError(t("timelineSaveError"));
+      return;
+    }
+
     setSaving(true);
-    const payload: UpdateProjectTimelineInput = { title, phases, rows };
-    const nextProject = await projectsApi.updateProjectTimeline(project.id, payload);
-    setSaving(false);
-    onSaved(nextProject);
-    onClose();
+    setSaveError("");
+
+    try {
+      const payload: UpdateProjectTimelineInput = { title, phases, rows };
+      const nextProject = await projectsApi.updateProjectTimeline(project.id, payload);
+      onSaved(nextProject);
+      onClose();
+    } catch {
+      setSaveError(t("timelineSaveError"));
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -384,6 +405,7 @@ export function ProjectTimelineSettingsModal({
                     <span className={fieldLabelClass}>{t("startDate")}</span>
                     <input
                       type="date"
+                      required
                       className={inputClass}
                       value={phase.startDate}
                       onChange={(event) => updatePhase(phase.id, { startDate: event.target.value })}
@@ -393,6 +415,8 @@ export function ProjectTimelineSettingsModal({
                     <span className={fieldLabelClass}>{t("endDate")}</span>
                     <input
                       type="date"
+                      required
+                      min={phase.startDate}
                       className={inputClass}
                       value={phase.endDate}
                       onChange={(event) => updatePhase(phase.id, { endDate: event.target.value })}
@@ -485,7 +509,7 @@ export function ProjectTimelineSettingsModal({
                           value={task.dueDate}
                           onChange={(event) => updateTask(phase.id, task.id, { dueDate: event.target.value })}
                         />
-                        <select
+                        <Select
                           className={inputClass}
                           value={task.assigneeId}
                           onChange={(event) => updateTask(phase.id, task.id, { assigneeId: event.target.value })}
@@ -495,7 +519,7 @@ export function ProjectTimelineSettingsModal({
                               {person.name}
                             </option>
                           ))}
-                        </select>
+                        </Select>
                         <button
                           type="button"
                           onClick={() => setPendingDelete({ phaseId: phase.id, taskId: task.id, type: "task" })}
@@ -595,6 +619,11 @@ export function ProjectTimelineSettingsModal({
         </div>
 
         <div className="flex flex-wrap items-center justify-end gap-3 border-t border-black/[0.06] p-4 sm:p-6">
+          {saveError ? (
+            <p className="mr-auto w-full text-sm font-black text-coral sm:w-auto" role="alert">
+              {saveError}
+            </p>
+          ) : null}
           <button
             type="button"
             onClick={onClose}
@@ -605,7 +634,7 @@ export function ProjectTimelineSettingsModal({
           <button
             type="button"
             onClick={save}
-            disabled={saving || phases.length === 0}
+            disabled={saving || !timelineIsValid}
             className="inline-flex h-12 items-center gap-2 rounded-full bg-coral px-5 text-sm font-black text-white shadow-soft disabled:opacity-50"
           >
             <Save size={17} />
@@ -619,7 +648,12 @@ export function ProjectTimelineSettingsModal({
       open={Boolean(pendingDelete)}
       title={t("deleteItemTitle")}
       description={t("deleteItemDescription")}
-      warning={t("deleteIrreversibleWarning")}
+      warning={
+        pendingDelete?.type === "phase" &&
+        project.budget?.phases.some((phase) => phase.phaseId === pendingDelete.phaseId)
+          ? t("timelinePhaseBudgetDeleteWarning")
+          : t("deleteIrreversibleWarning")
+      }
       cancelLabel={t("cancel")}
       confirmLabel={t("confirmDelete")}
       onCancel={() => setPendingDelete(null)}

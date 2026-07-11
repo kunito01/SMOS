@@ -3,9 +3,10 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { ArrowRight, Building2, FolderKanban, FolderPlus, ImagePlus, Layers3, Pencil, Plus, Rocket, Trash2, Upload, X } from "lucide-react";
+import { ArrowRight, Building2, Calculator, FolderKanban, FolderPlus, ImagePlus, Layers3, Pencil, Plus, Rocket, Trash2, Upload, X } from "lucide-react";
 import { ImageCard } from "@/components/cards/image-card";
 import { PixelForestScene } from "@/components/companies/pixel-forest-scene";
+import { useCostDisplayCurrency } from "@/components/costs/use-cost-display-currency";
 import {
   ProjectGroupManagerModal,
   type ProjectGroupManagerMode
@@ -26,6 +27,7 @@ import {
   translateDomainLabel
 } from "@/lib/i18n/domain-labels";
 import type { CompanySummary, ProjectGroupSummary } from "@/lib/types";
+import type { ExchangeRateSnapshot, MoneyCurrency } from "@/lib/utils/money";
 
 const spring = { type: "spring", stiffness: 150, damping: 18 } as const;
 const seededGroupDescriptionSuffix = "grouped for visual planning and progress sharing.";
@@ -53,10 +55,13 @@ const defaultBrandForm: BrandForm = {
   name: ""
 };
 
-const loadCompaniesData = async (): Promise<CompaniesData> => {
+const loadCompaniesData = async (
+  currency: MoneyCurrency,
+  snapshot: ExchangeRateSnapshot
+): Promise<CompaniesData> => {
   const [companySummaries, groupSummaries] = await Promise.all([
-    companiesApi.listCompanySummaries(),
-    groupsApi.listGroupSummaries()
+    companiesApi.listCompanySummaries(currency, snapshot),
+    groupsApi.listGroupSummaries({ currency, snapshot })
   ]);
 
   return { companySummaries, groupSummaries };
@@ -64,6 +69,12 @@ const loadCompaniesData = async (): Promise<CompaniesData> => {
 
 export function CompaniesPage() {
   const { language, t } = useI18n();
+  const {
+    displayCurrency,
+    exchangeRateSnapshot,
+    formatAmount,
+    isReady: isCurrencyReady
+  } = useCostDisplayCurrency();
   const [data, setData] = useState<CompaniesData | null>(null);
   const [brandModalOpen, setBrandModalOpen] = useState(false);
   const [brandForm, setBrandForm] = useState(defaultBrandForm);
@@ -73,10 +84,14 @@ export function CompaniesPage() {
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!isCurrencyReady) {
+      return;
+    }
+
     let isMounted = true;
 
     async function load() {
-      const nextData = await loadCompaniesData();
+      const nextData = await loadCompaniesData(displayCurrency, exchangeRateSnapshot);
 
       if (isMounted) {
         setData(nextData);
@@ -88,7 +103,7 @@ export function CompaniesPage() {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [displayCurrency, exchangeRateSnapshot, isCurrencyReady]);
 
   const totals = useMemo(() => {
     const companySummaries = data?.companySummaries ?? [];
@@ -116,7 +131,7 @@ export function CompaniesPage() {
         description: brandForm.description,
         name: brandForm.name
       });
-      setData(await loadCompaniesData());
+      setData(await loadCompaniesData(displayCurrency, exchangeRateSnapshot));
       setBrandForm(defaultBrandForm);
       setBrandCoverError("");
       setBrandModalOpen(false);
@@ -258,6 +273,13 @@ export function CompaniesPage() {
                       <div className="sm:col-span-3">
                         <ProgressBar value={summary.averageProgress} />
                       </div>
+                      <div className="flex items-center justify-between gap-3 rounded-full bg-cloud px-3 py-2 sm:col-span-3">
+                        <span className="inline-flex items-center gap-2 text-xs font-black text-muted">
+                          <Calculator size={15} />
+                          {t("projectBudgetTotal")}
+                        </span>
+                        <span className="font-black">{formatAmount(summary.budgetCostTotal, summary.currency)}</span>
+                      </div>
                       <div className="inline-flex items-center gap-2 text-sm font-black sm:col-span-3">
                         {t("openCompany")}
                         <ArrowRight size={16} />
@@ -336,7 +358,12 @@ export function CompaniesPage() {
                   <div className="mt-5">
                     <ProgressBar value={summary.averageProgress} />
                   </div>
-                  <p className="mt-4 text-sm font-black">{summary.totalProjectCount} {t("projectsCount")}</p>
+                  <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                    <p className="text-sm font-black">{summary.totalProjectCount} {t("projectsCount")}</p>
+                    <p className="text-lg font-black">
+                      {t("projectBudgetTotal")}: {formatAmount(summary.budgetCostTotal, summary.currency)}
+                    </p>
+                  </div>
                 </Card>
               ))}
             </div>
@@ -352,7 +379,7 @@ export function CompaniesPage() {
           setGroupManagerMode(null);
           setEditingGroupId(null);
         }}
-        onChanged={async () => setData(await loadCompaniesData())}
+        onChanged={async () => setData(await loadCompaniesData(displayCurrency, exchangeRateSnapshot))}
       />
       {brandModalOpen ? (
         <ModalPortal>

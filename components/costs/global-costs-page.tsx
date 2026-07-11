@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowRight, Banknote, BarChart3, CircleDollarSign, ReceiptText, TrendingUp } from "lucide-react";
+import { ArrowRight, Banknote, Calculator, CircleDollarSign, ReceiptText, TrendingUp } from "lucide-react";
 import { CostCurrencySelector } from "@/components/costs/cost-currency-selector";
 import { PixelUnderseaScene } from "@/components/costs/pixel-undersea-scene";
 import { useCostDisplayCurrency } from "@/components/costs/use-cost-display-currency";
@@ -15,6 +15,7 @@ import { SectionHeader } from "@/components/ui/section-header";
 import { costsApi, groupsApi, projectsApi } from "@/lib/api";
 import type { CostSummary, ProjectCostSummary } from "@/lib/api/costs";
 import {
+  budgetCostCategoryKeys,
   costCategoryKeys,
   formatDemoEntityName,
   getProjectGroupDisplayName,
@@ -104,7 +105,7 @@ export function GlobalCostsPage() {
                         {t("globalCostsTitle")}
                       </h1>
                       <p className="mt-5 max-w-2xl text-base font-bold leading-7 text-cyan-50/80 drop-shadow-[0_1px_0_rgba(2,14,36,0.32)]">
-                        {t("globalCostsBody")}
+                        {t("globalBudgetCostsBody")}
                       </p>
                     </div>
                     <CostCurrencySelector
@@ -125,9 +126,9 @@ export function GlobalCostsPage() {
                         className: "bg-[#1C4D7A] text-[#8be0e2]"
                       },
                       {
-                        label: t("futureEstimatedCost"),
-                        value: formatAmount(data.globalSummary.futureEstimatedCost, data.globalSummary.currency),
-                        icon: BarChart3,
+                        label: t("projectBudgetTotal"),
+                        value: formatAmount(data.globalSummary.budgetCostTotal, data.globalSummary.currency),
+                        icon: Calculator,
                         className: "bg-[#1C4D7A] text-[#8be0e2]"
                       },
                       {
@@ -204,7 +205,7 @@ export function GlobalCostsPage() {
                             </div>
                             <div className="text-right">
                               <p className="text-2xl font-black">
-                                {formatAmount(summary?.totalProjectCost ?? 0, summary?.currency ?? displayCurrency)}
+                                {formatAmount(summary?.budgetCostTotal ?? 0, summary?.currency ?? displayCurrency)}
                               </p>
                               <p className="mt-1 text-sm font-bold text-muted">
                                 {t("currentProfit")}: {formatAmount(summary?.actualProfit ?? 0, summary?.currency ?? displayCurrency)}
@@ -223,12 +224,12 @@ export function GlobalCostsPage() {
               </Card>
 
               <Card tone="lime" className="bg-[#ffc700] p-5 sm:p-6">
-                <SectionHeader eyebrow={t("costPulse")} title={t("privateCost")} />
+                <SectionHeader eyebrow={t("costPulse")} title={t("projectBudgetTotal")} />
                 <div className="mt-5 grid gap-4">
                   {Object.entries(data.globalSummary.byCategory).map(([category, value]) => (
                     <div key={category}>
                       <div className="mb-2 flex items-center justify-between text-sm font-black">
-                        <span>{t(costCategoryKeys[category as CostItem["category"]])}</span>
+                        <span>{t(budgetCostCategoryKeys[category] ?? costCategoryKeys[category as CostItem["category"]] ?? "costCategoryOther")}</span>
                         <span>{formatAmount(value, data.globalSummary.currency)}</span>
                       </div>
                       <ProgressBar value={(value / maxCategory) * 100} className="bg-white/70" barClassName="bg-ink" />

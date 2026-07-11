@@ -2,8 +2,13 @@
 
 import { useRef, useState } from "react";
 import { Download, FolderOpen, Save, Trash2 } from "lucide-react";
-import { projectsApi } from "@/lib/api";
+import { WorkspaceKeyDialog } from "@/components/auth/workspace-key-dialog";
+import { authApi, projectsApi } from "@/lib/api";
 import type { TranslationKey } from "@/lib/i18n/translations";
+import {
+  parseEncryptedWorkspaceEnvelope,
+  type EncryptedWorkspaceEnvelope
+} from "@/lib/security/workspace-crypto";
 import type { Project } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -51,6 +56,7 @@ type WindowWithFilePickers = Window & {
 };
 
 const saveSchema = "studio-map-os.project-save.v1" as const;
+const maxEncryptedProjectFileBytes = 16 * 1024 * 1024;
 
 const filePickerOptions = {
   excludeAcceptAllOption: false,
@@ -63,19 +69,14 @@ const filePickerOptions = {
   ]
 };
 
-const sanitizeFileName = (value: string) =>
-  value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9\u4e00-\u9fa5_-]+/gi, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 56) || "studio-map-project";
-
 const createProjectSave = (project: Project): ProjectSaveFile => ({
   schema: saveSchema,
   savedAt: new Date().toISOString(),
   project
 });
+
+const createProjectFileName = (exportedAt: string) =>
+  `studio-map-os-project-${exportedAt.replace(/[:.]/g, "-")}.smos-project.json`;
 
 const validateProjectSave = (value: unknown): ProjectSaveFile => {
   if (!value || typeof value !== "object") {
@@ -113,17 +114,20 @@ export function ProjectSaveControls({
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [busy, setBusy] = useState<"delete" | "load" | "save" | null>(null);
-
-  const fileName = `${sanitizeFileName(project.name)}-${project.id}.smos-project.json`;
+  const [pendingEncryptedSave, setPendingEncryptedSave] = useState<EncryptedWorkspaceEnvelope | null>(null);
+  const [unlockError, setUnlockError] = useState("");
 
   const saveProject = async () => {
-    const content = JSON.stringify(createProjectSave(project), null, 2);
-    const blob = new Blob([content], { type: "application/json" });
     const pickerWindow = window as WindowWithFilePickers;
 
     setBusy("save");
 
     try {
+      const encryptedSave = await authApi.encryptActiveWorkspaceFile("project", createProjectSave(project));
+      const content = JSON.stringify(encryptedSave, null, 2);
+      const blob = new Blob([content], { type: "application/json" });
+      const fileName = createProjectFileName(encryptedSave.exportedAt);
+
       if (pickerWindow.showDirectoryPicker) {
         const directory = await pickerWindow.showDirectoryPicker();
         const fileHandle = await directory.getFileHandle(fileName, { create: true });
@@ -138,8 +142,7 @@ export function ProjectSaveControls({
       setNotice(t("projectSavedFile"));
     } catch (error) {
       if (!(error instanceof DOMException && error.name === "AbortError")) {
-        downloadFallback(content, fileName);
-        setNotice(t("projectSavedFile"));
+        setNotice(t("projectFileInvalid"));
       }
     } finally {
       setBusy(null);
@@ -150,14 +153,43 @@ export function ProjectSaveControls({
     setBusy("load");
 
     try {
-      const content = await file.text();
-      const saveFile = validateProjectSave(JSON.parse(content));
+      if (file.size > maxEncryptedProjectFileBytes) {
+        throw new Error("Encrypted project save is too large");
+      }
+
+      const encryptedSave = parseEncryptedWorkspaceEnvelope(await file.text(), "project");
+
+      setUnlockError("");
+      setPendingEncryptedSave(encryptedSave);
+    } catch {
+      setNotice(t("workspaceEncryptedBackupOnly"));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const unlockProject = async (workspaceCode: string) => {
+    if (!pendingEncryptedSave) {
+      return;
+    }
+
+    setBusy("load");
+    setUnlockError("");
+
+    try {
+      const payload = await authApi.decryptActiveWorkspaceFile<unknown>(
+        pendingEncryptedSave,
+        workspaceCode,
+        "project"
+      );
+      const saveFile = validateProjectSave(payload);
       const nextProject = await projectsApi.replaceProject(project.id, saveFile.project);
 
+      setPendingEncryptedSave(null);
       onLoaded(nextProject);
       setNotice(t("projectLoadedFile"));
     } catch {
-      setNotice(t("projectFileInvalid"));
+      setUnlockError(t("workspaceKeyMismatchOrCorrupt"));
     } finally {
       setBusy(null);
     }
@@ -207,6 +239,9 @@ export function ProjectSaveControls({
         />
         <p className="mt-3 max-w-3xl text-sm font-semibold leading-6 text-white/62 [overflow-wrap:anywhere] max-[560px]:text-xs max-[560px]:leading-5 max-[360px]:mt-2 max-[360px]:text-[10px] max-[360px]:leading-4">
           {t("projectSaveConsoleBody")}
+        </p>
+        <p className="mt-2 max-w-3xl text-xs font-black leading-5 text-limepop/72 [overflow-wrap:anywhere]">
+          {t("workspaceBackupEncryptedHint")}
         </p>
         <div className="mt-5 grid min-w-0 gap-3 max-[560px]:mt-4 max-[560px]:gap-2 md:grid-cols-3">
           <Button
@@ -268,6 +303,16 @@ export function ProjectSaveControls({
           setDeleteOpen(false);
           void deleteProject();
         }}
+      />
+      <WorkspaceKeyDialog
+        open={Boolean(pendingEncryptedSave)}
+        busy={busy === "load"}
+        error={unlockError}
+        onCancel={() => {
+          setPendingEncryptedSave(null);
+          setUnlockError("");
+        }}
+        onConfirm={unlockProject}
       />
     </>
   );

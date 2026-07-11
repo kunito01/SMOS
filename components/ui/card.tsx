@@ -18,8 +18,9 @@ const tones: Record<CardTone, string> = {
 export function Card({ className, tone = "white", ...props }: CardProps) {
   return (
     <div
+      data-jelly-card="true"
       className={cn(
-        "rounded-studio-lg shadow-soft ring-1 ring-black/[0.04]",
+        "smos-game-card rounded-studio-lg shadow-soft ring-1 ring-black/[0.04]",
         tones[tone],
         className
       )}

@@ -2,9 +2,10 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, ArrowRight, FolderKanban, Layers3, Pencil, Rocket } from "lucide-react";
+import { ArrowLeft, ArrowRight, Calculator, FolderKanban, Layers3, Pencil, Rocket } from "lucide-react";
 import { ImageCard } from "@/components/cards/image-card";
 import { CompanyBasicsEditModal } from "@/components/companies/company-basics-edit-modal";
+import { useCostDisplayCurrency } from "@/components/costs/use-cost-display-currency";
 import { ProjectGroupManagerModal } from "@/components/companies/project-group-manager-modal";
 import { ProjectCard } from "@/components/domain/project-card";
 import { AppShell } from "@/components/layout/app-shell";
@@ -23,6 +24,7 @@ import {
   translateDomainLabel
 } from "@/lib/i18n/domain-labels";
 import type { Company, DashboardOverview, Project, ProjectGroup, ProjectGroupSummary } from "@/lib/types";
+import type { ExchangeRateSnapshot, MoneyCurrency } from "@/lib/utils/money";
 
 type CompanyDetailData = {
   company: Company;
@@ -42,12 +44,19 @@ const isSeededGroupDescription = (name: string, description: string) =>
   description === `${name}, ${seededGroupDescriptionSuffix}` ||
   (description.startsWith(`${name} under `) && description.endsWith(seededGroupDescriptionSuffix));
 
-const loadCompanyDetailData = async (companyId: string): Promise<CompanyDetailData> => {
+const loadCompanyDetailData = async (
+  companyId: string,
+  currency: MoneyCurrency,
+  snapshot: ExchangeRateSnapshot
+): Promise<CompanyDetailData> => {
   const [company, groupSummaries, projects, overview] = await Promise.all([
     companiesApi.getCompany(companyId),
-    groupsApi.listGroupSummaries({ companyId }),
+    groupsApi.listGroupSummaries({ companyId, currency, snapshot }),
     companiesApi.listCompanyProjects(companyId),
-    projectsApi.getDashboardOverview({ type: "company", id: companyId }, { includeArchivedTotal: false })
+    projectsApi.getDashboardOverview(
+      { type: "company", id: companyId },
+      { includeArchivedTotal: false, currency, snapshot }
+    )
   ]);
 
   return {
@@ -61,16 +70,26 @@ const loadCompanyDetailData = async (companyId: string): Promise<CompanyDetailDa
 
 export function CompanyDetailPage({ companyId }: { companyId: string }) {
   const { language, t } = useI18n();
+  const {
+    displayCurrency,
+    exchangeRateSnapshot,
+    formatAmount,
+    isReady: isCurrencyReady
+  } = useCostDisplayCurrency();
   const [data, setData] = useState<CompanyDetailData | null>(null);
   const [basicsOpen, setBasicsOpen] = useState(false);
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
 
   useEffect(() => {
+    if (!isCurrencyReady) {
+      return;
+    }
+
     let isMounted = true;
 
     async function load() {
-      const nextData = await loadCompanyDetailData(companyId);
+      const nextData = await loadCompanyDetailData(companyId, displayCurrency, exchangeRateSnapshot);
 
       if (isMounted) {
         setData(nextData);
@@ -82,7 +101,7 @@ export function CompanyDetailPage({ companyId }: { companyId: string }) {
     return () => {
       isMounted = false;
     };
-  }, [companyId]);
+  }, [companyId, displayCurrency, exchangeRateSnapshot, isCurrencyReady]);
 
   const groupById = useMemo(
     () => new Map((data?.groups ?? []).map((group) => [group.id, group])),
@@ -139,12 +158,13 @@ export function CompanyDetailPage({ companyId }: { companyId: string }) {
                 </div>
               </ImageCard>
 
-              <div className="grid min-w-0 self-end grid-cols-4 gap-[clamp(4px,0.8vw,8px)]">
+              <div className="grid min-w-0 self-end grid-cols-5 gap-[clamp(4px,0.8vw,8px)]">
                 {[
                   { label: t("projectsCount"), value: data.overview.totalProjectCount, icon: Layers3, iconClassName: "bg-limepop text-ink" },
                   { label: t("projectGroupsCount"), value: data.groups.length, icon: FolderKanban, iconClassName: "bg-aqua text-ink" },
                   { label: t("activeCount"), value: data.overview.activeProjectCount, icon: Rocket, iconClassName: "bg-coral text-white" },
-                  { label: t("averageProgressShort"), value: `${data.overview.averageProgress}%`, icon: ArrowRight, iconClassName: "bg-ink text-white" }
+                  { label: t("averageProgressShort"), value: `${data.overview.averageProgress}%`, icon: ArrowRight, iconClassName: "bg-ink text-white" },
+                  { label: t("projectBudgetTotal"), value: formatAmount(data.overview.budgetCostTotal, data.overview.currency), icon: Calculator, iconClassName: "bg-[#ffc700] text-ink" }
                 ].map((metric) => {
                   const Icon = metric.icon;
 
@@ -208,6 +228,9 @@ export function CompanyDetailPage({ companyId }: { companyId: string }) {
                       <ProgressBar value={summary.averageProgress} />
                     </div>
                     <p className="mt-4 text-sm font-black">{summary.totalProjectCount} {t("projectsCount")}</p>
+                    <p className="mt-2 text-xl font-black">
+                      {t("projectBudgetTotal")}: {formatAmount(summary.budgetCostTotal, summary.currency)}
+                    </p>
                   </Card>
                 ))}
               </div>
@@ -238,7 +261,9 @@ export function CompanyDetailPage({ companyId }: { companyId: string }) {
         groupSummaries={data?.groupSummaries ?? []}
         initialGroupId={editingGroupId ?? undefined}
         onClose={() => setEditingGroupId(null)}
-        onChanged={async () => setData(await loadCompanyDetailData(companyId))}
+        onChanged={async () =>
+          setData(await loadCompanyDetailData(companyId, displayCurrency, exchangeRateSnapshot))
+        }
       />
     </AppShell>
   );

@@ -6,6 +6,7 @@ import { useI18n } from "@/components/providers/app-providers";
 import { Button } from "@/components/ui/button";
 import { DeleteConfirmDialog } from "@/components/ui/delete-confirm-dialog";
 import { ModalPortal } from "@/components/ui/modal-portal";
+import { Select } from "@/components/ui/select";
 import { groupsApi } from "@/lib/api";
 import { getProjectGroupDisplayName } from "@/lib/i18n/domain-labels";
 import type { ProjectGroupSummary } from "@/lib/types";
@@ -192,7 +193,7 @@ export function ProjectGroupManagerModal({
               <div className="mt-6 grid gap-4">
                 <label className="grid gap-2">
                   <span className="text-sm font-black">{t("projectGroupsCount")}</span>
-                  <select
+                  <Select
                     value={selectedGroupId}
                     onChange={(event) => {
                       setSelectedGroupId(event.target.value);
@@ -205,7 +206,7 @@ export function ProjectGroupManagerModal({
                         {getProjectGroupDisplayName(summary.group, language, t)}
                       </option>
                     ))}
-                  </select>
+                  </Select>
                 </label>
 
                 {selectedSummary ? (

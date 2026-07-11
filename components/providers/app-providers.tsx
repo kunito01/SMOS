@@ -1,20 +1,17 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { CostDisplayCurrencyProvider } from "@/components/costs/use-cost-display-currency";
+import { JellyInteractions } from "@/components/providers/jelly-interactions";
 import { authApi } from "@/lib/api";
+import type { LocalAuthUser, RegisterPayload, RegisterResult } from "@/lib/api/auth";
 import { Language, TranslationKey, languageLocales, languages, translations } from "@/lib/i18n/translations";
 
-type MockUser = {
-  id: string;
-  name: string;
-  email: string;
-};
-
 type AuthContextValue = {
-  user: MockUser | null;
+  user: LocalAuthUser | null;
   isReady: boolean;
   signIn: (email: string, password: string) => Promise<void>;
-  signUp: (name: string, email: string, password: string) => Promise<void>;
+  signUp: (payload: RegisterPayload) => Promise<RegisterResult>;
   signOut: () => Promise<void>;
 };
 
@@ -28,25 +25,15 @@ type LanguageContextValue = {
 const AuthContext = createContext<AuthContextValue | null>(null);
 const LanguageContext = createContext<LanguageContextValue | null>(null);
 
-const authStorageKey = "studio-map-os.mock-user";
 const languageStorageKey = "studio-map-os.language";
 
 export function AppProviders({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<MockUser | null>(null);
+  const [user, setUser] = useState<LocalAuthUser | null>(null);
   const [isReady, setIsReady] = useState(false);
   const [language, setLanguageState] = useState<Language>("en");
 
   useEffect(() => {
-    const storedUser = window.localStorage.getItem(authStorageKey);
     const storedLanguage = window.localStorage.getItem(languageStorageKey);
-
-    if (storedUser) {
-      try {
-        setUser(JSON.parse(storedUser) as MockUser);
-      } catch {
-        window.localStorage.removeItem(authStorageKey);
-      }
-    }
 
     if (languages.some((item) => item === storedLanguage)) {
       setLanguageState(storedLanguage as Language);
@@ -72,19 +59,21 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
         const { user: nextUser } = await authApi.login({ email, password });
 
         setUser(nextUser);
-        window.localStorage.setItem(authStorageKey, JSON.stringify(nextUser));
       },
-      signUp: async (name: string, email: string, password: string) => {
-        const { user: nextUser } = await authApi.register({ name, email, password });
+      signUp: async (payload: RegisterPayload) => {
+        const result = await authApi.register(payload);
+        const nextUser = result.user;
         await authApi.handshake(nextUser.id);
 
+        if (result.restoredLanguage) {
+          setLanguageState(result.restoredLanguage);
+        }
         setUser(nextUser);
-        window.localStorage.setItem(authStorageKey, JSON.stringify(nextUser));
+        return result;
       },
       signOut: async () => {
         await authApi.logout();
         setUser(null);
-        window.localStorage.removeItem(authStorageKey);
       }
     }),
     [isReady, user]
@@ -106,7 +95,12 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
 
   return (
     <LanguageContext.Provider value={languageValue}>
-      <AuthContext.Provider value={authValue}>{children}</AuthContext.Provider>
+      <AuthContext.Provider value={authValue}>
+        <CostDisplayCurrencyProvider>
+          <JellyInteractions />
+          {children}
+        </CostDisplayCurrencyProvider>
+      </AuthContext.Provider>
     </LanguageContext.Provider>
   );
 }

@@ -7,10 +7,9 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { ModalPortal } from "@/components/ui/modal-portal";
 import { Pill } from "@/components/ui/pill";
+import { Select } from "@/components/ui/select";
 import { librariesApi, projectsApi } from "@/lib/api";
 import {
-  billingTypeKeys,
-  costCategoryKeys,
   formatDemoEntityName,
   getProjectGroupDisplayName,
   personTypeKeys,
@@ -19,8 +18,6 @@ import {
 } from "@/lib/i18n/domain-labels";
 import type {
   Company,
-  CostItem,
-  CostLibraryItem,
   CreateProjectInput,
   Person,
   Project,
@@ -40,57 +37,45 @@ type ProjectCreateModalProps = {
 
 const statusOptions: ProjectStatus[] = ["planning", "active", "paused", "terminated", "completed"];
 
-const today = "2026-06-26";
+const defaultProjectStartDate = "2026-06-01";
+const defaultProjectEndDate = "2026-10-24";
 
-const addMonths = (date: string, months: number) => {
-  const next = new Date(`${date}T00:00:00`);
-  next.setMonth(next.getMonth() + months);
-  return next.toISOString().slice(0, 10);
-};
+const createInitialForm = (companies: Company[], groups: ProjectGroup[]): CreateProjectInput => ({
+  name: "",
+  companyId: companies[0]?.id ?? "",
+  groupId: groups[0]?.id ?? "",
+  status: "planning",
+  startDate: defaultProjectStartDate,
+  endDate: defaultProjectEndDate,
+  toolIds: [],
+  personIds: [],
+  costTemplateIds: []
+});
 
 export function ProjectCreateModal({ companies, groups, open, onClose, onCreated }: ProjectCreateModalProps) {
   const { language, t } = useI18n();
   const [people, setPeople] = useState<Person[]>([]);
   const [tools, setTools] = useState<Tool[]>([]);
-  const [costTemplates, setCostTemplates] = useState<CostLibraryItem[]>([]);
-  const [form, setForm] = useState<CreateProjectInput>({
-    name: "",
-    companyId: companies[0]?.id ?? "",
-    groupId: groups[0]?.id ?? "",
-    status: "planning",
-    startDate: today,
-    endDate: addMonths(today, 4),
-    toolIds: [],
-    personIds: [],
-    costTemplateIds: []
-  });
+  const [form, setForm] = useState<CreateProjectInput>(() => createInitialForm(companies, groups));
 
   useEffect(() => {
     if (!open) {
       return;
     }
 
+    setForm(createInitialForm(companies, groups));
+
     let isMounted = true;
 
     async function loadLibraries() {
-      const [nextPeople, nextTools, nextCostTemplates] = await Promise.all([
+      const [nextPeople, nextTools] = await Promise.all([
         librariesApi.listPeople(),
-        librariesApi.listTools(),
-        librariesApi.listCostTemplates()
+        librariesApi.listTools()
       ]);
 
       if (isMounted) {
         setPeople(nextPeople);
         setTools(nextTools);
-        setCostTemplates(nextCostTemplates);
-        setForm((current) => ({
-          ...current,
-          personIds: current.personIds.length ? current.personIds : nextPeople.slice(0, 3).map((person) => person.id),
-          toolIds: current.toolIds.length ? current.toolIds : nextTools.slice(0, 4).map((tool) => tool.id),
-          costTemplateIds: current.costTemplateIds.length
-            ? current.costTemplateIds
-            : nextCostTemplates.slice(0, 2).map((cost) => cost.id)
-        }));
       }
     }
 
@@ -99,7 +84,7 @@ export function ProjectCreateModal({ companies, groups, open, onClose, onCreated
     return () => {
       isMounted = false;
     };
-  }, [open]);
+  }, [companies, groups, open]);
 
   useEffect(() => {
     if (!form.companyId && companies[0]) {
@@ -121,7 +106,7 @@ export function ProjectCreateModal({ companies, groups, open, onClose, onCreated
     return null;
   }
 
-  const toggle = (key: "toolIds" | "personIds" | "costTemplateIds", id: string) => {
+  const toggle = (key: "toolIds" | "personIds", id: string) => {
     setForm((current) => {
       const values = current[key];
       return {
@@ -134,7 +119,12 @@ export function ProjectCreateModal({ companies, groups, open, onClose, onCreated
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const name = form.name.trim() || t("projectNamePlaceholder");
-    const project = await projectsApi.createProject({ ...form, name });
+    const project = await projectsApi.createProject({
+      ...form,
+      name,
+      endDate: form.endDate >= form.startDate ? form.endDate : form.startDate,
+      costTemplateIds: []
+    });
     onCreated(project);
   };
 
@@ -152,7 +142,7 @@ export function ProjectCreateModal({ companies, groups, open, onClose, onCreated
                 <p className="text-sm font-black uppercase text-muted">{t("addProject")}</p>
               </div>
               <h2 className="mt-3 text-3xl font-black leading-none">{t("createProjectTitle")}</h2>
-              <p className="mt-3 max-w-2xl text-sm font-semibold leading-6 text-muted">{t("createProjectBody")}</p>
+              <p className="mt-3 max-w-2xl text-sm font-semibold leading-6 text-muted">{t("createProjectBudgetBody")}</p>
             </div>
             <Button type="button" variant="ghost" size="icon" aria-label={t("cancel")} onClick={onClose}>
               <X size={20} />
@@ -176,7 +166,7 @@ export function ProjectCreateModal({ companies, groups, open, onClose, onCreated
                     </label>
                     <label className="grid gap-2">
                       <span className="text-sm font-black text-muted">{t("chooseCompany")}</span>
-                      <select
+                      <Select
                         value={form.companyId}
                         onChange={(event) =>
                           setForm((current) => ({ ...current, companyId: event.target.value }))
@@ -188,11 +178,11 @@ export function ProjectCreateModal({ companies, groups, open, onClose, onCreated
                             {formatDemoEntityName(company.name, company.id, "company", t)}
                           </option>
                         ))}
-                      </select>
+                      </Select>
                     </label>
                     <label className="grid gap-2">
                       <span className="text-sm font-black text-muted">{t("chooseGroup")}</span>
-                      <select
+                      <Select
                         value={form.groupId}
                         onChange={(event) => setForm((current) => ({ ...current, groupId: event.target.value }))}
                         className="h-12 rounded-full border-0 bg-white px-4 text-sm font-bold text-ink outline-none ring-1 ring-black/[0.06]"
@@ -203,11 +193,11 @@ export function ProjectCreateModal({ companies, groups, open, onClose, onCreated
                             {getProjectGroupDisplayName(group, language, t)}
                           </option>
                         ))}
-                      </select>
+                      </Select>
                     </label>
                     <label className="grid gap-2">
                       <span className="text-sm font-black text-muted">{t("projectStatus")}</span>
-                      <select
+                      <Select
                         value={form.status}
                         onChange={(event) =>
                           setForm((current) => ({ ...current, status: event.target.value as ProjectStatus }))
@@ -217,7 +207,7 @@ export function ProjectCreateModal({ companies, groups, open, onClose, onCreated
                         {statusOptions.map((status) => (
                           <option key={status} value={status}>{t(statusKeys[status])}</option>
                         ))}
-                      </select>
+                      </Select>
                     </label>
                   </div>
                 </section>
@@ -229,6 +219,7 @@ export function ProjectCreateModal({ companies, groups, open, onClose, onCreated
                       <span className="text-sm font-black text-muted">{t("startDate")}</span>
                       <input
                         type="date"
+                        required
                         value={form.startDate}
                         onChange={(event) => setForm((current) => ({ ...current, startDate: event.target.value }))}
                         className="h-12 rounded-full border-0 bg-white px-4 text-sm font-bold text-ink outline-none ring-1 ring-black/[0.06]"
@@ -238,6 +229,8 @@ export function ProjectCreateModal({ companies, groups, open, onClose, onCreated
                       <span className="text-sm font-black text-muted">{t("endDate")}</span>
                       <input
                         type="date"
+                        required
+                        min={form.startDate}
                         value={form.endDate}
                         onChange={(event) => setForm((current) => ({ ...current, endDate: event.target.value }))}
                         className="h-12 rounded-full border-0 bg-white px-4 text-sm font-bold text-ink outline-none ring-1 ring-black/[0.06]"
@@ -246,27 +239,6 @@ export function ProjectCreateModal({ companies, groups, open, onClose, onCreated
                   </div>
                 </section>
 
-                <section className="rounded-studio bg-cloud/70 p-4">
-                  <h3 className="text-xl font-black">{t("chooseCostTemplates")}</h3>
-                  <div className="mt-4 grid gap-3 md:grid-cols-2">
-                    {costTemplates.map((cost) => (
-                      <label key={cost.id} className="flex cursor-pointer gap-3 rounded-studio bg-white p-3">
-                        <input
-                          type="checkbox"
-                          checked={form.costTemplateIds.includes(cost.id)}
-                          onChange={() => toggle("costTemplateIds", cost.id)}
-                          className="mt-1 size-5 shrink-0 accent-coral"
-                        />
-                        <span className="min-w-0">
-                          <span className="block font-black">{cost.name}</span>
-                          <span className="mt-1 block text-xs font-bold text-muted">
-                            {t(costCategoryKeys[cost.category as CostItem["category"]])} · {cost.currency} {cost.amount} · {t(billingTypeKeys[cost.billingType])}
-                          </span>
-                        </span>
-                      </label>
-                    ))}
-                  </div>
-                </section>
               </div>
 
               <div className="grid gap-4 content-start">
@@ -311,6 +283,7 @@ export function ProjectCreateModal({ companies, groups, open, onClose, onCreated
                 </section>
               </div>
             </div>
+
           </div>
 
           <div className="flex flex-wrap justify-end gap-3 border-t border-black/[0.06] p-5 sm:p-6">

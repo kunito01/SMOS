@@ -132,6 +132,21 @@ export const costCategoryKeys: Record<CostItem["category"], TranslationKey> = {
   other: "costCategoryOther"
 };
 
+export const budgetCostCategoryKeys: Record<string, TranslationKey> = {
+  personnel: "budgetCategoryPersonnel",
+  travel: "budgetCategoryTravel",
+  "daily-expenses": "budgetCategoryDailyExpenses",
+  outsourcing: "budgetCategoryOutsourcing",
+  extra: "budgetCategoryExtra",
+  software: "budgetCategorySoftware",
+  contingency: "budgetCategoryContingency",
+  tax: "budgetCategoryTax",
+  people: "costCategoryPeople",
+  asset: "costCategoryAsset",
+  server: "costCategoryServer",
+  other: "costCategoryOther"
+};
+
 export const personTypeKeys: Record<Person["type"], TranslationKey> = {
   internal: "personTypeInternal",
   external: "personTypeExternal",

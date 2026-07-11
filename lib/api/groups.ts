@@ -1,8 +1,13 @@
 import { mockApi, requireEntity } from "@/lib/api/mock-client";
 import { hydrateMockDatabase, persistMockDatabase } from "@/lib/api/mock-persistence";
 import type { Language } from "@/lib/i18n/translations";
-import { createDashboardOverview, getProjectActualCost, mockDatabase } from "@/lib/mock";
+import { createDashboardOverview, mockDatabase } from "@/lib/mock";
 import type { ProjectGroup, ProjectGroupSummary } from "@/lib/types";
+import {
+  bundledExchangeRateSnapshot,
+  type ExchangeRateSnapshot,
+  type MoneyCurrency
+} from "@/lib/utils/money";
 
 export type CreateGroupInput = {
   description: string;
@@ -14,6 +19,8 @@ export type UpdateGroupInput = CreateGroupInput;
 
 export type ListGroupSummariesOptions = {
   companyId?: string;
+  currency?: MoneyCurrency;
+  snapshot?: ExchangeRateSnapshot;
 };
 
 export type DeleteGroupResult = {
@@ -36,12 +43,12 @@ const getGroupNameForLanguage = (group: ProjectGroup, language: Language) =>
   group.nameI18n?.[language]?.trim() || group.name.trim();
 
 export async function listGroups() {
-  hydrateMockDatabase();
+  await hydrateMockDatabase();
   return mockApi(mockDatabase.groups);
 }
 
 export async function getGroup(groupId: string) {
-  hydrateMockDatabase();
+  await hydrateMockDatabase();
   const group = requireEntity(
     mockDatabase.groups.find((item) => item.id === groupId),
     `Project group not found: ${groupId}`
@@ -51,7 +58,7 @@ export async function getGroup(groupId: string) {
 }
 
 export async function createGroup(input: CreateGroupInput) {
-  hydrateMockDatabase();
+  await hydrateMockDatabase();
   const name = input.name.trim();
 
   if (!name) {
@@ -78,13 +85,13 @@ export async function createGroup(input: CreateGroupInput) {
   };
 
   mockDatabase.groups = [group, ...mockDatabase.groups];
-  persistMockDatabase();
+  await persistMockDatabase();
 
   return mockApi(group);
 }
 
 export async function updateGroup(groupId: string, input: UpdateGroupInput) {
-  hydrateMockDatabase();
+  await hydrateMockDatabase();
   const group = requireEntity(
     mockDatabase.groups.find((item) => item.id === groupId),
     `Project group not found: ${groupId}`
@@ -108,13 +115,13 @@ export async function updateGroup(groupId: string, input: UpdateGroupInput) {
 
   group.nameI18n = { ...group.nameI18n, [input.language]: name };
   group.description = input.description.trim();
-  persistMockDatabase();
+  await persistMockDatabase();
 
   return mockApi(group);
 }
 
 export async function deleteGroup(groupId: string): Promise<DeleteGroupResult> {
-  hydrateMockDatabase();
+  await hydrateMockDatabase();
   const group = requireEntity(
     mockDatabase.groups.find((item) => item.id === groupId),
     `Project group not found: ${groupId}`
@@ -125,34 +132,42 @@ export async function deleteGroup(groupId: string): Promise<DeleteGroupResult> {
     project.groupId = "";
   });
   mockDatabase.groups = mockDatabase.groups.filter((item) => item.id !== groupId);
-  persistMockDatabase();
+  await persistMockDatabase();
 
   return mockApi({ status: "deleted", group, unlinkedProjectCount: linkedProjects.length });
 }
 
 export async function listGroupProjects(groupId: string) {
-  hydrateMockDatabase();
+  await hydrateMockDatabase();
   return mockApi(mockDatabase.projects.filter((project) => project.groupId === groupId && !project.archivedAt));
 }
 
 export async function listGroupSummaries(
   options: ListGroupSummariesOptions = {}
 ): Promise<ProjectGroupSummary[]> {
-  hydrateMockDatabase();
+  await hydrateMockDatabase();
+  const currency = options.currency ?? "CNY";
+  const snapshot = options.snapshot ?? bundledExchangeRateSnapshot;
   const scopedProjects = mockDatabase.projects.filter(
     (project) => !project.archivedAt && (!options.companyId || project.companyId === options.companyId)
   );
   const summaries = mockDatabase.groups.map((group) => {
     const projects = scopedProjects.filter((project) => project.groupId === group.id);
-    const overview = createDashboardOverview(projects, { includeArchivedTotal: false });
+    const overview = createDashboardOverview(projects, {
+      includeArchivedTotal: false,
+      currency,
+      snapshot
+    });
 
     return {
       group,
+      currency,
       totalProjectCount: overview.totalProjectCount,
       activeProjectCount: overview.activeProjectCount,
       completedProjectCount: overview.completedProjectCount,
       averageProgress: overview.averageProgress,
-      privateCostTotal: projects.reduce((sum, project) => sum + getProjectActualCost(project), 0)
+      actualCostTotal: overview.actualCostSoFar,
+      budgetCostTotal: overview.budgetCostTotal
     };
   });
 

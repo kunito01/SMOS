@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   CalendarClock,
   ChevronDown,
@@ -20,6 +20,7 @@ import {
   X
 } from "lucide-react";
 import { PixelDesertScene } from "@/components/libraries/pixel-desert-scene";
+import { useCostDisplayCurrency } from "@/components/costs/use-cost-display-currency";
 import { AppShell } from "@/components/layout/app-shell";
 import { useI18n } from "@/components/providers/app-providers";
 import { Button } from "@/components/ui/button";
@@ -28,8 +29,10 @@ import { DeleteConfirmDialog } from "@/components/ui/delete-confirm-dialog";
 import { LoadingState } from "@/components/ui/loading-state";
 import { Pill } from "@/components/ui/pill";
 import { ProgressBar } from "@/components/ui/progress-bar";
+import { Select } from "@/components/ui/select";
 import { SectionHeader } from "@/components/ui/section-header";
 import { librariesApi } from "@/lib/api";
+import { getToolMonthlySubscriptionCost } from "@/lib/mock";
 import {
   billingTypeKeys,
   costCategoryKeys,
@@ -42,9 +45,8 @@ import {
   toolCategoryKeys
 } from "@/lib/i18n/domain-labels";
 import { formatLocalizedDate } from "@/lib/i18n/formatters";
-import { languageLocales } from "@/lib/i18n/translations";
 import type { CostItem, CostLibraryItem, Person, PersonProjectParticipation, ProjectStatus, Tool } from "@/lib/types";
-import { formatCurrency, toCny } from "@/lib/utils/money";
+import { formatNumber, type MoneyCurrency } from "@/lib/utils/money";
 
 type LibrariesData = {
   people: Person[];
@@ -53,6 +55,7 @@ type LibrariesData = {
   personProjects: PersonProjectParticipation[];
   subscriptionSummary: {
     activeSubscriptionCount: number;
+    currency: MoneyCurrency;
     monthlyTotal: number;
   };
 };
@@ -132,6 +135,12 @@ const defaultCost: Omit<CostLibraryItem, "id"> = {
 
 export function LibrariesPage() {
   const { language, t } = useI18n();
+  const {
+    displayCurrency,
+    exchangeRateSnapshot,
+    formatAmount,
+    isReady: isCurrencyReady
+  } = useCostDisplayCurrency();
   const [data, setData] = useState<LibrariesData | null>(null);
   const [personForm, setPersonForm] = useState(defaultPerson);
   const [editingPersonId, setEditingPersonId] = useState<string | null>(null);
@@ -143,20 +152,22 @@ export function LibrariesPage() {
   const [pendingDelete, setPendingDelete] = useState<PendingLibraryDelete | null>(null);
   const [expandedPersonProjectsId, setExpandedPersonProjectsId] = useState<string | null>(null);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     const [people, tools, costTemplates, personProjects, subscriptionSummary] = await Promise.all([
       librariesApi.listPeople(),
       librariesApi.listTools(),
       librariesApi.listCostTemplates(),
-      librariesApi.listPersonProjectParticipation(),
-      librariesApi.getToolSubscriptionSummary()
+      librariesApi.listPersonProjectParticipation(displayCurrency, exchangeRateSnapshot),
+      librariesApi.getToolSubscriptionSummary(displayCurrency, exchangeRateSnapshot)
     ]);
     setData({ people, tools, costTemplates, personProjects, subscriptionSummary });
-  };
+  }, [displayCurrency, exchangeRateSnapshot]);
 
   useEffect(() => {
-    load();
-  }, []);
+    if (isCurrencyReady) {
+      void load();
+    }
+  }, [isCurrencyReady, load]);
 
   const totals = useMemo(
     () => ({
@@ -188,8 +199,9 @@ export function LibrariesPage() {
   );
 
   const formatMoney = (currency?: CostItem["currency"], amount?: number) =>
-    amount && currency ? `${currency} ${amount.toLocaleString(languageLocales[language])}` : t("noDailyCost");
-  const formatCny = (value: number) => formatCurrency(value, "CNY", languageLocales[language]);
+    amount && currency ? `${currency} ${formatNumber(amount)}` : t("noDailyCost");
+  const formatTotal = (value: number, currency: MoneyCurrency = displayCurrency) =>
+    formatAmount(value, currency);
 
   const personToForm = (person: Person): PersonForm => ({
     name: person.name,
@@ -230,7 +242,7 @@ export function LibrariesPage() {
       name: form.name.trim(),
       category: form.category,
       subscription:
-        amount > 0 && form.subscriptionAccountEmail.trim()
+        amount > 0
           ? {
               amount,
               currency: form.subscriptionCurrency,
@@ -243,16 +255,7 @@ export function LibrariesPage() {
   };
 
   const getToolMonthlyCost = (tool: Tool) => {
-    if (!tool.subscription?.amount) {
-      return 0;
-    }
-
-    const monthlyAmount =
-      tool.subscription.billingCycle === "yearly"
-        ? tool.subscription.amount / 12
-        : tool.subscription.amount;
-
-    return toCny(monthlyAmount, tool.subscription.currency);
+    return getToolMonthlySubscriptionCost(tool, displayCurrency, exchangeRateSnapshot);
   };
 
   const submitPerson = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -386,7 +389,7 @@ export function LibrariesPage() {
                       { label: t("softwareLibrary"), value: totals.tools, icon: Wrench },
                       {
                         label: t("monthlySubscriptionCost"),
-                        value: formatCny(data.subscriptionSummary.monthlyTotal),
+                        value: formatTotal(data.subscriptionSummary.monthlyTotal, data.subscriptionSummary.currency),
                         icon: CreditCard
                       },
                       { label: t("costTemplateLibrary"), value: totals.costs, icon: CircleDollarSign }
@@ -440,7 +443,7 @@ export function LibrariesPage() {
                     placeholder={t("role")}
                     className="h-11 rounded-full border-0 bg-white px-4 text-sm font-bold outline-none ring-1 ring-black/[0.06]"
                   />
-                  <select
+                  <Select
                     value={personForm.type}
                     onChange={(event) =>
                       setPersonForm((current) => ({ ...current, type: event.target.value as Person["type"] }))
@@ -450,7 +453,7 @@ export function LibrariesPage() {
                     {(["internal", "external", "vendor", "ai-tool"] as Person["type"][]).map((type) => (
                       <option key={type} value={type}>{t(personTypeKeys[type])}</option>
                     ))}
-                  </select>
+                  </Select>
                   <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(7rem,0.45fr)] xl:grid-cols-1 2xl:grid-cols-[minmax(0,1fr)_minmax(7rem,0.45fr)]">
                     <input
                       type="number"
@@ -460,7 +463,7 @@ export function LibrariesPage() {
                       placeholder={t("dailyCost")}
                       className="h-11 min-w-0 rounded-full border-0 bg-white px-4 text-sm font-bold outline-none ring-1 ring-black/[0.06]"
                     />
-                    <select
+                    <Select
                       value={personForm.dailyCostCurrency}
                       onChange={(event) =>
                         setPersonForm((current) => ({
@@ -473,9 +476,9 @@ export function LibrariesPage() {
                       {currencyOptions.map((currency) => (
                         <option key={currency} value={currency}>{currency}</option>
                       ))}
-                    </select>
+                    </Select>
                   </div>
-                  <select
+                  <Select
                     value={personForm.costTemplateId}
                     onChange={(event) => setPersonForm((current) => ({ ...current, costTemplateId: event.target.value }))}
                     className="h-11 rounded-full border-0 bg-white px-4 text-sm font-bold outline-none ring-1 ring-black/[0.06]"
@@ -486,7 +489,7 @@ export function LibrariesPage() {
                         {template.name} · {template.currency} {template.amount}
                       </option>
                     ))}
-                  </select>
+                  </Select>
                   <Button type="submit" size="md">
                     <UserPlus size={18} />
                     {t("addPerson")}
@@ -527,7 +530,7 @@ export function LibrariesPage() {
                             className="h-11 rounded-full border-0 bg-cloud/75 px-4 text-sm font-bold outline-none ring-1 ring-black/[0.06]"
                           />
                         </div>
-                        <select
+                        <Select
                           value={editingPersonForm.type}
                           onChange={(event) =>
                             setEditingPersonForm((current) => ({ ...current, type: event.target.value as Person["type"] }))
@@ -537,7 +540,7 @@ export function LibrariesPage() {
                           {(["internal", "external", "vendor", "ai-tool"] as Person["type"][]).map((type) => (
                             <option key={type} value={type}>{t(personTypeKeys[type])}</option>
                           ))}
-                        </select>
+                        </Select>
                         <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(7rem,0.45fr)] xl:grid-cols-1 2xl:grid-cols-[minmax(0,1fr)_minmax(7rem,0.45fr)]">
                           <input
                             type="number"
@@ -549,7 +552,7 @@ export function LibrariesPage() {
                             placeholder={t("dailyCost")}
                             className="h-11 min-w-0 rounded-full border-0 bg-cloud/75 px-4 text-sm font-bold outline-none ring-1 ring-black/[0.06]"
                           />
-                          <select
+                          <Select
                             value={editingPersonForm.dailyCostCurrency}
                             onChange={(event) =>
                               setEditingPersonForm((current) => ({
@@ -562,9 +565,9 @@ export function LibrariesPage() {
                             {currencyOptions.map((currency) => (
                               <option key={currency} value={currency}>{currency}</option>
                             ))}
-                          </select>
+                          </Select>
                         </div>
-                        <select
+                        <Select
                           value={editingPersonForm.costTemplateId}
                           onChange={(event) =>
                             setEditingPersonForm((current) => ({ ...current, costTemplateId: event.target.value }))
@@ -577,7 +580,7 @@ export function LibrariesPage() {
                               {template.name} · {template.currency} {template.amount}
                             </option>
                           ))}
-                        </select>
+                        </Select>
                         <div className="flex flex-wrap gap-2">
                           <Button type="submit" size="sm" className="min-w-28">
                             <Save size={16} />
@@ -658,7 +661,10 @@ export function LibrariesPage() {
                           </div>
                           <div className="rounded-2xl bg-white/70 p-3 ring-1 ring-white/70 sm:col-span-2">
                             <p className="text-2xl font-black leading-none">
-                              {formatCny(participation?.actualCostTotal ?? 0)}
+                              {formatTotal(
+                                participation?.actualCostTotal ?? 0,
+                                participation?.currency ?? displayCurrency
+                              )}
                             </p>
                             <p className="mt-1 text-[0.68rem] font-black uppercase text-ink/52">
                               {t("actualCostSoFar")}
@@ -741,7 +747,12 @@ export function LibrariesPage() {
                                       />
                                       <div className="flex items-center justify-between gap-3 text-xs font-black text-ink/58">
                                         <span>{t("actualCostSoFar")}</span>
-                                        <span>{formatCny(project.actualCostSoFar)}</span>
+                                        <span>
+                                          {formatTotal(
+                                            project.actualCostSoFar,
+                                            participation?.currency ?? displayCurrency
+                                          )}
+                                        </span>
                                       </div>
                                     </div>
                                   </Link>
@@ -773,7 +784,7 @@ export function LibrariesPage() {
                     placeholder={t("softwareName")}
                     className="h-11 rounded-full border-0 bg-white/90 px-4 text-sm font-bold text-ink outline-none"
                   />
-                  <select
+                  <Select
                     value={toolForm.category}
                     onChange={(event) =>
                       setToolForm((current) => ({ ...current, category: event.target.value as Tool["category"] }))
@@ -783,7 +794,7 @@ export function LibrariesPage() {
                     {(["ai", "design", "dev", "game", "video", "other"] as Tool["category"][]).map((category) => (
                       <option key={category} value={category}>{t(toolCategoryKeys[category])}</option>
                     ))}
-                  </select>
+                  </Select>
                   <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
                     <input
                       type="number"
@@ -795,7 +806,7 @@ export function LibrariesPage() {
                       placeholder={t("subscriptionFee")}
                       className="h-11 rounded-full border-0 bg-white/90 px-4 text-sm font-bold text-ink outline-none"
                     />
-                    <select
+                    <Select
                       value={toolForm.subscriptionCurrency}
                       onChange={(event) =>
                         setToolForm((current) => ({
@@ -808,8 +819,8 @@ export function LibrariesPage() {
                       {currencyOptions.map((currency) => (
                         <option key={currency} value={currency}>{currency}</option>
                       ))}
-                    </select>
-                    <select
+                    </Select>
+                    <Select
                       value={toolForm.subscriptionBillingCycle}
                       onChange={(event) =>
                         setToolForm((current) => ({
@@ -821,7 +832,7 @@ export function LibrariesPage() {
                     >
                       <option value="monthly">{t("billingTypeMonthly")}</option>
                       <option value="yearly">{t("billingTypeYearly")}</option>
-                    </select>
+                    </Select>
                     <input
                       type="date"
                       value={toolForm.subscriptionExpiresAt}
@@ -850,7 +861,7 @@ export function LibrariesPage() {
                   <div className="flex items-center justify-between gap-3">
                     <span className="text-sm font-black">{t("monthlySubscriptionCost")}</span>
                     <span className="text-2xl font-black leading-none">
-                      {formatCny(data.subscriptionSummary.monthlyTotal)}
+                      {formatTotal(data.subscriptionSummary.monthlyTotal, data.subscriptionSummary.currency)}
                     </span>
                   </div>
                   <p className="mt-2 text-xs font-bold leading-5 text-ink/62">{t("subscriptionCostRule")}</p>
@@ -875,7 +886,7 @@ export function LibrariesPage() {
                             placeholder={t("softwareName")}
                             className="h-11 rounded-full border-0 bg-cloud/75 px-4 text-sm font-bold outline-none ring-1 ring-black/[0.06]"
                           />
-                          <select
+                          <Select
                             value={editingToolForm.category}
                             onChange={(event) =>
                               setEditingToolForm((current) => ({
@@ -888,7 +899,7 @@ export function LibrariesPage() {
                             {(["ai", "design", "dev", "game", "video", "other"] as Tool["category"][]).map((category) => (
                               <option key={category} value={category}>{t(toolCategoryKeys[category])}</option>
                             ))}
-                          </select>
+                          </Select>
                           <input
                             type="number"
                             min="0"
@@ -899,7 +910,7 @@ export function LibrariesPage() {
                             placeholder={t("subscriptionFee")}
                             className="h-11 rounded-full border-0 bg-cloud/75 px-4 text-sm font-bold outline-none ring-1 ring-black/[0.06]"
                           />
-                          <select
+                          <Select
                             value={editingToolForm.subscriptionCurrency}
                             onChange={(event) =>
                               setEditingToolForm((current) => ({
@@ -912,8 +923,8 @@ export function LibrariesPage() {
                             {currencyOptions.map((currency) => (
                               <option key={currency} value={currency}>{currency}</option>
                             ))}
-                          </select>
-                          <select
+                          </Select>
+                          <Select
                             value={editingToolForm.subscriptionBillingCycle}
                             onChange={(event) =>
                               setEditingToolForm((current) => ({
@@ -925,7 +936,7 @@ export function LibrariesPage() {
                           >
                             <option value="monthly">{t("billingTypeMonthly")}</option>
                             <option value="yearly">{t("billingTypeYearly")}</option>
-                          </select>
+                          </Select>
                           <input
                             type="date"
                             value={editingToolForm.subscriptionExpiresAt}
@@ -981,25 +992,27 @@ export function LibrariesPage() {
                                 <>
                                   <span className="inline-flex items-center gap-2">
                                     <CreditCard size={14} />
-                                    {tool.subscription.currency} {tool.subscription.amount.toLocaleString(languageLocales[language])} ·{" "}
+                                    {tool.subscription.currency} {formatNumber(tool.subscription.amount)} ·{" "}
                                     {tool.subscription.billingCycle === "monthly"
                                       ? t("billingTypeMonthly")
                                       : t("billingTypeYearly")}
                                   </span>
                                   <span className="inline-flex items-center gap-2">
                                     <Repeat size={14} />
-                                    {t("monthlyEquivalent")}: {formatCny(monthlyCost)}
+                                    {t("monthlyEquivalent")}: {formatTotal(monthlyCost)}
                                   </span>
                                   <span className="inline-flex items-center gap-2">
                                     <CalendarClock size={14} />
                                     {t("subscriptionExpiresAt")}: {formatLocalizedDate(tool.subscription.expiresAt, language)}
                                   </span>
-                                  <span className="inline-flex min-w-0 items-center gap-2">
-                                    <Mail size={14} className="shrink-0" />
-                                    <span className="truncate">
-                                      {t("subscriptionAccountEmail")}: {tool.subscription.accountEmail}
+                                  {tool.subscription.accountEmail ? (
+                                    <span className="inline-flex min-w-0 items-center gap-2">
+                                      <Mail size={14} className="shrink-0" />
+                                      <span className="truncate">
+                                        {t("subscriptionAccountEmail")}: {tool.subscription.accountEmail}
+                                      </span>
                                     </span>
-                                  </span>
+                                  ) : null}
                                 </>
                               ) : (
                                 <span>{t("noSubscription")}</span>
@@ -1047,7 +1060,7 @@ export function LibrariesPage() {
                     className="h-11 rounded-full border-0 bg-white px-4 text-sm font-bold outline-none ring-1 ring-black/[0.06]"
                   />
                   <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-                    <select
+                    <Select
                       value={costForm.category}
                       onChange={(event) =>
                         setCostForm((current) => ({ ...current, category: event.target.value as CostItem["category"] }))
@@ -1057,7 +1070,7 @@ export function LibrariesPage() {
                       {(["software", "people", "outsourcing", "asset", "server", "other"] as CostItem["category"][]).map((category) => (
                         <option key={category} value={category}>{t(costCategoryKeys[category])}</option>
                       ))}
-                    </select>
+                    </Select>
                     <input
                       type="number"
                       min="0"
@@ -1068,7 +1081,7 @@ export function LibrariesPage() {
                       placeholder={t("amount")}
                       className="h-11 rounded-full border-0 bg-white px-4 text-sm font-bold outline-none ring-1 ring-black/[0.06]"
                     />
-                    <select
+                    <Select
                       value={costForm.currency}
                       onChange={(event) =>
                         setCostForm((current) => ({ ...current, currency: event.target.value as CostItem["currency"] }))
@@ -1078,8 +1091,8 @@ export function LibrariesPage() {
                       {(["CNY", "USD", "JPY", "EUR"] as CostItem["currency"][]).map((currency) => (
                         <option key={currency} value={currency}>{currency}</option>
                       ))}
-                    </select>
-                    <select
+                    </Select>
+                    <Select
                       value={costForm.billingType}
                       onChange={(event) =>
                         setCostForm((current) => ({ ...current, billingType: event.target.value as CostItem["billingType"] }))
@@ -1089,7 +1102,7 @@ export function LibrariesPage() {
                       {(["one-time", "monthly", "yearly", "hourly", "daily"] as CostItem["billingType"][]).map((billingType) => (
                         <option key={billingType} value={billingType}>{t(billingTypeKeys[billingType])}</option>
                       ))}
-                    </select>
+                    </Select>
                   </div>
                   <Button type="submit" size="md">
                     <PackagePlus size={18} />

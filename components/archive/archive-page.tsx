@@ -3,10 +3,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Archive, ArrowRight, Building2, Download, Layers3, Sparkles, Upload } from "lucide-react";
+import { WorkspaceKeyDialog } from "@/components/auth/workspace-key-dialog";
 import { ImageCard } from "@/components/cards/image-card";
 import { PixelCanyonScene } from "@/components/dashboard/pixel-canyon-scene";
 import { AppShell } from "@/components/layout/app-shell";
-import { useI18n } from "@/components/providers/app-providers";
+import { useAuth, useI18n } from "@/components/providers/app-providers";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { DeleteConfirmDialog } from "@/components/ui/delete-confirm-dialog";
@@ -14,12 +15,14 @@ import { LoadingState } from "@/components/ui/loading-state";
 import { Pill } from "@/components/ui/pill";
 import { ProgressBar } from "@/components/ui/progress-bar";
 import { SectionHeader } from "@/components/ui/section-header";
-import { companiesApi, groupsApi, projectsApi } from "@/lib/api";
+import { authApi, companiesApi, groupsApi, projectsApi } from "@/lib/api";
+import { LocalAuthError } from "@/lib/api/auth";
 import {
+  captureMockDatabaseWorkspaceStorage,
   createMockDatabaseBackup,
-  parseMockDatabaseBackup,
+  restoreMockDatabaseWorkspaceStorage,
   restoreMockDatabaseBackup,
-  type MockDatabaseBackup
+  validateMockDatabaseBackup
 } from "@/lib/api/mock-persistence";
 import {
   formatDemoEntityName,
@@ -29,7 +32,12 @@ import {
   translateDomainLabel
 } from "@/lib/i18n/domain-labels";
 import { formatLocalizedDate } from "@/lib/i18n/formatters";
+import {
+  parseEncryptedWorkspaceEnvelope,
+  type EncryptedWorkspaceEnvelope
+} from "@/lib/security/workspace-crypto";
 import type { Company, Project, ProjectGroup } from "@/lib/types";
+import type { ImportedSiteBackup } from "@/lib/api/auth";
 
 type ArchiveData = {
   companies: Company[];
@@ -42,19 +50,30 @@ type BackupNotice = {
   tone: "error" | "success";
 };
 
-const maxBackupFileBytes = 10 * 1024 * 1024;
+const maxBackupFileBytes = 64 * 1024 * 1024;
 const restoredNoticeStorageKey = "studio-map-os.backup-restored-notice";
+const restoredLoginNoticeStorageKey = "studio-map-os.full-site-restored-login-notice";
+const restoreFailedLoginNoticeStorageKey = "studio-map-os.full-site-restore-failed-login-notice";
 
 const createBackupFileName = (exportedAt: string) =>
   `studio-map-os-${exportedAt.replace(/[:.]/g, "-")}.smos-backup.json`;
 
+const createWorkspaceBackupFileName = (exportedAt: string) =>
+  `studio-map-os-workspace-${exportedAt.replace(/[:.]/g, "-")}.smos-backup.json`;
+
 export function ArchivePage() {
+  const { user } = useAuth();
   const { language, t } = useI18n();
   const [data, setData] = useState<ArchiveData | null>(null);
   const backupInputRef = useRef<HTMLInputElement | null>(null);
-  const [backupBusy, setBackupBusy] = useState<"export" | "import" | "restore" | null>(null);
+  const restoreInFlightRef = useRef(false);
+  const [backupBusy, setBackupBusy] = useState<
+    "export" | "workspace-export" | "import" | "restore" | null
+  >(null);
   const [backupNotice, setBackupNotice] = useState<BackupNotice | null>(null);
-  const [pendingBackup, setPendingBackup] = useState<MockDatabaseBackup | null>(null);
+  const [pendingBackup, setPendingBackup] = useState<ImportedSiteBackup | null>(null);
+  const [pendingEncryptedBackup, setPendingEncryptedBackup] = useState<EncryptedWorkspaceEnvelope | null>(null);
+  const [unlockError, setUnlockError] = useState("");
 
   useEffect(() => {
     const restoredNotice = window.sessionStorage.getItem(restoredNoticeStorageKey);
@@ -125,23 +144,51 @@ export function ArchivePage() {
       .filter((branch) => branch.groups.length > 0);
   }, [data]);
 
-  const downloadSiteBackup = () => {
+  const downloadSiteBackup = async () => {
     setBackupBusy("export");
     setBackupNotice(null);
 
     try {
-      const backup = createMockDatabaseBackup();
-      const content = JSON.stringify(backup, null, 2);
+      const encryptedBackup = await authApi.createEncryptedFullSiteBackup();
+      const content = JSON.stringify(encryptedBackup, null, 2);
       const url = URL.createObjectURL(new Blob([content], { type: "application/json" }));
       const link = document.createElement("a");
 
       link.href = url;
-      link.download = createBackupFileName(backup.exportedAt);
+      link.download = createBackupFileName(encryptedBackup.exportedAt);
       document.body.append(link);
       link.click();
       link.remove();
       URL.revokeObjectURL(url);
       setBackupNotice({ message: t("siteBackupExportSuccess"), tone: "success" });
+    } catch {
+      setBackupNotice({ message: t("siteBackupExportError"), tone: "error" });
+    } finally {
+      setBackupBusy(null);
+    }
+  };
+
+  const downloadWorkspaceBackup = async () => {
+    setBackupBusy("workspace-export");
+    setBackupNotice(null);
+
+    try {
+      const workspaceBackup = await createMockDatabaseBackup();
+      const encryptedBackup = await authApi.encryptActiveWorkspaceFile(
+        "workspace",
+        workspaceBackup
+      );
+      const content = JSON.stringify(encryptedBackup, null, 2);
+      const url = URL.createObjectURL(new Blob([content], { type: "application/json" }));
+      const link = document.createElement("a");
+
+      link.href = url;
+      link.download = createWorkspaceBackupFileName(encryptedBackup.exportedAt);
+      document.body.append(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      setBackupNotice({ message: t("workspaceBackupExportSuccess"), tone: "success" });
     } catch {
       setBackupNotice({ message: t("siteBackupExportError"), tone: "error" });
     } finally {
@@ -159,33 +206,95 @@ export function ArchivePage() {
         return;
       }
 
-      const hasJsonFileName = file.name.toLocaleLowerCase().endsWith(".json");
-      const hasJsonMimeType = !file.type || file.type === "application/json" || file.type === "text/json";
+      const lowerFileName = file.name.toLocaleLowerCase();
+      const hasSupportedFileName = lowerFileName.endsWith(".json") || lowerFileName.endsWith(".smos-backup");
+      const hasJsonMimeType =
+        !file.type ||
+        file.type === "application/json" ||
+        file.type === "text/json" ||
+        file.type === "application/octet-stream";
 
-      if (!hasJsonFileName || !hasJsonMimeType) {
+      if (!hasSupportedFileName || !hasJsonMimeType) {
         setBackupNotice({ message: t("siteBackupInvalid"), tone: "error" });
         return;
       }
 
-      const backup = parseMockDatabaseBackup(await file.text());
-      setPendingBackup(backup);
+      const encryptedBackup = parseEncryptedWorkspaceEnvelope(await file.text());
+      if (encryptedBackup.kind !== "device" && encryptedBackup.kind !== "workspace") {
+        throw new Error("Unsupported full-site backup kind");
+      }
+      setUnlockError("");
+      setPendingEncryptedBackup(encryptedBackup);
     } catch {
-      setBackupNotice({ message: t("siteBackupInvalid"), tone: "error" });
+      setBackupNotice({ message: t("workspaceEncryptedBackupOnly"), tone: "error" });
     } finally {
       setBackupBusy(null);
     }
   };
 
-  const confirmRestore = () => {
-    if (!pendingBackup) {
+  const unlockBackup = async (workspaceCode: string) => {
+    if (!pendingEncryptedBackup) {
       return;
     }
 
-    setBackupBusy("restore");
-    setBackupNotice(null);
+    setBackupBusy("import");
+    setUnlockError("");
 
     try {
-      restoreMockDatabaseBackup(pendingBackup);
+      const backup: ImportedSiteBackup = pendingEncryptedBackup.kind === "device"
+        ? {
+            format: "device",
+            backup: await authApi.decryptActiveFullSiteBackup(
+              pendingEncryptedBackup,
+              workspaceCode
+            )
+          }
+        : {
+            format: "legacy-workspace",
+            backup: validateMockDatabaseBackup(
+              await authApi.decryptActiveWorkspaceFile<unknown>(
+                pendingEncryptedBackup,
+                workspaceCode,
+                "workspace"
+              )
+            )
+          };
+
+      setPendingEncryptedBackup(null);
+      setPendingBackup(backup);
+    } catch {
+      setUnlockError(t("workspaceKeyMismatchOrCorrupt"));
+    } finally {
+      setBackupBusy(null);
+    }
+  };
+
+  const confirmRestore = async () => {
+    if (!pendingBackup || !user || restoreInFlightRef.current) {
+      return;
+    }
+
+    restoreInFlightRef.current = true;
+    setBackupBusy("restore");
+    setBackupNotice(null);
+    let storageSnapshot: Awaited<ReturnType<typeof captureMockDatabaseWorkspaceStorage>> | null = null;
+
+    try {
+      if (pendingBackup.format === "device") {
+        await authApi.restoreFullSiteBackup(pendingBackup.backup);
+        try {
+          window.sessionStorage.setItem(restoredLoginNoticeStorageKey, "1");
+        } catch {
+          // The restored accounts and encrypted data are already durable.
+        }
+        setPendingBackup(null);
+        window.location.assign("/login");
+        return;
+      }
+
+      storageSnapshot = await captureMockDatabaseWorkspaceStorage(user.workspaceId);
+      await restoreMockDatabaseBackup(pendingBackup.backup);
+      await authApi.ensureActiveWorkspaceMember();
       try {
         window.sessionStorage.setItem(restoredNoticeStorageKey, t("siteBackupRestoreSuccess"));
       } catch {
@@ -193,10 +302,28 @@ export function ArchivePage() {
       }
       setPendingBackup(null);
       window.location.reload();
-    } catch {
+    } catch (cause) {
+      if (storageSnapshot) {
+        try {
+          await restoreMockDatabaseWorkspaceStorage(storageSnapshot);
+          await authApi.reloadActiveWorkspaceDatabase();
+        } catch {
+          // Keep the original restore failure visible. Reloading is deliberately
+          // avoided so the current in-memory session is not silently replaced.
+        }
+      }
       setPendingBackup(null);
       setBackupNotice({ message: t("siteBackupRestoreError"), tone: "error" });
       setBackupBusy(null);
+      restoreInFlightRef.current = false;
+      if (cause instanceof LocalAuthError && cause.code === "STORAGE_CORRUPT") {
+        try {
+          window.sessionStorage.setItem(restoreFailedLoginNoticeStorageKey, "1");
+        } catch {
+          // Navigation still returns to a fail-closed login screen.
+        }
+        window.location.assign("/login");
+      }
     }
   };
 
@@ -359,13 +486,16 @@ export function ArchivePage() {
               <p className="mt-3 max-w-3xl text-sm font-semibold leading-6 text-white/62">
                 {t("siteBackupBody")}
               </p>
+              <p className="mt-4 max-w-3xl rounded-studio bg-white/[0.07] p-4 text-xs font-bold leading-5 text-white/72 ring-1 ring-white/10">
+                {t("siteBackupCredentialsHint")}
+              </p>
               <div className="mt-5 grid gap-3 sm:grid-cols-2">
                 <Button
                   type="button"
                   variant="secondary"
                   size="lg"
                   disabled={Boolean(backupBusy)}
-                  onClick={downloadSiteBackup}
+                  onClick={() => void downloadSiteBackup()}
                   className="w-full"
                 >
                   <Download size={19} />
@@ -383,7 +513,30 @@ export function ArchivePage() {
                   {backupBusy === "import" || backupBusy === "restore" ? t("loading") : t("restoreSiteBackup")}
                 </Button>
               </div>
-              <p className="mt-3 text-xs font-bold leading-5 text-white/48">{t("siteBackupFileHint")}</p>
+              <p className="mt-3 text-xs font-bold leading-5 text-white/48">
+                {t("workspaceBackupEncryptedHint")}
+              </p>
+              <p className="mt-1 text-xs font-bold leading-5 text-white/48">
+                {t("siteBackupFileHint")}
+              </p>
+              <div className="mt-5 border-t border-white/10 pt-5">
+                <p className="max-w-3xl text-xs font-bold leading-5 text-white/62">
+                  {t("workspaceBackupShareHint")}
+                </p>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="lg"
+                  disabled={Boolean(backupBusy)}
+                  onClick={() => void downloadWorkspaceBackup()}
+                  className="mt-3 w-full bg-white/10 text-white hover:bg-white/18 sm:w-auto"
+                >
+                  <Download size={19} />
+                  {backupBusy === "workspace-export"
+                    ? t("saving")
+                    : t("downloadWorkspaceBackup")}
+                </Button>
+              </div>
               {backupNotice ? (
                 <p
                   role={backupNotice.tone === "error" ? "alert" : "status"}
@@ -397,7 +550,7 @@ export function ArchivePage() {
               <input
                 ref={backupInputRef}
                 type="file"
-                accept=".json,application/json"
+                accept=".json,.smos-backup,application/json,application/octet-stream"
                 className="sr-only"
                 onChange={(event) => {
                   const file = event.target.files?.[0];
@@ -415,6 +568,7 @@ export function ArchivePage() {
       </div>
       <DeleteConfirmDialog
         open={Boolean(pendingBackup)}
+        busy={backupBusy === "restore"}
         title={t("siteBackupRestoreConfirmTitle")}
         description={t("siteBackupRestoreConfirmBody")}
         warning={t("siteBackupRestoreWarning")}
@@ -422,6 +576,16 @@ export function ArchivePage() {
         confirmLabel={t("restoreSiteBackup")}
         onCancel={() => setPendingBackup(null)}
         onConfirm={confirmRestore}
+      />
+      <WorkspaceKeyDialog
+        open={Boolean(pendingEncryptedBackup)}
+        busy={backupBusy === "import"}
+        error={unlockError}
+        onCancel={() => {
+          setPendingEncryptedBackup(null);
+          setUnlockError("");
+        }}
+        onConfirm={unlockBackup}
       />
     </AppShell>
   );
