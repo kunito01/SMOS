@@ -252,27 +252,6 @@ Issues and Pull Requests are welcome. Before submitting a change:
 3. Run ESLint and the TypeScript check.
 4. Document backward compatibility and backup recovery for data-format changes.
 
-## Maintainers
-
-<table>
-  <tr>
-    <td align="center">
-      <a href="https://github.com/kunito01">
-        <img src="https://github.com/kunito01.png?size=120" width="80" alt="kunito01" /><br />
-        <sub><strong>kunito01</strong></sub>
-      </a><br />
-      <sub>Creator and maintainer</sub>
-    </td>
-    <td align="center">
-      <a href="https://github.com/codex">
-        <img src="https://github.com/codex.png?size=120" width="80" alt="Codex" /><br />
-        <sub><strong>Codex</strong></sub>
-      </a><br />
-      <sub>OpenAI coding agent</sub>
-    </td>
-  </tr>
-</table>
-
 ## Copyright
 
 This repository currently has no separate open-source license. Unless the copyright owner grants explicit permission, do not assume rights to copy, distribute, modify, or use the project commercially.
