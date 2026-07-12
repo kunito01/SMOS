@@ -48,7 +48,7 @@ export type AuthCredentials = {
   password: string;
 };
 
-export type WorkspaceRegistrationMode = "create" | "join";
+export type WorkspaceRegistrationMode = "create" | "join" | "recover-empty";
 export type LocalWorkspaceRole = "owner" | "member";
 
 export type RegisterPayload = AuthCredentials & {
@@ -68,6 +68,7 @@ export type RegisterResult = {
   claimedLegacyData: boolean;
   joinedExistingWorkspace: boolean;
   restoredLanguage?: Language;
+  startedEmptyWorkspace: boolean;
   token: string;
   user: LocalAuthUser;
 };
@@ -78,6 +79,7 @@ export type LocalAuthErrorCode =
   | "BACKUP_REQUIRED"
   | "BACKUP_TOO_LARGE"
   | "DEVICE_NOT_EMPTY"
+  | "EMPTY_WORKSPACE_RESET_BLOCKED"
   | "INVALID_CREDENTIALS"
   | "INVALID_WORKSPACE_CODE"
   | "NO_ACTIVE_SESSION"
@@ -638,6 +640,40 @@ const findWorkspaceByCode = async (workspaceCode: string) => {
   return null;
 };
 
+const findWorkspaceByIdAndCode = async (workspaceId: string, workspaceCode: string) => {
+  const workspace = readWorkspaces().find((item) => item.workspaceId === workspaceId);
+
+  if (!workspace) {
+    return null;
+  }
+
+  try {
+    const masterKey = await unlockWorkspaceRecovery(workspace, workspaceCode);
+    return { masterKey, workspace };
+  } catch (error) {
+    if (error instanceof WorkspaceCryptoError) {
+      return null;
+    }
+
+    throw error;
+  }
+};
+
+type LocalWorkspaceDataStatus = "corrupt" | "missing" | "usable";
+
+const readLocalWorkspaceDataStatus = async (
+  workspace: WorkspaceRecoveryMetadata,
+  masterKey: WorkspaceMasterKey
+): Promise<LocalWorkspaceDataStatus> => {
+  try {
+    return (await readMockDatabaseWorkspaceSnapshot(workspace.workspaceId, masterKey))
+      ? "usable"
+      : "missing";
+  } catch {
+    return "corrupt";
+  }
+};
+
 type DecodedRegistrationBackup = {
   databaseBackup: ReturnType<typeof validateMockDatabaseBackup>;
   masterKey: WorkspaceMasterKey;
@@ -733,15 +769,25 @@ export async function register(payload: RegisterPayload): Promise<RegisterResult
   let workspace: WorkspaceRecoveryMetadata | null = null;
   let masterKey: WorkspaceMasterKey | null = null;
   let joinedExistingWorkspace = false;
+  let startedEmptyWorkspace = false;
   let backupToRestore: ReturnType<typeof validateMockDatabaseBackup> | null = null;
   let discardCorruptBundleForVerifiedRecovery = false;
 
   try {
-    const existingWorkspace = await findWorkspaceByCode(workspaceCode);
     const decodedBackup =
       payload.workspaceMode === "join" && payload.workspaceBackup
         ? await decodeRegistrationBackup(payload.workspaceBackup, workspaceCode)
         : null;
+    const existingWorkspace = decodedBackup
+      ? await findWorkspaceByIdAndCode(decodedBackup.metadata.workspaceId, workspaceCode)
+      : await findWorkspaceByCode(workspaceCode);
+
+    if (payload.workspaceMode === "recover-empty" && payload.workspaceBackup) {
+      throw new LocalAuthError(
+        "BACKUP_INVALID",
+        "An encrypted backup cannot be combined with an empty-workspace reset"
+      );
+    }
 
     if (payload.workspaceMode === "create") {
       if (existingWorkspace) {
@@ -755,47 +801,49 @@ export async function register(payload: RegisterPayload): Promise<RegisterResult
     } else if (existingWorkspace) {
       workspace = existingWorkspace.workspace;
       masterKey = existingWorkspace.masterKey;
-      joinedExistingWorkspace = true;
-      let localWorkspaceDataStatus: "corrupt" | "missing" | "usable";
+      const localWorkspaceDataStatus = await readLocalWorkspaceDataStatus(workspace, masterKey);
 
-      try {
-        localWorkspaceDataStatus = (await readMockDatabaseWorkspaceSnapshot(
-          workspace.workspaceId,
-          masterKey
-        ))
-          ? "usable"
-          : "missing";
-      } catch {
-        localWorkspaceDataStatus = "corrupt";
-      }
-
-      if (decodedBackup) {
-        try {
-          if (
-            decodedBackup.metadata.workspaceId !== workspace.workspaceId ||
-            !masterKeysMatch(decodedBackup.masterKey, masterKey)
-          ) {
-            throw new LocalAuthError("WORKSPACE_MISMATCH", "The encrypted backup belongs to another workspace");
-          }
-
-          if (localWorkspaceDataStatus !== "usable") {
-            // Recovery metadata alone identifies the workspace but contains no
-            // usable business data. A verified encrypted workspace backup may
-            // recover a missing or corrupt scoped database transactionally.
-            backupToRestore = decodedBackup.databaseBackup;
-            discardCorruptBundleForVerifiedRecovery = localWorkspaceDataStatus === "corrupt";
-          }
-          // When data is already present, selecting a backup only verifies it.
-          // Restoring here could silently roll the shared workspace back without
-          // the existing members' confirmation.
-        } finally {
-          decodedBackup.masterKey.fill(0);
+      if (payload.workspaceMode === "recover-empty") {
+        if (localWorkspaceDataStatus === "usable") {
+          throw new LocalAuthError(
+            "EMPTY_WORKSPACE_RESET_BLOCKED",
+            "This recovery key already unlocks usable local workspace data"
+          );
         }
-      } else if (localWorkspaceDataStatus !== "usable") {
-        throw new LocalAuthError(
-          "BACKUP_REQUIRED",
-          "This workspace is known locally, but its data is missing or damaged; an encrypted backup is required"
-        );
+
+        startedEmptyWorkspace = true;
+        discardCorruptBundleForVerifiedRecovery = localWorkspaceDataStatus === "corrupt";
+      } else {
+        joinedExistingWorkspace = true;
+
+        if (decodedBackup) {
+          try {
+            if (
+              decodedBackup.metadata.workspaceId !== workspace.workspaceId ||
+              !masterKeysMatch(decodedBackup.masterKey, masterKey)
+            ) {
+              throw new LocalAuthError("WORKSPACE_MISMATCH", "The encrypted backup belongs to another workspace");
+            }
+
+            if (localWorkspaceDataStatus !== "usable") {
+              // Recovery metadata alone identifies the workspace but contains no
+              // usable business data. A verified encrypted workspace backup may
+              // recover a missing or corrupt scoped database transactionally.
+              backupToRestore = decodedBackup.databaseBackup;
+              discardCorruptBundleForVerifiedRecovery = localWorkspaceDataStatus === "corrupt";
+            }
+            // When data is already present, selecting a backup only verifies it.
+            // Restoring here could silently roll the shared workspace back without
+            // the existing members' confirmation.
+          } finally {
+            decodedBackup.masterKey.fill(0);
+          }
+        } else if (localWorkspaceDataStatus !== "usable") {
+          throw new LocalAuthError(
+            "BACKUP_REQUIRED",
+            "This workspace is known locally, but its data is missing or damaged; an encrypted backup is required"
+          );
+        }
       }
     } else if (decodedBackup) {
       let accepted = false;
@@ -818,6 +866,11 @@ export async function register(payload: RegisterPayload): Promise<RegisterResult
           decodedBackup.masterKey.fill(0);
         }
       }
+    } else if (payload.workspaceMode === "recover-empty") {
+      const createdWorkspace = await createWorkspaceRecovery(workspaceCode);
+      workspace = createdWorkspace.metadata;
+      masterKey = createdWorkspace.masterKey;
+      startedEmptyWorkspace = true;
     } else {
       throw new LocalAuthError(
         "BACKUP_REQUIRED",
@@ -839,7 +892,7 @@ export async function register(payload: RegisterPayload): Promise<RegisterResult
         name,
         passwordProtection: await protectMasterKeyWithPassword(masterKey, password, workspace.workspaceId),
         workspaceId: workspace.workspaceId,
-        workspaceRole: payload.workspaceMode === "create" ? "owner" : "member"
+        workspaceRole: payload.workspaceMode === "join" ? "member" : "owner"
       };
     } catch (error) {
       masterKey.fill(0);
@@ -856,9 +909,10 @@ export async function register(payload: RegisterPayload): Promise<RegisterResult
       upsertWorkspace(workspace);
       writeArray(accountsStorageKey, [...previousAccounts, account]);
       await activateMockDatabaseWorkspace(workspace.workspaceId, masterKey, {
-        allowCreate: payload.workspaceMode === "create",
-        allowRecoveryOverwrite: Boolean(backupToRestore),
-        claimLegacy: claimedLegacyData
+        allowCreate: payload.workspaceMode === "create" || startedEmptyWorkspace,
+        allowRecoveryOverwrite: Boolean(backupToRestore) || startedEmptyWorkspace,
+        claimLegacy: claimedLegacyData,
+        initialDatabase: startedEmptyWorkspace ? "empty" : "examples"
       });
 
       if (backupToRestore) {
@@ -892,6 +946,7 @@ export async function register(payload: RegisterPayload): Promise<RegisterResult
         ...(backupToRestore?.preferences?.language
           ? { restoredLanguage: backupToRestore.preferences.language }
           : {}),
+        startedEmptyWorkspace,
         token: "local-workspace-session",
         user: activeSession.user
       });

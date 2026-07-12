@@ -638,6 +638,18 @@ export const createMockDatabase = (): MockDatabase => {
   });
 };
 
+/** Creates a genuinely blank workspace without any bundled example content. */
+export const createEmptyMockDatabase = (): MockDatabase => ({
+  users: [],
+  companies: [],
+  groups: [],
+  projects: [],
+  people: [],
+  tools: [],
+  costLibrary: [],
+  shareLinks: []
+});
+
 export const mockDatabase = createMockDatabase();
 
 export const getToolMonthlySubscriptionMoney = (tool: Tool) => {

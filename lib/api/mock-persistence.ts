@@ -1,4 +1,9 @@
-import { createMockDatabase, createProjectPayments, mockDatabase } from "@/lib/mock";
+import {
+  createEmptyMockDatabase,
+  createMockDatabase,
+  createProjectPayments,
+  mockDatabase
+} from "@/lib/mock";
 import { languages, type Language } from "@/lib/i18n/translations";
 import {
   buildEncryptedPublicShareRecords,
@@ -722,6 +727,7 @@ export async function activateMockDatabaseWorkspace(
     allowCreate?: boolean;
     allowRecoveryOverwrite?: boolean;
     claimLegacy?: boolean;
+    initialDatabase?: "examples" | "empty";
   } = {}
 ) {
   const normalizedWorkspaceId = normalizeWorkspaceId(workspaceId);
@@ -828,7 +834,9 @@ export async function activateMockDatabaseWorkspace(
         throw new Error("The encrypted workspace database is missing");
       }
 
-      const seedDatabase = normalizePersistedDatabase(createMockDatabase());
+      const seedDatabase = normalizePersistedDatabase(
+        options.initialDatabase === "empty" ? createEmptyMockDatabase() : createMockDatabase()
+      );
       applyDatabaseSnapshot(seedDatabase);
       lastPersistedDatabase = cloneDatabaseSnapshot(seedDatabase);
       hydrated = true;

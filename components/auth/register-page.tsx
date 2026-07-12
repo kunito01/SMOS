@@ -48,6 +48,7 @@ export function RegisterPage() {
   const [workspaceCode, setWorkspaceCode] = useState("");
   const [workspaceBackup, setWorkspaceBackup] = useState<File | null>(null);
   const [acknowledged, setAcknowledged] = useState(false);
+  const [emptyRecoveryAcknowledged, setEmptyRecoveryAcknowledged] = useState(false);
   const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -84,6 +85,7 @@ export function RegisterPage() {
   const setMode = (mode: WorkspaceRegistrationMode) => {
     setWorkspaceMode(mode);
     setAcknowledged(false);
+    setEmptyRecoveryAcknowledged(false);
     setCopied(false);
     setError("");
     setWorkspaceBackup(null);
@@ -181,6 +183,8 @@ export function RegisterPage() {
           return t("workspaceKeyNotFound");
         case "BACKUP_REQUIRED":
           return t("workspaceKeyBackupRequired");
+        case "EMPTY_WORKSPACE_RESET_BLOCKED":
+          return t("workspaceKeyRecoverEmptyBlocked");
         case "BACKUP_TOO_LARGE":
           return t("siteBackupTooLarge");
         case "BACKUP_INVALID":
@@ -212,6 +216,10 @@ export function RegisterPage() {
     }
 
     if (!acknowledged) {
+      return;
+    }
+
+    if (workspaceMode === "recover-empty" && !emptyRecoveryAcknowledged) {
       return;
     }
 
@@ -327,17 +335,18 @@ export function RegisterPage() {
                 />
               </label>
 
-              <div className="grid grid-cols-2 gap-2 rounded-full bg-cloud p-1">
+              <div className="grid gap-2 rounded-studio-lg bg-cloud p-1 sm:grid-cols-3">
                 {([
                   ["create", t("workspaceKeyCreateMode")],
-                  ["join", t("workspaceKeyJoinMode")]
+                  ["join", t("workspaceKeyJoinMode")],
+                  ["recover-empty", t("workspaceKeyRecoverEmptyMode")]
                 ] as const).map(([mode, label]) => (
                   <button
                     key={mode}
                     type="button"
                     aria-pressed={workspaceMode === mode}
                     onClick={() => setMode(mode)}
-                    className={`min-h-11 rounded-full px-3 text-sm font-black transition ${
+                    className={`min-h-11 rounded-studio px-3 text-sm font-black transition ${
                       workspaceMode === mode ? "bg-ink text-white shadow-soft" : "text-muted hover:bg-white"
                     }`}
                   >
@@ -352,10 +361,18 @@ export function RegisterPage() {
                     <ShieldAlert className="mt-0.5 shrink-0" size={24} />
                     <div>
                       <p className="text-base font-black uppercase tracking-[0.08em]">
-                        {t("workspaceKeyWarningTitle")}
+                        {workspaceMode === "create"
+                          ? t("workspaceKeyWarningTitle")
+                          : workspaceMode === "join"
+                            ? t("workspaceKeyTitle")
+                            : t("workspaceKeyRecoverEmptyWarningTitle")}
                       </p>
                       <p className="mt-1 text-sm font-bold leading-6 text-white/88">
-                        {t("workspaceKeyOnlyOnce")}
+                        {workspaceMode === "create"
+                          ? t("workspaceKeyOnlyOnce")
+                          : workspaceMode === "join"
+                            ? t("workspaceKeyJoinHelp")
+                            : t("workspaceKeyRecoverEmptyWarningBody")}
                       </p>
                     </div>
                   </div>
@@ -380,6 +397,7 @@ export function RegisterPage() {
 
                       setWorkspaceCode(sanitizeWorkspaceCodeInput(event.target.value));
                       setAcknowledged(false);
+                      setEmptyRecoveryAcknowledged(false);
                       setCopied(false);
                       setError("");
                     }}
@@ -388,7 +406,11 @@ export function RegisterPage() {
                     className="mt-3 h-16 w-full rounded-studio bg-white/[0.08] px-3 text-center font-mono text-[clamp(1rem,4vw,1.45rem)] font-black tracking-[0.08em] text-limepop outline-none ring-1 ring-white/10 transition focus:ring-2 focus:ring-limepop read-only:cursor-default"
                   />
                   <p className="mt-3 text-xs font-bold leading-5 text-white/58">
-                    {workspaceMode === "create" ? t("workspaceKeyCreateHelp") : t("workspaceKeyJoinHelp")}
+                    {workspaceMode === "create"
+                      ? t("workspaceKeyCreateHelp")
+                      : workspaceMode === "join"
+                        ? t("workspaceKeyJoinHelp")
+                        : t("workspaceKeyRecoverEmptyHelp")}
                   </p>
 
                   {workspaceMode === "create" ? (
@@ -421,7 +443,7 @@ export function RegisterPage() {
                       <RefreshCw size={15} />
                       {t("workspaceKeyRegenerate")}
                     </button>
-                  ) : (
+                  ) : workspaceMode === "join" ? (
                     <label className="mt-4 block rounded-studio bg-white/[0.06] p-4">
                       <span className="flex items-center gap-2 text-sm font-black text-white">
                         <Upload size={17} />
@@ -445,6 +467,32 @@ export function RegisterPage() {
                         </span>
                       ) : null}
                     </label>
+                  ) : (
+                    <div className="mt-4 rounded-studio bg-coral/16 p-4 ring-1 ring-coral/40">
+                      <div className="flex items-start gap-3">
+                        <ShieldAlert className="mt-0.5 shrink-0 text-coral" size={20} />
+                        <div>
+                          <p className="text-sm font-black text-white">
+                            {t("workspaceKeyRecoverEmptyWarningTitle")}
+                          </p>
+                          <p className="mt-1 text-xs font-bold leading-5 text-white/68">
+                            {t("workspaceKeyRecoverEmptyWarningBody")}
+                          </p>
+                        </div>
+                      </div>
+
+                      <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-studio bg-black/20 p-3">
+                        <input
+                          type="checkbox"
+                          checked={emptyRecoveryAcknowledged}
+                          onChange={(event) => setEmptyRecoveryAcknowledged(event.target.checked)}
+                          className="mt-0.5 size-5 shrink-0 accent-[#ff4629]"
+                        />
+                        <span className="text-xs font-black leading-5 text-white">
+                          {t("workspaceKeyRecoverEmptyConfirm")}
+                        </span>
+                      </label>
+                    </div>
                   )}
 
                   <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-studio bg-limepop/[0.12] p-4 ring-1 ring-limepop/20">
@@ -477,9 +525,18 @@ export function RegisterPage() {
                 type="submit"
                 size="lg"
                 className="w-full"
-                disabled={busy || !acknowledged || !isValidWorkspaceCode(workspaceCode)}
+                disabled={
+                  busy ||
+                  !acknowledged ||
+                  !isValidWorkspaceCode(workspaceCode) ||
+                  (workspaceMode === "recover-empty" && !emptyRecoveryAcknowledged)
+                }
               >
-                {busy ? t("saving") : t("registerButton")}
+                {busy
+                  ? t("saving")
+                  : workspaceMode === "recover-empty"
+                    ? t("workspaceKeyRecoverEmptyButton")
+                    : t("registerButton")}
                 <ArrowRight size={19} />
               </Button>
               <Button
@@ -499,9 +556,21 @@ export function RegisterPage() {
             <Card tone="dark" className="p-6">
               <div className="mb-4 flex items-center gap-3">
                 <ShieldCheck size={22} className="text-limepop" />
-                <h3 className="text-xl font-black">{t("workspaceKeyOnlyOnce")}</h3>
+                <h3 className="text-xl font-black">
+                  {workspaceMode === "create"
+                    ? t("workspaceKeyOnlyOnce")
+                    : workspaceMode === "join"
+                      ? t("workspaceKeyTitle")
+                      : t("workspaceKeyRecoverEmptyWarningTitle")}
+                </h3>
               </div>
-              <p className="text-sm font-bold leading-6 text-white/70">{t("workspaceKeyWarningBody")}</p>
+              <p className="text-sm font-bold leading-6 text-white/70">
+                {workspaceMode === "create"
+                  ? t("workspaceKeyWarningBody")
+                  : workspaceMode === "join"
+                    ? t("workspaceKeyJoinHelp")
+                    : t("workspaceKeyRecoverEmptyWarningBody")}
+              </p>
             </Card>
 
             <Card tone="aqua" className="p-6">
