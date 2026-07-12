@@ -16,8 +16,8 @@
 </p>
 
 <p align="center">
-  <a href="https://kunito01.github.io/SMOS/login/"><img src="https://img.shields.io/badge/Live_Demo-Open_PWA-ff4b2b?style=for-the-badge&logo=pwa&logoColor=white" alt="Open Live Demo" /></a>
-  <a href="https://github.com/kunito01/SMOS/releases/latest"><img src="https://img.shields.io/badge/Download-Portable_PWA-f4f414?style=for-the-badge&logo=github&logoColor=1c2328" alt="Download portable PWA" /></a>
+  <a href="https://kunito01.github.io/SMOS/login/"><img src="./docs/readme/live-demo.svg" alt="打开在线演示" /></a>
+  <a href="https://github.com/kunito01/SMOS/releases/latest"><img src="./docs/readme/download-pwa.svg" alt="下载便携 PWA" /></a>
 </p>
 
 <p align="center">
@@ -144,7 +144,7 @@ npm run start
 npm run package:pwa
 ```
 
-打包结果会写入 `output/pwa/studio-map-os-pwa/`。其中包含独立服务、PWA 静态资源和 macOS 启动脚本 `START_STUDIO_MAP_OS.command`；该脚本默认使用 `127.0.0.1:3002`。
+打包结果会写入 `output/pwa/studio-map-os-pwa/`。其中包含独立服务、PWA 静态资源，以及适用于 Windows（`START_STUDIO_MAP_OS.bat`）、macOS（`START_STUDIO_MAP_OS.command`）和 Linux/macOS 终端（`START_STUDIO_MAP_OS.sh`）的启动脚本；所有脚本默认使用 `127.0.0.1:3002`。
 
 ## 主要路由
 

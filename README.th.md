@@ -16,8 +16,8 @@
 </p>
 
 <p align="center">
-  <a href="https://kunito01.github.io/SMOS/login/"><img src="https://img.shields.io/badge/Live_Demo-Open_PWA-ff4b2b?style=for-the-badge&logo=pwa&logoColor=white" alt="Open Live Demo" /></a>
-  <a href="https://github.com/kunito01/SMOS/releases/latest"><img src="https://img.shields.io/badge/Download-Portable_PWA-f4f414?style=for-the-badge&logo=github&logoColor=1c2328" alt="Download portable PWA" /></a>
+  <a href="https://kunito01.github.io/SMOS/login/"><img src="./docs/readme/live-demo.svg" alt="เปิดเดโมสด" /></a>
+  <a href="https://github.com/kunito01/SMOS/releases/latest"><img src="./docs/readme/download-pwa.svg" alt="ดาวน์โหลด PWA แบบพกพา" /></a>
 </p>
 
 <p align="center">
@@ -144,7 +144,7 @@ npm run start
 npm run package:pwa
 ```
 
-ชุดไฟล์จะถูกเขียนไปที่ `output/pwa/studio-map-os-pwa/` ภายในประกอบด้วยเซิร์ฟเวอร์แบบสแตนด์อโลน สินทรัพย์ PWA และตัวเรียกใช้สำหรับ macOS ชื่อ `START_STUDIO_MAP_OS.command` ซึ่งใช้ `127.0.0.1:3002` เป็นค่าเริ่มต้น
+ชุดไฟล์จะถูกเขียนไปที่ `output/pwa/studio-map-os-pwa/` ภายในประกอบด้วยเซิร์ฟเวอร์แบบสแตนด์อโลน สินทรัพย์ PWA และสคริปต์เริ่มต้นสำหรับ Windows (`START_STUDIO_MAP_OS.bat`), macOS (`START_STUDIO_MAP_OS.command`) และเทอร์มินัล Linux/macOS (`START_STUDIO_MAP_OS.sh`) โดยตัวเรียกใช้ทั้งหมดใช้ `127.0.0.1:3002` เป็นค่าเริ่มต้น
 
 ## เส้นทางหลัก
 

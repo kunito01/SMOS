@@ -394,24 +394,32 @@ writeFileSync(
 =================================
 
 Platform and requirement
-- macOS on Apple Silicon (arm64)
-- Node.js 20 must be installed and available as the "node" command
+- Windows 10/11, macOS, or a modern Linux distribution
+- Node.js 20 or later must be installed and available as the "node" command
 
 Start Studio Map OS
 1. Extract the complete studio-map-os-pwa.zip archive.
-2. Double-click START_STUDIO_MAP_OS.command.
-   Or open Terminal in this folder and run:
-     ./START_STUDIO_MAP_OS.command
-3. Keep the Terminal window open and visit:
+2. Start the local server for your system:
+   Windows: double-click START_STUDIO_MAP_OS.bat
+   macOS: double-click START_STUDIO_MAP_OS.command
+   Linux or a macOS Terminal: ./START_STUDIO_MAP_OS.sh
+3. Keep the launcher window open and visit:
      http://127.0.0.1:3002/login
-4. Press Control-C in Terminal to stop the local server.
+4. Press Control-C in that window to stop the local server.
 
 If port 3002 is already in use, choose another port:
-  PORT=3003 ./START_STUDIO_MAP_OS.command
+  Windows Command Prompt: set PORT=3003 && START_STUDIO_MAP_OS.bat
+  Windows PowerShell: $env:PORT=3003; .\\START_STUDIO_MAP_OS.bat
+  macOS or Linux: PORT=3003 ./START_STUDIO_MAP_OS.sh
+
+Important: Browser data is isolated by the exact website address and port.
+The Live Demo, 127.0.0.1:3002, and 127.0.0.1:3003 each use separate local
+storage. Keep port 3002 whenever possible, and use an encrypted full-site
+backup when moving data between the Live Demo, devices, browsers, or ports.
 
 Privacy and local data
 - Accounts, workspaces, projects, and settings are stored only in this
-  browser profile on this Mac, using local browser storage and IndexedDB.
+  browser profile on this device, using local browser storage and IndexedDB.
 - This bundle does not automatically upload or sync business data to a
   remote backend.
 - Clearing browser site data or switching browser profiles can remove access
@@ -427,12 +435,21 @@ THIRD_PARTY_LICENSES/ for the corresponding license and notice texts.
 `
 );
 
-const launcherPath = join(packageDir, "START_STUDIO_MAP_OS.command");
+const posixLauncher = `#!/bin/sh\ncd "$(dirname "$0")"\nPORT="\${PORT:-3002}" HOSTNAME="127.0.0.1" exec node server.js\n`;
+
+for (const launcherName of [
+  "START_STUDIO_MAP_OS.command",
+  "START_STUDIO_MAP_OS.sh"
+]) {
+  const launcherPath = join(packageDir, launcherName);
+  writeFileSync(launcherPath, posixLauncher);
+  chmodSync(launcherPath, 0o755);
+}
+
 writeFileSync(
-  launcherPath,
-  `#!/bin/sh\ncd "$(dirname "$0")"\nPORT="\${PORT:-3002}" HOSTNAME="\${HOSTNAME:-127.0.0.1}" exec node server.js\n`
+  join(packageDir, "START_STUDIO_MAP_OS.bat"),
+  `@echo off\r\ncd /d "%~dp0"\r\nif "%PORT%"=="" set "PORT=3002"\r\nset "HOSTNAME=127.0.0.1"\r\nnode server.js\r\n`
 );
-chmodSync(launcherPath, 0o755);
 
 console.log(
   `\nPWA package created at ${packageDir} with licenses for ${thirdPartyPackageCount} third-party packages.`

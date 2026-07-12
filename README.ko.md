@@ -16,8 +16,8 @@
 </p>
 
 <p align="center">
-  <a href="https://kunito01.github.io/SMOS/login/"><img src="https://img.shields.io/badge/Live_Demo-Open_PWA-ff4b2b?style=for-the-badge&logo=pwa&logoColor=white" alt="Open Live Demo" /></a>
-  <a href="https://github.com/kunito01/SMOS/releases/latest"><img src="https://img.shields.io/badge/Download-Portable_PWA-f4f414?style=for-the-badge&logo=github&logoColor=1c2328" alt="Download portable PWA" /></a>
+  <a href="https://kunito01.github.io/SMOS/login/"><img src="./docs/readme/live-demo.svg" alt="라이브 데모 열기" /></a>
+  <a href="https://github.com/kunito01/SMOS/releases/latest"><img src="./docs/readme/download-pwa.svg" alt="휴대용 PWA 다운로드" /></a>
 </p>
 
 <p align="center">
@@ -144,7 +144,7 @@ PWA를 지원하는 브라우저에서 [http://localhost:3000/login](http://loca
 npm run package:pwa
 ```
 
-번들은 `output/pwa/studio-map-os-pwa/`에 생성됩니다. 독립 실행형 서버, PWA 자산, macOS 실행 프로그램 `START_STUDIO_MAP_OS.command`가 포함되며 기본적으로 `127.0.0.1:3002`를 사용합니다.
+번들은 `output/pwa/studio-map-os-pwa/`에 생성됩니다. 독립 실행형 서버, PWA 자산과 함께 Windows(`START_STUDIO_MAP_OS.bat`), macOS(`START_STUDIO_MAP_OS.command`), Linux/macOS 터미널(`START_STUDIO_MAP_OS.sh`)용 실행 스크립트가 포함됩니다. 모든 실행기는 기본적으로 `127.0.0.1:3002`를 사용합니다.
 
 ## 주요 경로
 

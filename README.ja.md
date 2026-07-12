@@ -16,8 +16,8 @@
 </p>
 
 <p align="center">
-  <a href="https://kunito01.github.io/SMOS/login/"><img src="https://img.shields.io/badge/Live_Demo-Open_PWA-ff4b2b?style=for-the-badge&logo=pwa&logoColor=white" alt="Open Live Demo" /></a>
-  <a href="https://github.com/kunito01/SMOS/releases/latest"><img src="https://img.shields.io/badge/Download-Portable_PWA-f4f414?style=for-the-badge&logo=github&logoColor=1c2328" alt="Download portable PWA" /></a>
+  <a href="https://kunito01.github.io/SMOS/login/"><img src="./docs/readme/live-demo.svg" alt="ライブデモを開く" /></a>
+  <a href="https://github.com/kunito01/SMOS/releases/latest"><img src="./docs/readme/download-pwa.svg" alt="ポータブル PWA をダウンロード" /></a>
 </p>
 
 <p align="center">
@@ -144,7 +144,7 @@ PWA 対応ブラウザで [http://localhost:3000/login](http://localhost:3000/lo
 npm run package:pwa
 ```
 
-バンドルは `output/pwa/studio-map-os-pwa/` に出力されます。スタンドアロンサーバー、PWA アセット、macOS 用ランチャー `START_STUDIO_MAP_OS.command` が含まれ、既定では `127.0.0.1:3002` を使用します。
+バンドルは `output/pwa/studio-map-os-pwa/` に出力されます。スタンドアロンサーバー、PWA アセットに加え、Windows（`START_STUDIO_MAP_OS.bat`）、macOS（`START_STUDIO_MAP_OS.command`）、Linux/macOS のターミナル（`START_STUDIO_MAP_OS.sh`）用の起動スクリプトが含まれます。すべてのランチャーは既定で `127.0.0.1:3002` を使用します。
 
 ## 主なルート
 

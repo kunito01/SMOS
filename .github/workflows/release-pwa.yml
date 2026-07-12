@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   package:
-    runs-on: macos-15
+    runs-on: ubuntu-latest
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -25,10 +25,6 @@ jobs:
         with:
           node-version: "20"
           cache: npm
-
-      - name: Confirm Apple Silicon runner
-        shell: bash
-        run: test "$(uname -m)" = "arm64"
 
       - name: Install dependencies
         run: npm ci
@@ -53,14 +49,21 @@ jobs:
             "$bundle/.next-pwa/BUILD_ID" \
             "$bundle/public/sw.js" \
             "$bundle/START_STUDIO_MAP_OS.command" \
+            "$bundle/START_STUDIO_MAP_OS.sh" \
+            "$bundle/START_STUDIO_MAP_OS.bat" \
             "$bundle/LICENSE" \
             "$bundle/THIRD_PARTY_NOTICES.txt" \
             "$bundle/README.txt"; do
             test -s "$required"
           done
           test -x "$bundle/START_STUDIO_MAP_OS.command"
+          test -x "$bundle/START_STUDIO_MAP_OS.sh"
           test ! -e "$bundle/node_modules/sharp"
           test ! -e "$bundle/node_modules/@img"
+          if find "$bundle/node_modules" -type f -name '*.node' -print -quit | grep -q .; then
+            echo "The release archive contains a platform-specific native Node.js module."
+            exit 1
+          fi
           test -d "$bundle/THIRD_PARTY_LICENSES"
           third_party_license="$(find "$bundle/THIRD_PARTY_LICENSES" -type f -print -quit)"
           test -n "$third_party_license"
@@ -80,6 +83,8 @@ jobs:
             studio-map-os-pwa/.next-pwa/BUILD_ID \
             studio-map-os-pwa/public/sw.js \
             studio-map-os-pwa/START_STUDIO_MAP_OS.command \
+            studio-map-os-pwa/START_STUDIO_MAP_OS.sh \
+            studio-map-os-pwa/START_STUDIO_MAP_OS.bat \
             studio-map-os-pwa/LICENSE \
             studio-map-os-pwa/THIRD_PARTY_NOTICES.txt \
             studio-map-os-pwa/README.txt; do
@@ -99,8 +104,8 @@ jobs:
             exit 1
           fi
 
-          shasum -a 256 studio-map-os-pwa.zip > studio-map-os-pwa.zip.sha256
-          shasum -a 256 -c studio-map-os-pwa.zip.sha256
+          sha256sum studio-map-os-pwa.zip > studio-map-os-pwa.zip.sha256
+          sha256sum -c studio-map-os-pwa.zip.sha256
 
       - name: Smoke-test extracted archive
         shell: bash
@@ -113,7 +118,7 @@ jobs:
           mkdir -p "$smoke"
           unzip -q output/pwa/studio-map-os-pwa.zip -d "$smoke"
 
-          launcher="$smoke/studio-map-os-pwa/START_STUDIO_MAP_OS.command"
+          launcher="$smoke/studio-map-os-pwa/START_STUDIO_MAP_OS.sh"
           test -x "$launcher"
           PORT=3002 HOSTNAME=127.0.0.1 "$launcher" >"$log" 2>&1 &
           server_pid=$!
@@ -158,8 +163,8 @@ jobs:
         shell: bash
         run: |
           gh release create "$GITHUB_REF_NAME" \
-            'output/pwa/studio-map-os-pwa.zip#Studio Map OS PWA (macOS Apple Silicon)' \
+            'output/pwa/studio-map-os-pwa.zip#Studio Map OS PWA' \
             'output/pwa/studio-map-os-pwa.zip.sha256#SHA-256 checksum' \
             --verify-tag \
-            --generate-notes \
+            --notes "" \
             --title "Studio Map OS $GITHUB_REF_NAME"

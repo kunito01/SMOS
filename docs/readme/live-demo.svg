@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="348" height="68" viewBox="0 0 348 68" role="img" aria-labelledby="title desc">
+  <title id="title">Live Demo — Open PWA</title>
+  <desc id="desc">A large rounded button linking to the Studio Map OS live PWA demo.</desc>
+  <defs>
+    <clipPath id="corners">
+      <rect width="348" height="68" rx="19" />
+    </clipPath>
+  </defs>
+  <g clip-path="url(#corners)">
+    <rect width="190" height="68" fill="#ff0099" />
+    <rect x="190" width="158" height="68" fill="#ff4b2b" />
+  </g>
+  <path
+    d="M20.5967 7.482 24 16.518h-2.5098l-.5816-1.6184h-3.2452l.6933-1.7532h2.0019l-.95-2.6597 1.1881-3.0047Zm-8.111 0 1.7722 5.8393L16.75 7.482h2.4154l-3.6433 9.036h-2.3833l-1.6395-5.2366-1.7196 5.2366h-2.377l-1.233-2.1161 1.2144-3.7415 1.342 2.6609L10.629 7.482h1.8567Zm-8.7453 0c1.0635 0 1.8713.3055 2.4234.9166.1097.1125.2032.2353.2806.3684l-1.0753 3.3128-.3847 1.1854c-.352.1006-.7533.1509-1.204.1509H2.2928v3.102H0V7.482Zm-.5816 1.7532h-.866v2.4276h.8597c.5577 0 .9406-.1194 1.1485-.3582.1896-.215.2845-.5058.2845-.8724 0-.364-.1079-.6544-.3235-.8714-.2157-.217-.5834-.3256-1.1032-.3256Z"
+    fill="#fff"
+    transform="translate(18 19) scale(1.15)"
+  />
+  <g fill="#fff" font-family="Arial, Helvetica, sans-serif" font-size="17" font-weight="800" letter-spacing="1.4">
+    <text x="119" y="40" text-anchor="middle">LIVE DEMO</text>
+    <text x="269" y="40" text-anchor="middle">OPEN PWA</text>
+  </g>
+</svg>

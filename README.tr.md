@@ -16,8 +16,8 @@
 </p>
 
 <p align="center">
-  <a href="https://kunito01.github.io/SMOS/login/"><img src="https://img.shields.io/badge/Live_Demo-Open_PWA-ff4b2b?style=for-the-badge&logo=pwa&logoColor=white" alt="Open Live Demo" /></a>
-  <a href="https://github.com/kunito01/SMOS/releases/latest"><img src="https://img.shields.io/badge/Download-Portable_PWA-f4f414?style=for-the-badge&logo=github&logoColor=1c2328" alt="Download portable PWA" /></a>
+  <a href="https://kunito01.github.io/SMOS/login/"><img src="./docs/readme/live-demo.svg" alt="Canlı demoyu aç" /></a>
+  <a href="https://github.com/kunito01/SMOS/releases/latest"><img src="./docs/readme/download-pwa.svg" alt="Taşınabilir PWA'yı indir" /></a>
 </p>
 
 <p align="center">
@@ -144,7 +144,7 @@ Manifest'i, Service Worker'ı ve kurulum giriş noktasını incelemek için [htt
 npm run package:pwa
 ```
 
-Paket `output/pwa/studio-map-os-pwa/` konumuna yazılır. Bağımsız sunucuyu, PWA varlıklarını ve varsayılan olarak `127.0.0.1:3002` adresini kullanan macOS başlatıcısı `START_STUDIO_MAP_OS.command` dosyasını içerir.
+Paket `output/pwa/studio-map-os-pwa/` konumuna yazılır. Bağımsız sunucuyu, PWA varlıklarını ve Windows (`START_STUDIO_MAP_OS.bat`), macOS (`START_STUDIO_MAP_OS.command`) ile Linux/macOS terminalleri (`START_STUDIO_MAP_OS.sh`) için başlatma betiklerini içerir. Tüm başlatıcılar varsayılan olarak `127.0.0.1:3002` adresini kullanır.
 
 ## Ana Rotalar
 

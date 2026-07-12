@@ -16,8 +16,8 @@
 </p>
 
 <p align="center">
-  <a href="https://kunito01.github.io/SMOS/login/"><img src="https://img.shields.io/badge/Live_Demo-Open_PWA-ff4b2b?style=for-the-badge&logo=pwa&logoColor=white" alt="Open Live Demo" /></a>
-  <a href="https://github.com/kunito01/SMOS/releases/latest"><img src="https://img.shields.io/badge/Download-Portable_PWA-f4f414?style=for-the-badge&logo=github&logoColor=1c2328" alt="Download portable PWA" /></a>
+  <a href="https://kunito01.github.io/SMOS/login/"><img src="./docs/readme/live-demo.svg" alt="Open Live Demo" /></a>
+  <a href="https://github.com/kunito01/SMOS/releases/latest"><img src="./docs/readme/download-pwa.svg" alt="Download portable PWA" /></a>
 </p>
 
 <p align="center">
@@ -144,7 +144,7 @@ Open [http://localhost:3000/login](http://localhost:3000/login) in a PWA-capable
 npm run package:pwa
 ```
 
-The bundle is written to `output/pwa/studio-map-os-pwa/`. It includes the standalone server, PWA assets, and the macOS launcher `START_STUDIO_MAP_OS.command`, which uses `127.0.0.1:3002` by default.
+The bundle is written to `output/pwa/studio-map-os-pwa/`. It includes the standalone server, PWA assets, and launch scripts for Windows (`START_STUDIO_MAP_OS.bat`), macOS (`START_STUDIO_MAP_OS.command`), and Linux/macOS terminals (`START_STUDIO_MAP_OS.sh`). All launchers use `127.0.0.1:3002` by default.
 
 ## Main routes
 

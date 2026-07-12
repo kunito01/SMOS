@@ -16,8 +16,8 @@
 </p>
 
 <p align="center">
-  <a href="https://kunito01.github.io/SMOS/login/"><img src="https://img.shields.io/badge/Live_Demo-Open_PWA-ff4b2b?style=for-the-badge&logo=pwa&logoColor=white" alt="Open Live Demo" /></a>
-  <a href="https://github.com/kunito01/SMOS/releases/latest"><img src="https://img.shields.io/badge/Download-Portable_PWA-f4f414?style=for-the-badge&logo=github&logoColor=1c2328" alt="Download portable PWA" /></a>
+  <a href="https://kunito01.github.io/SMOS/login/"><img src="./docs/readme/live-demo.svg" alt="Abrir la demo en vivo" /></a>
+  <a href="https://github.com/kunito01/SMOS/releases/latest"><img src="./docs/readme/download-pwa.svg" alt="Descargar la PWA portátil" /></a>
 </p>
 
 <p align="center">
@@ -144,7 +144,7 @@ Abre [http://localhost:3000/login](http://localhost:3000/login) en un navegador 
 npm run package:pwa
 ```
 
-El paquete se escribe en `output/pwa/studio-map-os-pwa/`. Incluye el servidor independiente, los recursos PWA y el lanzador para macOS `START_STUDIO_MAP_OS.command`, que utiliza `127.0.0.1:3002` de forma predeterminada.
+El paquete se escribe en `output/pwa/studio-map-os-pwa/`. Incluye el servidor independiente, los recursos PWA y scripts de inicio para Windows (`START_STUDIO_MAP_OS.bat`), macOS (`START_STUDIO_MAP_OS.command`) y terminales Linux/macOS (`START_STUDIO_MAP_OS.sh`). Todos los iniciadores utilizan `127.0.0.1:3002` de forma predeterminada.
 
 ## Rutas principales
 
