@@ -19,14 +19,14 @@ import { LoadingState } from "@/components/ui/loading-state";
 import { ModalPortal } from "@/components/ui/modal-portal";
 import { ProgressBar } from "@/components/ui/progress-bar";
 import { SectionHeader } from "@/components/ui/section-header";
-import { companiesApi, groupsApi } from "@/lib/api";
+import { companiesApi, groupsApi, projectsApi } from "@/lib/api";
 import {
   formatDemoEntityName,
   getProjectGroupDisplayName,
   groupDescriptionKeys,
   translateDomainLabel
 } from "@/lib/i18n/domain-labels";
-import type { CompanySummary, ProjectGroupSummary } from "@/lib/types";
+import type { CompanySummary, Project, ProjectGroupSummary } from "@/lib/types";
 import { companyPath } from "@/lib/utils/app-routes";
 import type { ExchangeRateSnapshot, MoneyCurrency } from "@/lib/utils/money";
 
@@ -42,6 +42,7 @@ const isSeededGroupDescription = (name: string, description: string) =>
 type CompaniesData = {
   companySummaries: CompanySummary[];
   groupSummaries: ProjectGroupSummary[];
+  projects: Project[];
 };
 
 type BrandForm = {
@@ -60,12 +61,13 @@ const loadCompaniesData = async (
   currency: MoneyCurrency,
   snapshot: ExchangeRateSnapshot
 ): Promise<CompaniesData> => {
-  const [companySummaries, groupSummaries] = await Promise.all([
+  const [companySummaries, groupSummaries, projects] = await Promise.all([
     companiesApi.listCompanySummaries(currency, snapshot),
-    groupsApi.listGroupSummaries({ currency, snapshot })
+    groupsApi.listGroupSummaries({ currency, snapshot }),
+    projectsApi.listProjects()
   ]);
 
-  return { companySummaries, groupSummaries };
+  return { companySummaries, groupSummaries, projects };
 };
 
 export function CompaniesPage() {
@@ -109,12 +111,13 @@ export function CompaniesPage() {
   const totals = useMemo(() => {
     const companySummaries = data?.companySummaries ?? [];
     const groupSummaries = data?.groupSummaries ?? [];
+    const projects = data?.projects ?? [];
 
     return {
       companies: companySummaries.length,
       groups: groupSummaries.length,
-      projects: companySummaries.reduce((sum, item) => sum + item.totalProjectCount, 0),
-      active: companySummaries.reduce((sum, item) => sum + item.activeProjectCount, 0)
+      projects: projects.length,
+      active: projects.filter((project) => project.status === "active").length
     };
   }, [data]);
 

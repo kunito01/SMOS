@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, ArrowRight, Calculator, FolderKanban, Layers3, Pencil, Rocket } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { ArrowLeft, ArrowRight, Calculator, FolderKanban, Layers3, Pencil, Rocket, Trash2 } from "lucide-react";
 import { ImageCard } from "@/components/cards/image-card";
 import { CompanyBasicsEditModal } from "@/components/companies/company-basics-edit-modal";
 import { useCostDisplayCurrency } from "@/components/costs/use-cost-display-currency";
@@ -12,6 +13,7 @@ import { AppShell } from "@/components/layout/app-shell";
 import { useI18n } from "@/components/providers/app-providers";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { DeleteConfirmDialog } from "@/components/ui/delete-confirm-dialog";
 import { LoadingState } from "@/components/ui/loading-state";
 import { ProgressBar } from "@/components/ui/progress-bar";
 import { SectionHeader } from "@/components/ui/section-header";
@@ -30,6 +32,7 @@ type CompanyDetailData = {
   company: Company;
   groups: ProjectGroup[];
   groupSummaries: ProjectGroupSummary[];
+  linkedProjectCount: number;
   projects: Project[];
   overview: DashboardOverview;
 };
@@ -49,10 +52,11 @@ const loadCompanyDetailData = async (
   currency: MoneyCurrency,
   snapshot: ExchangeRateSnapshot
 ): Promise<CompanyDetailData> => {
-  const [company, groupSummaries, projects, overview] = await Promise.all([
+  const [company, groupSummaries, projects, archivedProjects, overview] = await Promise.all([
     companiesApi.getCompany(companyId),
     groupsApi.listGroupSummaries({ companyId, currency, snapshot }),
     companiesApi.listCompanyProjects(companyId),
+    projectsApi.listArchivedProjects({ type: "company", id: companyId }),
     projectsApi.getDashboardOverview(
       { type: "company", id: companyId },
       { includeArchivedTotal: false, currency, snapshot }
@@ -63,6 +67,7 @@ const loadCompanyDetailData = async (
     company,
     groups: groupSummaries.map((summary) => summary.group),
     groupSummaries,
+    linkedProjectCount: projects.length + archivedProjects.length,
     projects,
     overview
   };
@@ -70,6 +75,7 @@ const loadCompanyDetailData = async (
 
 export function CompanyDetailPage({ companyId }: { companyId: string }) {
   const { language, t } = useI18n();
+  const router = useRouter();
   const {
     displayCurrency,
     exchangeRateSnapshot,
@@ -78,6 +84,9 @@ export function CompanyDetailPage({ companyId }: { companyId: string }) {
   } = useCostDisplayCurrency();
   const [data, setData] = useState<CompanyDetailData | null>(null);
   const [basicsOpen, setBasicsOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
+  const [deleting, setDeleting] = useState(false);
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
 
@@ -113,11 +122,28 @@ export function CompanyDetailPage({ companyId }: { companyId: string }) {
       ? translateDomainLabel(data.company.id, companyDescriptionKeys, t)
       : data.company.description
     : "";
-
   const handleBasicsSaved = (company: Company) => {
     setData((current) => (current ? { ...current, company } : current));
     setNotice(t("companyBasicsUpdated"));
     window.setTimeout(() => setNotice(""), 1600);
+  };
+
+  const handleCompanyDeleted = async () => {
+    if (!data || deleting) {
+      return;
+    }
+
+    setDeleting(true);
+    setDeleteError("");
+    try {
+      await companiesApi.deleteCompany(data.company.id);
+      router.replace("/companies");
+    } catch {
+      setDeleteDialogOpen(false);
+      setDeleteError(t("deleteCompanyError"));
+    } finally {
+      setDeleting(false);
+    }
   };
 
   return (
@@ -245,12 +271,74 @@ export function CompanyDetailPage({ companyId }: { companyId: string }) {
               </div>
             </section>
 
+            <section className="mt-6">
+              <Card tone="white" className="p-5 sm:p-6">
+                <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+                  <div className="min-w-0 max-w-3xl">
+                    <span className="grid size-11 place-items-center rounded-full bg-coral text-white">
+                      <Trash2 size={19} />
+                    </span>
+                    <h2 className="mt-4 text-2xl font-black leading-tight">{t("deleteCompany")}</h2>
+                    <p className="mt-2 text-sm font-bold leading-6 text-muted">{t("deleteCompanyBody")}</p>
+
+                    {data.linkedProjectCount > 0 ? (
+                      <div className="mt-5 max-w-xl rounded-studio bg-cloud p-4">
+                        <p className="text-sm font-black">
+                          {data.linkedProjectCount} {t("projectsCount")}
+                        </p>
+                        <p className="mt-2 text-xs font-bold leading-5 text-muted">
+                          {t("deleteCompanyUnlinkProjectsHint")}
+                        </p>
+                      </div>
+                    ) : null}
+
+                    {deleteError ? (
+                      <p className="mt-4 rounded-studio bg-coral/10 p-4 text-sm font-black text-coral">
+                        {deleteError}
+                      </p>
+                    ) : null}
+                  </div>
+
+                  <Button
+                    variant="primary"
+                    size="lg"
+                    className="bg-coral text-white"
+                    disabled={deleting}
+                    onClick={() => {
+                      setDeleteError("");
+                      setDeleteDialogOpen(true);
+                    }}
+                  >
+                    <Trash2 size={19} />
+                    {t("deleteCompany")}
+                  </Button>
+                </div>
+              </Card>
+            </section>
+
             <CompanyBasicsEditModal
               open={basicsOpen}
               company={data.company}
               t={t}
               onClose={() => setBasicsOpen(false)}
               onSaved={handleBasicsSaved}
+            />
+            <DeleteConfirmDialog
+              open={deleteDialogOpen}
+              busy={deleting}
+              title={t("deleteCompanyConfirmTitle")}
+              description={`${t("deleteCompanyConfirmDescription")}${
+                data.linkedProjectCount > 0
+                  ? ` ${data.linkedProjectCount} ${t("projectsCount")}.`
+                  : ""
+              }`}
+              warning={t("deleteCompanyWarning")}
+              cancelLabel={t("cancel")}
+              confirmLabel={t("confirmDelete")}
+              onCancel={() => setDeleteDialogOpen(false)}
+              onConfirm={() => {
+                void handleCompanyDeleted();
+              }}
             />
           </>
         )}

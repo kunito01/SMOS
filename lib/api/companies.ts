@@ -20,6 +20,12 @@ export type CompanyBasicsInput = {
   name: string;
 };
 
+export type DeleteCompanyResult = {
+  company: Company;
+  status: "deleted";
+  unlinkedProjectCount: number;
+};
+
 const defaultCompanyCoverImage =
   "https://images.unsplash.com/photo-1497366754035-f200968a6e72?auto=format&fit=crop&w=1400&q=80";
 
@@ -80,6 +86,44 @@ export async function updateCompanyBasics(companyId: string, input: CompanyBasic
   await persistMockDatabase();
 
   return mockApi(company);
+}
+
+export async function deleteCompany(companyId: string): Promise<DeleteCompanyResult> {
+  await hydrateMockDatabase();
+  const company = requireEntity(
+    mockDatabase.companies.find((item) => item.id === companyId),
+    `Company not found: ${companyId}`
+  );
+  const linkedProjects = mockDatabase.projects.filter((project) => project.companyId === companyId);
+  const previousCompanies = [...mockDatabase.companies];
+  const previousProjectCompanyIds = new Map(
+    linkedProjects.map((project) => [project.id, project.companyId])
+  );
+
+  linkedProjects.forEach((project) => {
+    project.companyId = "";
+  });
+  mockDatabase.companies = mockDatabase.companies.filter((item) => item.id !== companyId);
+
+  try {
+    await persistMockDatabase();
+  } catch (error) {
+    mockDatabase.companies = previousCompanies;
+    mockDatabase.projects.forEach((project) => {
+      const previousCompanyId = previousProjectCompanyIds.get(project.id);
+
+      if (previousCompanyId !== undefined) {
+        project.companyId = previousCompanyId;
+      }
+    });
+    throw error;
+  }
+
+  return mockApi({
+    status: "deleted",
+    company,
+    unlinkedProjectCount: linkedProjects.length
+  });
 }
 
 export async function listCompanyGroups(companyId: string) {
