@@ -16,6 +16,7 @@ import {
   UserPlus
 } from "lucide-react";
 import { BrandLockup } from "@/components/brand/brand-lockup";
+import { PasswordField } from "@/components/auth/password-field";
 import { LanguageToggle } from "@/components/i18n/language-toggle";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { useAuth, useI18n } from "@/components/providers/app-providers";
@@ -44,6 +45,8 @@ export function RegisterPage() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [confirmPasswordTouched, setConfirmPasswordTouched] = useState(false);
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceRegistrationMode>("create");
   const [workspaceCode, setWorkspaceCode] = useState("");
   const [workspaceBackup, setWorkspaceBackup] = useState<File | null>(null);
@@ -210,6 +213,11 @@ export function RegisterPage() {
     event.preventDefault();
     setError("");
 
+    if (password !== confirmPassword) {
+      setConfirmPasswordTouched(true);
+      return;
+    }
+
     if (!isValidWorkspaceCode(workspaceCode)) {
       setError(t("workspaceKeyInvalid"));
       return;
@@ -254,6 +262,10 @@ export function RegisterPage() {
   };
 
   const formattedWorkspaceCode = formatWorkspaceCode(workspaceCode);
+  const passwordConfirmationError =
+    confirmPasswordTouched && password !== confirmPassword
+      ? t("authPasswordsDoNotMatch")
+      : undefined;
 
   return (
     <main className="min-h-dvh p-3 sm:p-5 xl:p-6">
@@ -321,19 +333,46 @@ export function RegisterPage() {
                 />
               </label>
 
-              <label className="block">
-                <span className="mb-2 block text-sm font-black text-ink">{t("loginPassword")}</span>
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  placeholder={t("loginPasswordPlaceholder")}
-                  autoComplete="new-password"
-                  minLength={8}
-                  required
-                  className="h-14 w-full rounded-full border-0 bg-cloud px-5 text-base font-bold text-ink outline-none ring-1 ring-black/[0.04] transition focus:bg-white focus:ring-2 focus:ring-coral"
-                />
-              </label>
+              <PasswordField
+                id="register-password"
+                label={t("loginPassword")}
+                value={password}
+                onChange={(value) => {
+                  setPassword(value);
+                  setConfirmPasswordTouched(false);
+                  setError("");
+                }}
+                onBlur={() => {
+                  if (confirmPassword) {
+                    setConfirmPasswordTouched(true);
+                  }
+                }}
+                placeholder={t("loginPasswordPlaceholder")}
+                autoComplete="new-password"
+                minLength={8}
+                showPasswordLabel={t("showPassword")}
+                hidePasswordLabel={t("hidePassword")}
+                surface="cloud"
+              />
+
+              <PasswordField
+                id="register-confirm-password"
+                label={t("registerConfirmPassword")}
+                value={confirmPassword}
+                onChange={(value) => {
+                  setConfirmPassword(value);
+                  setConfirmPasswordTouched(false);
+                  setError("");
+                }}
+                onBlur={() => setConfirmPasswordTouched(true)}
+                placeholder={t("registerConfirmPasswordPlaceholder")}
+                autoComplete="new-password"
+                minLength={8}
+                showPasswordLabel={t("showPassword")}
+                hidePasswordLabel={t("hidePassword")}
+                surface="cloud"
+                error={passwordConfirmationError}
+              />
 
               <div className="grid gap-2 rounded-studio-lg bg-cloud p-1 sm:grid-cols-3">
                 {([

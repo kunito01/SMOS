@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowRight, CheckCircle2, LockKeyhole, Upload } from "lucide-react";
 import { PixelHeroScene } from "@/components/auth/pixel-hero-scene";
+import { PasswordField } from "@/components/auth/password-field";
 import { WorkspaceKeyDialog } from "@/components/auth/workspace-key-dialog";
 import { BrandLockup } from "@/components/brand/brand-lockup";
 import { LanguageToggle } from "@/components/i18n/language-toggle";
@@ -182,21 +183,19 @@ export function LoginPage() {
                 />
               </label>
 
-              <label className="block">
-                <span className="mb-2 block text-sm font-black text-ink">{t("loginPassword")}</span>
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(event) => {
-                    setPassword(event.target.value);
-                    setError("");
-                  }}
-                  placeholder={t("loginPasswordPlaceholder")}
-                  autoComplete="current-password"
-                  required
-                  className="h-14 w-full rounded-full border-0 bg-white px-5 text-base font-bold text-ink outline-none ring-1 ring-black/[0.04] transition focus:bg-white focus:ring-2 focus:ring-coral"
-                />
-              </label>
+              <PasswordField
+                id="login-password"
+                label={t("loginPassword")}
+                value={password}
+                onChange={(value) => {
+                  setPassword(value);
+                  setError("");
+                }}
+                placeholder={t("loginPasswordPlaceholder")}
+                autoComplete="current-password"
+                showPasswordLabel={t("showPassword")}
+                hidePasswordLabel={t("hidePassword")}
+              />
 
               {error ? (
                 <p role="alert" className="rounded-studio bg-coral/14 p-4 text-sm font-black text-[#b62f17]">
