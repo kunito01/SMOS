@@ -74,12 +74,9 @@ jobs:
             test -s "$required"
           done
 
-          worker="$(find out -maxdepth 1 -type f -name 'swe-worker-*.js' -print -quit)"
-          test -n "$worker"
-          test -s "$worker"
-
           node <<'NODE'
-          const { readFileSync } = require("node:fs");
+          const { readFileSync, readdirSync } = require("node:fs");
+          const { join } = require("node:path");
 
           const manifest = JSON.parse(readFileSync("out/manifest.webmanifest", "utf8"));
           const expected = {
@@ -135,6 +132,25 @@ jobs:
           ]) {
             if (!worker.includes(dataRoute)) {
               throw new Error(`The service worker does not precache ${dataRoute}.`);
+            }
+          }
+
+          const collectJavaScript = (directory) =>
+            readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+              const path = join(directory, entry.name);
+              if (entry.isDirectory()) {
+                return collectJavaScript(path);
+              }
+              return entry.isFile() && entry.name.endsWith(".js") ? [path] : [];
+            });
+
+          for (const path of collectJavaScript("out/_next/static/chunks")) {
+            const source = readFileSync(path, "utf8");
+            if (
+              source.includes('addEventListener("online"') ||
+              source.includes("addEventListener('online'")
+            ) {
+              throw new Error(`The PWA client must not reload or change state when the connection returns: ${path}.`);
             }
           }
           NODE
