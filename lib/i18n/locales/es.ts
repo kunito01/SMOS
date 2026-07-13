@@ -113,6 +113,7 @@ export const esTranslations = {
   quickSettings: "Ajustes rápidos",
   close: "Cerrar",
   logout: "Cerrar sesión",
+  logoutConfirmMessage: "¿Cerrar sesión? Tendrás que volver a introducir tu correo y contraseña. No se eliminarán las cuentas, los espacios de trabajo ni los datos de proyectos guardados en este dispositivo.",
   heroPillProduct: "Studio Map OS",
   heroPillScope: "Vista global",
   dashboardScope: "Ámbito del panel",

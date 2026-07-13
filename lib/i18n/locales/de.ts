@@ -113,6 +113,7 @@ export const deTranslations = {
   quickSettings: "Schnelleinstellungen",
   close: "Schließen",
   logout: "Abmelden",
+  logoutConfirmMessage: "Abmelden? Du musst E-Mail-Adresse und Passwort erneut eingeben. Konten, Arbeitsbereiche und Projektdaten auf diesem Gerät werden nicht gelöscht.",
   heroPillProduct: "Studio Map OS",
   heroPillScope: "Gesamtübersicht",
   dashboardScope: "Dashboard-Bereich",

@@ -33,13 +33,34 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
   const [language, setLanguageState] = useState<Language>("en");
 
   useEffect(() => {
-    const storedLanguage = window.localStorage.getItem(languageStorageKey);
+    let isCancelled = false;
 
-    if (languages.some((item) => item === storedLanguage)) {
-      setLanguageState(storedLanguage as Language);
-    }
+    const restoreCurrentSession = async () => {
+      try {
+        const storedLanguage = window.localStorage.getItem(languageStorageKey);
 
-    setIsReady(true);
+        if (!isCancelled && languages.some((item) => item === storedLanguage)) {
+          setLanguageState(storedLanguage as Language);
+        }
+
+        const currentUser = await authApi.getCurrentUser();
+        if (!isCancelled) {
+          setUser(currentUser);
+        }
+      } catch {
+        // The login screen remains available if browser storage cannot be read.
+      } finally {
+        if (!isCancelled) {
+          setIsReady(true);
+        }
+      }
+    };
+
+    void restoreCurrentSession();
+
+    return () => {
+      isCancelled = true;
+    };
   }, []);
 
   useEffect(() => {

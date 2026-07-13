@@ -113,6 +113,7 @@ export const thTranslations = {
   quickSettings: "ตั้งค่าด่วน",
   close: "ปิด",
   logout: "ออกจากระบบ",
+  logoutConfirmMessage: "ออกจากระบบหรือไม่? คุณจะต้องกรอกอีเมลและรหัสผ่านอีกครั้ง บัญชี เวิร์กสเปซ และข้อมูลโปรเจกต์ที่เก็บไว้ในอุปกรณ์นี้จะไม่ถูกลบ",
   heroPillProduct: "Studio Map OS",
   heroPillScope: "ภาพรวมทั้งหมด",
   dashboardScope: "ขอบเขตแดชบอร์ด",

@@ -113,6 +113,7 @@ export const trTranslations = {
   quickSettings: "Hızlı ayarlar",
   close: "Kapat",
   logout: "Oturumu Kapat",
+  logoutConfirmMessage: "Oturumu kapatmak istiyor musunuz? E-posta adresinizi ve şifrenizi yeniden girmeniz gerekecek. Bu cihazdaki hesaplar, çalışma alanları ve proje verileri silinmez.",
   heroPillProduct: "Studio Map OS",
   heroPillScope: "Genel Bakış",
   dashboardScope: "Pano kapsamı",

@@ -113,6 +113,7 @@ export const ruTranslations = {
   quickSettings: "Быстрые настройки",
   close: "Закрыть",
   logout: "Выйти",
+  logoutConfirmMessage: "Выйти из системы? Вам потребуется снова ввести адрес электронной почты и пароль. Учетные записи, рабочие пространства и данные проектов на этом устройстве не будут удалены.",
   heroPillProduct: "Studio Map OS",
   heroPillScope: "Общий обзор",
   dashboardScope: "Область обзора",

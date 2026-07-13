@@ -113,6 +113,7 @@ export const frTranslations = {
   quickSettings: "Réglages rapides",
   close: "Fermer",
   logout: "Se déconnecter",
+  logoutConfirmMessage: "Vous déconnecter ? Vous devrez saisir de nouveau votre adresse e-mail et votre mot de passe. Les comptes, espaces de travail et données de projet stockés sur cet appareil ne seront pas supprimés.",
   heroPillProduct: "Studio Map OS",
   heroPillScope: "Vue d’ensemble",
   dashboardScope: "Périmètre du tableau de bord",

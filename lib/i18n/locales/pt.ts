@@ -113,6 +113,7 @@ export const ptTranslations = {
   quickSettings: "Configurações rápidas",
   close: "Fechar",
   logout: "Sair",
+  logoutConfirmMessage: "Sair? Você precisará informar novamente seu e-mail e senha. As contas, os espaços de trabalho e os dados de projetos armazenados neste dispositivo não serão excluídos.",
   heroPillProduct: "Studio Map OS",
   heroPillScope: "Visão geral global",
   dashboardScope: "Escopo do painel",

@@ -116,7 +116,7 @@ export function AppShell({ beforeNavigate, children }: AppShellProps) {
   };
 
   const handleSignOut = async () => {
-    if (!canNavigate()) {
+    if (!canNavigate() || !window.confirm(t("logoutConfirmMessage"))) {
       return;
     }
 

@@ -90,11 +90,15 @@ const withSerwist = withSerwistInit({
       revision: getFileRevision(source)
     }))
   ],
-  cacheOnNavigation: true,
+  // Every fixed app route and its GitHub Pages data route is precached. Avoid
+  // background page fetches while the local workspace is already running.
+  cacheOnNavigation: false,
   disable: isDevelopment,
   maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
   register: true,
-  reloadOnOnline: true,
+  // Registering checks for updates when the app starts. A connection change
+  // must never reload an unlocked local workspace while it is in use.
+  reloadOnOnline: false,
   scope: basePath ? `${basePath}/` : "/",
   swDest: "public/sw.js",
   swSrc: "app/sw.ts"

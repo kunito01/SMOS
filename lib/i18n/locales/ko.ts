@@ -113,6 +113,7 @@ export const koTranslations = {
   quickSettings: "빠른 설정",
   close: "닫기",
   logout: "로그아웃",
+  logoutConfirmMessage: "로그아웃하시겠습니까? 이메일과 비밀번호를 다시 입력해야 합니다. 이 기기에 저장된 계정, 작업 공간 및 프로젝트 데이터는 삭제되지 않습니다.",
   heroPillProduct: "Studio Map OS",
   heroPillScope: "전체 보기",
   dashboardScope: "대시보드 범위",
