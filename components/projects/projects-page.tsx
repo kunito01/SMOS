@@ -83,6 +83,9 @@ export function ProjectsPage() {
                 <p className="mt-5 max-w-2xl text-base font-bold leading-7 text-ink/80 drop-shadow-[0_1px_0_rgba(255,225,143,0.34)]">
                   {t("allProjectsBody")}
                 </p>
+                <p className="mt-3 max-w-2xl text-xs font-black leading-5 text-ink/68 drop-shadow-[0_1px_0_rgba(255,225,143,0.34)] sm:text-sm sm:leading-6">
+                  {t("projectImportBlankHint")}
+                </p>
                 <div className="mt-7 flex flex-wrap items-center gap-3">
                   <Button size="lg" disabled={!data} onClick={() => void openCreateModal()}>
                     <Plus size={19} />

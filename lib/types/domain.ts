@@ -253,6 +253,10 @@ export type ProjectStatus = "planning" | "active" | "paused" | "terminated" | "c
 
 export type Project = {
   id: string;
+  /** Stable opaque identity used only to verify standalone project archives. */
+  archiveIdentity?: string;
+  /** True only while a newly-created local project is safe to replace with an archive. */
+  importPlaceholder?: boolean;
   companyId: string;
   groupId: string;
   name: string;

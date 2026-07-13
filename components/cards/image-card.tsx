@@ -31,8 +31,14 @@ export function ImageCard({
     >
       {action ? <div className="absolute right-5 top-5 z-20">{action}</div> : null}
       <div className="relative z-10">
-        {meta ? <p className="mb-2 text-sm font-bold text-white/[0.82]">{meta}</p> : null}
-        <h3 className="max-w-56 text-2xl font-black leading-none">{title}</h3>
+        {meta ? (
+          <p className="mb-2 max-w-full break-words text-xs font-bold leading-tight text-white/[0.82] sm:text-sm">
+            {meta}
+          </p>
+        ) : null}
+        <h3 className="max-w-full break-words text-xl font-black leading-tight [overflow-wrap:anywhere] sm:max-w-56 sm:text-2xl sm:leading-none">
+          {title}
+        </h3>
         {children ? <div className="mt-4">{children}</div> : null}
       </div>
     </div>

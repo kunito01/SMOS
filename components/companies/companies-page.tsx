@@ -229,7 +229,7 @@ export function CompaniesPage() {
                           <p className="max-w-full whitespace-nowrap text-[clamp(1rem,5vw,2rem)] font-black leading-none tracking-[-0.03em] tabular-nums lg:text-4xl lg:tracking-normal">
                             {item.value}
                           </p>
-                          <p className="max-w-full whitespace-nowrap text-[clamp(7px,1.35vw,10px)] font-black leading-none tracking-[-0.04em] text-current/70 lg:text-sm lg:tracking-normal">
+                          <p className="max-w-full break-words text-[clamp(8px,2.2vw,10px)] font-black leading-[1.05] tracking-[-0.03em] text-current/70 lg:whitespace-nowrap lg:text-sm lg:leading-none lg:tracking-normal">
                             {item.label}
                           </p>
                         </div>
@@ -258,33 +258,41 @@ export function CompaniesPage() {
                     imageUrl={summary.company.coverImage}
                     title={formatDemoEntityName(summary.company.name, summary.company.id, "company", t)}
                     meta={t("companyOverview")}
-                    heightClassName="h-[24rem]"
-                    className="transition duration-200 hover:-translate-y-1"
+                    heightClassName="h-auto min-h-[24rem] sm:h-[24rem]"
+                    className="p-4 transition duration-200 hover:-translate-y-1 sm:p-5"
                   >
-                    <div className="grid gap-3 rounded-studio bg-white/90 p-4 text-ink sm:grid-cols-3">
-                      <div>
-                        <p className="text-2xl font-black">{summary.totalProjectCount}</p>
-                        <p className="text-xs font-bold text-muted">{t("projectsCount")}</p>
+                    <div className="grid grid-cols-3 gap-2 rounded-studio bg-white/90 p-3 text-ink sm:gap-3 sm:p-4">
+                      <div className="min-w-0">
+                        <p className="text-xl font-black sm:text-2xl">{summary.totalProjectCount}</p>
+                        <p className="mt-1 break-words text-[clamp(10px,2.8vw,12px)] font-bold leading-tight text-muted">
+                          {t("projectsCount")}
+                        </p>
                       </div>
-                      <div>
-                        <p className="text-2xl font-black">{summary.activeProjectCount}</p>
-                        <p className="text-xs font-bold text-muted">{t("activeCount")}</p>
+                      <div className="min-w-0">
+                        <p className="text-xl font-black sm:text-2xl">{summary.activeProjectCount}</p>
+                        <p className="mt-1 break-words text-[clamp(10px,2.8vw,12px)] font-bold leading-tight text-muted">
+                          {t("activeCount")}
+                        </p>
                       </div>
-                      <div>
-                        <p className="text-2xl font-black">{summary.averageProgress}%</p>
-                        <p className="text-xs font-bold text-muted">{t("averageProgressShort")}</p>
+                      <div className="min-w-0">
+                        <p className="text-xl font-black sm:text-2xl">{summary.averageProgress}%</p>
+                        <p className="mt-1 break-words text-[clamp(10px,2.8vw,12px)] font-bold leading-tight text-muted">
+                          {t("averageProgressShort")}
+                        </p>
                       </div>
-                      <div className="sm:col-span-3">
+                      <div className="col-span-3">
                         <ProgressBar value={summary.averageProgress} />
                       </div>
-                      <div className="flex items-center justify-between gap-3 rounded-full bg-cloud px-3 py-2 sm:col-span-3">
-                        <span className="inline-flex items-center gap-2 text-xs font-black text-muted">
-                          <Calculator size={15} />
-                          {t("projectBudgetTotal")}
+                      <div className="col-span-3 flex min-w-0 items-center justify-between gap-2 rounded-full bg-cloud px-3 py-2">
+                        <span className="inline-flex min-w-0 items-center gap-1.5 text-[clamp(10px,2.8vw,12px)] font-black leading-tight text-muted">
+                          <Calculator className="shrink-0" size={15} />
+                          <span className="break-words">{t("projectBudgetTotal")}</span>
                         </span>
-                        <span className="font-black">{formatAmount(summary.budgetCostTotal, summary.currency)}</span>
+                        <span className="shrink-0 whitespace-nowrap text-sm font-black sm:text-base">
+                          {formatAmount(summary.budgetCostTotal, summary.currency)}
+                        </span>
                       </div>
-                      <div className="inline-flex items-center gap-2 text-sm font-black sm:col-span-3">
+                      <div className="col-span-3 inline-flex items-center gap-2 text-sm font-black">
                         {t("openCompany")}
                         <ArrowRight size={16} />
                       </div>

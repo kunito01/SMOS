@@ -5,10 +5,15 @@ import { KeyRound, ShieldCheck, X } from "lucide-react";
 import { useI18n } from "@/components/providers/app-providers";
 import { Button } from "@/components/ui/button";
 import { ModalPortal } from "@/components/ui/modal-portal";
-import { formatWorkspaceCode, isValidWorkspaceCode } from "@/lib/security/workspace-crypto";
+import {
+  formatWorkspaceCode,
+  isValidWorkspaceCode,
+  sanitizeWorkspaceCodeInput
+} from "@/lib/security/workspace-crypto";
 
 type WorkspaceKeyDialogProps = {
   busy?: boolean;
+  confirmLabel?: string;
   description?: string;
   error?: string;
   open: boolean;
@@ -17,10 +22,9 @@ type WorkspaceKeyDialogProps = {
   title?: string;
 };
 
-const sanitizeWorkspaceCodeInput = (value: string) => value.replace(/\D/g, "").slice(0, 16);
-
 export function WorkspaceKeyDialog({
   busy = false,
+  confirmLabel,
   description,
   error,
   open,
@@ -129,10 +133,7 @@ export function WorkspaceKeyDialog({
                 <ShieldCheck size={22} />
               </span>
               <div>
-                <p className="text-xs font-black uppercase tracking-[0.12em] text-white/68">
-                  {t("workspaceIdentity")}
-                </p>
-                <h2 id={titleId} className="mt-1 text-2xl font-black">
+                <h2 id={titleId} className="text-2xl font-black">
                   {title ?? t("workspaceUnlockTitle")}
                 </h2>
               </div>
@@ -188,7 +189,7 @@ export function WorkspaceKeyDialog({
                 className="w-full"
               >
                 <KeyRound size={18} />
-                {busy ? t("loading") : t("workspaceUnlockAction")}
+                {busy ? t("loading") : confirmLabel ?? t("workspaceUnlockAction")}
               </Button>
             </div>
           </div>

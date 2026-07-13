@@ -705,6 +705,29 @@ export function normalizeWorkspaceCode(value: string): string {
   return typeof value === "string" ? value.replace(/[\s-]+/g, "") : "";
 }
 
+/**
+ * Accepts normal typing as well as a full recovery-card paste. When surrounding
+ * copy contains other numbers (for example "16-digit"), prefer the explicit
+ * wallet-style 4-4-4-4 code instead of taking the first sixteen digits.
+ */
+export function sanitizeWorkspaceCodeInput(value: string): string {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  const groupedCode = value.match(/(?:^|\D)(\d{4}(?:[\s-]\d{4}){3})(?=\D|$)/);
+  if (groupedCode) {
+    return normalizeWorkspaceCode(groupedCode[1]);
+  }
+
+  const compactCode = value.match(/(?:^|\D)(\d{16})(?=\D|$)/);
+  if (compactCode) {
+    return compactCode[1];
+  }
+
+  return value.replace(/\D/g, "").slice(0, WORKSPACE_CODE_LENGTH);
+}
+
 /** Formats a code in wallet-like 4-4-4-4 groups. Partial input is supported for form fields. */
 export function formatWorkspaceCode(value: string): string {
   const normalized = normalizeWorkspaceCode(value);

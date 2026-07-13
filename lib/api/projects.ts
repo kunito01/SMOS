@@ -20,6 +20,12 @@ import {
 } from "@/lib/utils/money";
 import { normalizeProjectBudgetForPhases } from "@/lib/utils/project-budget-normalize";
 import { buildProjectPhaseDateRanges } from "@/lib/utils/project-phases";
+import {
+  decideProjectImport,
+  type ProjectImportBlockedReason,
+  type ProjectImportMode,
+  type ValidatedProjectSave
+} from "@/lib/utils/project-import";
 
 export type TimelineTaskInput = {
   id?: string;
@@ -80,6 +86,32 @@ export type DashboardOverviewOptions = {
   includeArchivedTotal?: boolean;
   currency?: MoneyCurrency;
   snapshot?: ExchangeRateSnapshot;
+};
+
+export class ProjectImportTargetError extends Error {
+  constructor(public readonly reason: ProjectImportBlockedReason) {
+    super("The selected archive cannot replace this project");
+    this.name = "ProjectImportTargetError";
+    Object.setPrototypeOf(this, new.target.prototype);
+  }
+}
+
+export type ProjectImportPlan = {
+  mode: ProjectImportMode;
+  sourceName: string;
+  targetName: string;
+};
+
+const markProjectAsPopulated = (project: Project) => {
+  project.importPlaceholder = false;
+};
+
+const createProjectArchiveIdentity = () => {
+  if (!globalThis.crypto?.randomUUID) {
+    throw new Error("Secure project identity generation is unavailable");
+  }
+
+  return `project_${globalThis.crypto.randomUUID().replace(/-/g, "")}`;
 };
 
 export const isArchivedProject = (project: Project) => Boolean(project.archivedAt);
@@ -222,70 +254,42 @@ export async function createProject(input: CreateProjectInput) {
 
   project.startDate = input.startDate;
   project.endDate = input.endDate;
+  project.description = "";
+  project.timelineTitle = "";
   project.timelineConfigured = false;
+  project.timelineRows = [];
   alignProjectPhasesToDates(project, input.startDate, input.endDate);
   project.status = input.status;
   project.archivedAt = null;
   project.tools = selectedTools;
   project.people = selectedPeople;
-
-  if (project.people.length) {
-    const personAt = (index: number) => project.people[index % project.people.length];
-
-    project.phases.forEach((phase, phaseIndex) => {
-      phase.assigneeId = personAt(phaseIndex).id;
-      phase.personIds = Array.from(
-        { length: Math.min(2, project.people.length) },
-        (_, personOffset) => personAt(phaseIndex + personOffset).id
-      );
-
-      phase.deliverables.forEach((deliverable, deliverableIndex) => {
-        deliverable.assigneeId = personAt(phaseIndex + deliverableIndex).id;
-        deliverable.tasks.forEach((task, taskIndex) => {
-          task.assigneeId = personAt(phaseIndex + deliverableIndex + taskIndex).id;
-        });
-      });
-    });
-
-    project.materials.forEach((material, materialIndex) => {
-      material.ownerId = personAt(materialIndex).id;
-    });
-    project.activity.forEach((event, eventIndex) => {
-      event.actorId = personAt(eventIndex).id;
-    });
-  } else {
-    project.phases.forEach((phase) => {
-      phase.assigneeId = undefined;
-      phase.personIds = [];
-      phase.deliverables.forEach((deliverable) => {
-        deliverable.assigneeId = "";
-        deliverable.tasks.forEach((task) => {
-          task.assigneeId = "";
-        });
-      });
-    });
-    project.materials.forEach((material) => {
-      material.ownerId = "";
-    });
-    project.activity.forEach((event) => {
-      event.actorId = "";
-    });
-  }
-
-  if (project.tools.length) {
-    const toolAt = (index: number) => project.tools[index % project.tools.length];
-
-    project.phases.forEach((phase, phaseIndex) => {
-      phase.toolIds = Array.from(
-        { length: Math.min(2, project.tools.length) },
-        (_, toolOffset) => toolAt(phaseIndex + toolOffset).id
-      );
-    });
-  } else {
-    project.phases.forEach((phase) => {
-      phase.toolIds = [];
-    });
-  }
+  project.phases = project.phases.map((phase) => ({
+    ...phase,
+    name: "",
+    description: "",
+    status: "not-started",
+    assigneeId: undefined,
+    personIds: [],
+    toolIds: [],
+    notes: "",
+    deliverables: []
+  }));
+  project.currentPhaseId = project.phases[0]?.id ?? "";
+  project.progress = 0;
+  project.payments = [];
+  project.materials = [];
+  project.versions = [];
+  project.activity = [];
+  project.shareSettings = {
+    isEnabled: false,
+    allowCostPreview: false,
+    showPeople: true,
+    showTools: true,
+    showTimeline: true,
+    showDeliverables: true,
+    showMaterials: true,
+    showVersions: true
+  };
 
   project.costs = selectedCostTemplates.map<CostItem>((template, index) => ({
       id: `${project.id}-cost-library-${index + 1}`,
@@ -300,6 +304,8 @@ export async function createProject(input: CreateProjectInput) {
       visibility: "private"
     }));
   project.budget = undefined;
+  project.importPlaceholder =
+    selectedPeople.length === 0 && selectedTools.length === 0 && selectedCostTemplates.length === 0;
   linkBudgetResourcesToProject(project);
 
   mockDatabase.projects.unshift(project);
@@ -354,6 +360,7 @@ export async function updateTaskCompletion(taskId: string, completed: boolean) {
   }
 
   if (updatedProject) {
+    markProjectAsPopulated(updatedProject);
     updatedProject.progress = calculateProjectProgress(updatedProject);
     updatedProject.status = getProjectStatusFromProgress(updatedProject, updatedProject.progress);
 
@@ -467,6 +474,7 @@ export async function updateProjectBudget(projectId: string, input: UpdateProjec
     throw new Error("Save the project timeline before creating its phase budget");
   }
 
+  markProjectAsPopulated(project);
   project.budget = normalizeProjectBudgetForPhases(input, project.phases, project.tools);
   linkBudgetResourcesToProject(project);
   await persistMockDatabase();
@@ -494,6 +502,7 @@ export async function updateProjectTimeline(projectId: string, input: UpdateProj
   const nextPhases = input.phases.map((phase, index) => createPhaseFromTimelineInput(project, phase, index));
   const nextPhaseIds = new Set(nextPhases.map((phase) => phase.id));
 
+  markProjectAsPopulated(project);
   project.phases = nextPhases;
   project.budget = normalizeProjectBudgetForPhases(project.budget, project.phases, project.tools);
   project.timelineTitle = input.title.trim();
@@ -533,6 +542,7 @@ export async function updateProjectPayments(projectId: string, input: ProjectPay
     `Project not found: ${projectId}`
   );
 
+  markProjectAsPopulated(project);
   project.payments = input
     .filter((payment) => payment.amount > 0)
     .map((payment, index) => ({
@@ -564,6 +574,7 @@ export async function updateProjectBasics(projectId: string, input: ProjectBasic
     throw new Error(`Project group not found: ${groupId}`);
   }
 
+  markProjectAsPopulated(project);
   project.name = input.name.trim() || project.name;
   project.description = input.description.trim() || project.description;
   project.groupId = groupId;
@@ -584,6 +595,7 @@ export async function updateProjectStatus(projectId: string, status: ProjectStat
     `Project not found: ${projectId}`
   );
 
+  markProjectAsPopulated(project);
   project.status = status;
   await persistMockDatabase();
 
@@ -629,6 +641,7 @@ export async function updateProjectReleasePlan(projectId: string, input: Project
   const officialVersion = input.officialVersion.trim();
   const officialReleaseDate = input.officialReleaseDate.trim();
 
+  markProjectAsPopulated(project);
   project.versions = [
     createReleaseVersion(project, "demo", demoVersion, demoReleaseDate, findReleaseVersion(project, "demo")),
     createReleaseVersion(project, "official", officialVersion, officialReleaseDate, findReleaseVersion(project, "official"))
@@ -646,6 +659,7 @@ export async function archiveProject(projectId: string) {
     `Project not found: ${projectId}`
   );
 
+  markProjectAsPopulated(project);
   project.archivedAt = new Date().toISOString();
   await persistMockDatabase();
 
@@ -659,55 +673,222 @@ export async function restoreProject(projectId: string) {
     `Project not found: ${projectId}`
   );
 
+  markProjectAsPopulated(project);
   project.archivedAt = null;
   await persistMockDatabase();
 
   return mockApi(project);
 }
 
+const hashImportedId = (value: string, seed: number) => {
+  let hash = seed >>> 0;
+
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16_777_619);
+  }
+
+  return (hash >>> 0).toString(16).padStart(8, "0");
+};
+
+const createImportedEntityId = (
+  projectId: string,
+  archiveIdentity: string,
+  kind: string,
+  sourceId: string
+) => {
+  const value = `${archiveIdentity}:${kind}:${sourceId}`;
+  return `${projectId}-${kind}-${hashImportedId(value, 2_166_136_261)}${hashImportedId(value, 3_331_666_717)}`;
+};
+
 const normalizeImportedProject = (
   projectId: string,
-  importedProject: Project,
-  currentProject?: Project
+  archive: ValidatedProjectSave,
+  currentProject: Project,
+  archiveIdentity: string
 ): Project => {
-  const phases = importedProject.phases.map((phase) => ({
-    ...phase,
-    projectId,
-    deliverables: phase.deliverables.map((deliverable) => ({
-      ...deliverable,
-      tasks: deliverable.tasks.map((task) => ({
-        ...task,
-        deliverableId: deliverable.id
-      }))
-    }))
-  }));
+  const importedProject = archive.project;
+  const phaseIds = new Map(
+    importedProject.phases.map((phase) => [
+      phase.id,
+      createImportedEntityId(projectId, archiveIdentity, "phase", phase.id)
+    ])
+  );
+  const phases = importedProject.phases.map((phase) => {
+    const phaseId = phaseIds.get(phase.id) as string;
+
+    return {
+      ...phase,
+      id: phaseId,
+      projectId,
+      deliverables: phase.deliverables.map((deliverable) => {
+        const deliverableId = createImportedEntityId(
+          projectId,
+          archiveIdentity,
+          "deliverable",
+          deliverable.id
+        );
+
+        return {
+          ...deliverable,
+          id: deliverableId,
+          phaseId,
+          tasks: deliverable.tasks.map((task) => ({
+            ...task,
+            id: createImportedEntityId(projectId, archiveIdentity, "task", task.id),
+            deliverableId
+          }))
+        };
+      })
+    };
+  });
+  const importedBudget = importedProject.budget
+    ? {
+        ...importedProject.budget,
+        phases: importedProject.budget.phases.map((phaseBudget) => ({
+          ...phaseBudget,
+          phaseId: phaseIds.get(phaseBudget.phaseId) ?? phaseBudget.phaseId,
+          personnel: phaseBudget.personnel.map((line) => ({
+            ...line,
+            id: createImportedEntityId(projectId, archiveIdentity, "budget-person", line.id)
+          })),
+          dailyExpenseLines: phaseBudget.dailyExpenseLines.map((line) => ({
+            ...line,
+            id: createImportedEntityId(projectId, archiveIdentity, "budget-daily", line.id)
+          })),
+          extraCosts: phaseBudget.extraCosts.map((line) => ({
+            ...line,
+            id: createImportedEntityId(projectId, archiveIdentity, "budget-extra", line.id)
+          })),
+          softwareCosts: phaseBudget.softwareCosts.map((line) => ({
+            ...line,
+            id: createImportedEntityId(projectId, archiveIdentity, "budget-software", line.id)
+          }))
+        }))
+      }
+    : undefined;
 
   return {
     ...importedProject,
     id: projectId,
-    archivedAt: importedProject.archivedAt ?? currentProject?.archivedAt ?? null,
+    archiveIdentity,
+    importPlaceholder: false,
+    companyId: currentProject.companyId,
+    groupId: currentProject.groupId,
+    archivedAt: currentProject.archivedAt ?? null,
+    currentPhaseId: phaseIds.get(importedProject.currentPhaseId) ?? phases[0]?.id ?? "",
     phases,
-    budget: normalizeProjectBudgetForPhases(importedProject.budget, phases, importedProject.tools),
-    costs: importedProject.costs.map((cost) => ({ ...cost, projectId })),
-    payments: (importedProject.payments ?? []).map((payment) => ({ ...payment, projectId })),
-    materials: importedProject.materials.map((material) => ({ ...material, projectId })),
-    versions: (importedProject.versions ?? []).map((version) => ({ ...version, projectId })),
-    activity: importedProject.activity.map((event) => ({ ...event, projectId })),
-    shareSettings: {
-      ...importedProject.shareSettings,
-      token: importedProject.shareSettings.token
-    }
+    timelineRows: importedProject.timelineRows?.map((row) => ({
+      ...row,
+      id: createImportedEntityId(projectId, archiveIdentity, "timeline-row", row.id),
+      values: Object.fromEntries(
+        Object.entries(row.values).flatMap(([phaseId, cell]) => {
+          const mappedPhaseId = phaseIds.get(phaseId);
+          return mappedPhaseId ? [[mappedPhaseId, cell]] : [];
+        })
+      )
+    })),
+    budget: normalizeProjectBudgetForPhases(importedBudget, phases, importedProject.tools),
+    costs: importedProject.costs.map((cost) => ({
+      ...cost,
+      id: createImportedEntityId(projectId, archiveIdentity, "cost", cost.id),
+      projectId
+    })),
+    payments: importedProject.payments.map((payment) => ({
+      ...payment,
+      id: createImportedEntityId(projectId, archiveIdentity, "payment", payment.id),
+      projectId
+    })),
+    materials: importedProject.materials.map((material) => ({
+      ...material,
+      id: createImportedEntityId(projectId, archiveIdentity, "material", material.id),
+      projectId
+    })),
+    versions: importedProject.versions.map((version) => ({
+      ...version,
+      id: createImportedEntityId(projectId, archiveIdentity, "version", version.id),
+      projectId
+    })),
+    activity: importedProject.activity.map((event) => ({
+      ...event,
+      id: createImportedEntityId(projectId, archiveIdentity, "activity", event.id),
+      projectId
+    })),
+    // Company placement, archive state, and public sharing remain local to the
+    // receiving device. A standalone project file cannot silently move or
+    // publish the target project.
+    shareSettings: { ...currentProject.shareSettings }
   };
 };
 
-export async function replaceProject(projectId: string, importedProject: Project) {
+export async function ensureProjectArchiveIdentity(projectId: string) {
   await hydrateMockDatabase();
   const projectIndex = mockDatabase.projects.findIndex((item) => item.id === projectId);
+  const project = requireEntity(
+    projectIndex >= 0 ? mockDatabase.projects[projectIndex] : undefined,
+    `Project not found: ${projectId}`
+  );
 
-  requireEntity(projectIndex >= 0 ? mockDatabase.projects[projectIndex] : undefined, `Project not found: ${projectId}`);
+  if (project.archiveIdentity) {
+    return mockApi(project);
+  }
 
-  const nextProject = normalizeImportedProject(projectId, importedProject, mockDatabase.projects[projectIndex]);
-  const previousProject = mockDatabase.projects[projectIndex];
+  const previousProject = structuredClone(project);
+  project.archiveIdentity = createProjectArchiveIdentity();
+
+  try {
+    await persistMockDatabase();
+  } catch (error) {
+    mockDatabase.projects[projectIndex] = previousProject;
+    throw error;
+  }
+
+  return mockApi(project);
+}
+
+export async function inspectProjectImport(projectId: string, archive: ValidatedProjectSave) {
+  await hydrateMockDatabase();
+  const project = requireEntity(
+    mockDatabase.projects.find((item) => item.id === projectId),
+    `Project not found: ${projectId}`
+  );
+  const decision = decideProjectImport(project, archive);
+
+  if (!decision.allowed) {
+    throw new ProjectImportTargetError(decision.reason);
+  }
+
+  return mockApi({
+    mode: decision.mode,
+    sourceName: archive.project.name,
+    targetName: project.name
+  } satisfies ProjectImportPlan);
+}
+
+export async function replaceProjectFromArchive(
+  projectId: string,
+  archive: ValidatedProjectSave
+) {
+  await hydrateMockDatabase();
+  const projectIndex = mockDatabase.projects.findIndex((item) => item.id === projectId);
+  const currentProject = requireEntity(
+    projectIndex >= 0 ? mockDatabase.projects[projectIndex] : undefined,
+    `Project not found: ${projectId}`
+  );
+  const decision = decideProjectImport(currentProject, archive);
+
+  if (!decision.allowed) {
+    throw new ProjectImportTargetError(decision.reason);
+  }
+
+  const archiveIdentity = archive.projectIdentity ?? createProjectArchiveIdentity();
+  const nextProject = normalizeImportedProject(
+    projectId,
+    archive,
+    currentProject,
+    archiveIdentity
+  );
+  const previousProject = currentProject;
   mockDatabase.projects[projectIndex] = nextProject;
 
   try {
@@ -717,7 +898,7 @@ export async function replaceProject(projectId: string, importedProject: Project
     throw error;
   }
 
-  return mockApi(nextProject);
+  return mockApi({ mode: decision.mode, project: nextProject });
 }
 
 export async function deleteProject(projectId: string) {

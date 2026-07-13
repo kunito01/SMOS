@@ -74,6 +74,8 @@ export function ArchivePage() {
   const [backupNotice, setBackupNotice] = useState<BackupNotice | null>(null);
   const [pendingBackup, setPendingBackup] = useState<ImportedSiteBackup | null>(null);
   const [pendingEncryptedBackup, setPendingEncryptedBackup] = useState<EncryptedWorkspaceEnvelope | null>(null);
+  const [pendingBackupExport, setPendingBackupExport] = useState<"device" | "workspace" | null>(null);
+  const [exportUnlockError, setExportUnlockError] = useState("");
   const [unlockError, setUnlockError] = useState("");
 
   useEffect(() => {
@@ -145,12 +147,13 @@ export function ArchivePage() {
       .filter((branch) => branch.groups.length > 0);
   }, [data]);
 
-  const downloadSiteBackup = async () => {
+  const downloadSiteBackup = async (workspaceCode: string) => {
     setBackupBusy("export");
     setBackupNotice(null);
+    setExportUnlockError("");
 
     try {
-      const encryptedBackup = await authApi.createEncryptedFullSiteBackup();
+      const encryptedBackup = await authApi.createEncryptedFullSiteBackup(workspaceCode);
       const content = JSON.stringify(encryptedBackup, null, 2);
       const url = URL.createObjectURL(new Blob([content], { type: "application/json" }));
       const link = document.createElement("a");
@@ -160,20 +163,28 @@ export function ArchivePage() {
       document.body.append(link);
       link.click();
       link.remove();
-      URL.revokeObjectURL(url);
+      window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
+      setPendingBackupExport(null);
       setBackupNotice({ message: t("siteBackupExportSuccess"), tone: "success" });
-    } catch {
-      setBackupNotice({ message: t("siteBackupExportError"), tone: "error" });
+    } catch (cause) {
+      if (cause instanceof LocalAuthError && cause.code === "RECOVERY_KEY_MISMATCH") {
+        setExportUnlockError(t("backupExportKeyMismatch"));
+      } else {
+        setPendingBackupExport(null);
+        setBackupNotice({ message: t("siteBackupExportError"), tone: "error" });
+      }
     } finally {
       setBackupBusy(null);
     }
   };
 
-  const downloadWorkspaceBackup = async () => {
+  const downloadWorkspaceBackup = async (workspaceCode: string) => {
     setBackupBusy("workspace-export");
     setBackupNotice(null);
+    setExportUnlockError("");
 
     try {
+      await authApi.verifyActiveWorkspaceRecoveryCode(workspaceCode);
       const workspaceBackup = await createMockDatabaseBackup();
       const encryptedBackup = await authApi.encryptActiveWorkspaceFile(
         "workspace",
@@ -188,12 +199,29 @@ export function ArchivePage() {
       document.body.append(link);
       link.click();
       link.remove();
-      URL.revokeObjectURL(url);
+      window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
+      setPendingBackupExport(null);
       setBackupNotice({ message: t("workspaceBackupExportSuccess"), tone: "success" });
-    } catch {
-      setBackupNotice({ message: t("siteBackupExportError"), tone: "error" });
+    } catch (cause) {
+      if (cause instanceof LocalAuthError && cause.code === "RECOVERY_KEY_MISMATCH") {
+        setExportUnlockError(t("backupExportKeyMismatch"));
+      } else {
+        setPendingBackupExport(null);
+        setBackupNotice({ message: t("siteBackupExportError"), tone: "error" });
+      }
     } finally {
       setBackupBusy(null);
+    }
+  };
+
+  const confirmBackupExport = async (workspaceCode: string) => {
+    if (pendingBackupExport === "device") {
+      await downloadSiteBackup(workspaceCode);
+      return;
+    }
+
+    if (pendingBackupExport === "workspace") {
+      await downloadWorkspaceBackup(workspaceCode);
     }
   };
 
@@ -245,7 +273,7 @@ export function ArchivePage() {
       const backup: ImportedSiteBackup = pendingEncryptedBackup.kind === "device"
         ? {
             format: "device",
-            backup: await authApi.decryptActiveFullSiteBackup(
+            backup: await authApi.decryptFullSiteBackup(
               pendingEncryptedBackup,
               workspaceCode
             )
@@ -263,8 +291,12 @@ export function ArchivePage() {
 
       setPendingEncryptedBackup(null);
       setPendingBackup(backup);
-    } catch {
-      setUnlockError(t("workspaceKeyMismatchOrCorrupt"));
+    } catch (cause) {
+      setUnlockError(
+        cause instanceof LocalAuthError && cause.code === "RECOVERY_KEY_MISMATCH"
+          ? t("backupRecoveryKeyMismatch")
+          : t("workspaceKeyMismatchOrCorrupt")
+      );
     } finally {
       setBackupBusy(null);
     }
@@ -496,7 +528,10 @@ export function ArchivePage() {
                   variant="secondary"
                   size="lg"
                   disabled={Boolean(backupBusy)}
-                  onClick={() => void downloadSiteBackup()}
+                  onClick={() => {
+                    setExportUnlockError("");
+                    setPendingBackupExport("device");
+                  }}
                   className="w-full"
                 >
                   <Download size={19} />
@@ -529,7 +564,10 @@ export function ArchivePage() {
                   variant="ghost"
                   size="lg"
                   disabled={Boolean(backupBusy)}
-                  onClick={() => void downloadWorkspaceBackup()}
+                  onClick={() => {
+                    setExportUnlockError("");
+                    setPendingBackupExport("workspace");
+                  }}
                   className="mt-3 w-full bg-white/10 text-white hover:bg-white/18 sm:w-auto"
                 >
                   <Download size={19} />
@@ -577,6 +615,19 @@ export function ArchivePage() {
         confirmLabel={t("restoreSiteBackup")}
         onCancel={() => setPendingBackup(null)}
         onConfirm={confirmRestore}
+      />
+      <WorkspaceKeyDialog
+        open={Boolean(pendingBackupExport)}
+        busy={backupBusy === "export" || backupBusy === "workspace-export"}
+        error={exportUnlockError}
+        title={t("backupExportVerifyTitle")}
+        description={t("backupExportVerifyBody")}
+        confirmLabel={t("backupExportVerifyAction")}
+        onCancel={() => {
+          setPendingBackupExport(null);
+          setExportUnlockError("");
+        }}
+        onConfirm={confirmBackupExport}
       />
       <WorkspaceKeyDialog
         open={Boolean(pendingEncryptedBackup)}

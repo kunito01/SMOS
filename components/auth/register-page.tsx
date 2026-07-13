@@ -31,12 +31,11 @@ import {
   generateWorkspaceCode,
   isValidWorkspaceCode,
   parseEncryptedWorkspaceEnvelope,
+  sanitizeWorkspaceCodeInput,
   type EncryptedWorkspaceEnvelope
 } from "@/lib/security/workspace-crypto";
 
 const maxEncryptedBackupBytes = 64 * 1024 * 1024;
-
-const sanitizeWorkspaceCodeInput = (value: string) => value.replace(/\D/g, "").slice(0, 16);
 
 export function RegisterPage() {
   const router = useRouter();
@@ -86,6 +85,10 @@ export function RegisterPage() {
   }, [isReady, router, user]);
 
   const setMode = (mode: WorkspaceRegistrationMode) => {
+    if (busy || mode === workspaceMode) {
+      return;
+    }
+
     setWorkspaceMode(mode);
     setAcknowledged(false);
     setEmptyRecoveryAcknowledged(false);
@@ -106,6 +109,10 @@ export function RegisterPage() {
   };
 
   const regenerateWorkspaceCode = () => {
+    if (busy) {
+      return;
+    }
+
     try {
       setWorkspaceCode(generateWorkspaceCode());
       setAcknowledged(false);
@@ -117,6 +124,10 @@ export function RegisterPage() {
   };
 
   const copyWorkspaceCode = async () => {
+    if (busy) {
+      return;
+    }
+
     if (!isValidWorkspaceCode(workspaceCode)) {
       setError(t("workspaceKeyInvalid"));
       return;
@@ -131,17 +142,36 @@ export function RegisterPage() {
       textArea.value = formattedCode;
       textArea.style.position = "fixed";
       textArea.style.opacity = "0";
-      document.body.append(textArea);
-      textArea.select();
-      document.execCommand("copy");
-      textArea.remove();
+      textArea.style.pointerEvents = "none";
+
+      try {
+        document.body.append(textArea);
+        textArea.focus();
+        textArea.select();
+        textArea.setSelectionRange(0, textArea.value.length);
+
+        if (!document.execCommand("copy")) {
+          throw new Error("The browser rejected the clipboard copy request");
+        }
+      } catch {
+        setCopied(false);
+        setError(t("authRegistrationFailed"));
+        return;
+      } finally {
+        textArea.remove();
+      }
     }
 
+    setError("");
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1800);
   };
 
   const downloadRecoveryCard = () => {
+    if (busy) {
+      return;
+    }
+
     if (!isValidWorkspaceCode(workspaceCode)) {
       setError(t("workspaceKeyInvalid"));
       return;
@@ -150,6 +180,9 @@ export function RegisterPage() {
     const content = [
       t("workspaceRecoveryCardTitle"),
       "Studio Map OS",
+      "",
+      `${t("registerName")}: ${name.trim()}`,
+      `${t("loginEmail")}: ${email.trim()}`,
       "",
       `${t("workspaceKeyLabel")}: ${formatWorkspaceCode(workspaceCode)}`,
       "",
@@ -160,13 +193,20 @@ export function RegisterPage() {
     ].join("\n");
     const url = URL.createObjectURL(new Blob([content], { type: "text/plain;charset=utf-8" }));
     const link = document.createElement("a");
+    const emailSlug =
+      email
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9@._-]+/g, "-")
+        .replace(/^-+|-+$/g, "") || "account";
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
 
     link.href = url;
-    link.download = `studio-map-os-recovery-key-${new Date().toISOString().slice(0, 10)}.txt`;
+    link.download = `studio-map-os-recovery-key-${emailSlug}-${timestamp}.txt`;
     document.body.append(link);
     link.click();
     link.remove();
-    URL.revokeObjectURL(url);
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
   const getRegistrationError = (cause: unknown) => {
@@ -211,14 +251,20 @@ export function RegisterPage() {
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+
+    if (busy) {
+      return;
+    }
+
     setError("");
+    const submittedWorkspaceCode = workspaceCode;
 
     if (password !== confirmPassword) {
       setConfirmPasswordTouched(true);
       return;
     }
 
-    if (!isValidWorkspaceCode(workspaceCode)) {
+    if (!isValidWorkspaceCode(submittedWorkspaceCode)) {
       setError(t("workspaceKeyInvalid"));
       return;
     }
@@ -248,7 +294,7 @@ export function RegisterPage() {
         name,
         email,
         password,
-        workspaceCode,
+        workspaceCode: submittedWorkspaceCode,
         workspaceMode,
         workspaceBackup: encryptedBackup
       });
@@ -306,7 +352,8 @@ export function RegisterPage() {
               </span>
             </div>
 
-            <form onSubmit={handleSubmit} className="space-y-4">
+            <form onSubmit={handleSubmit}>
+              <fieldset disabled={busy} className="m-0 min-w-0 space-y-4 border-0 p-0">
               <label className="block">
                 <span className="mb-2 block text-sm font-black text-ink">{t("registerName")}</span>
                 <input
@@ -430,7 +477,7 @@ export function RegisterPage() {
                     readOnly={workspaceMode === "create"}
                     value={formattedWorkspaceCode}
                     onChange={(event) => {
-                      if (workspaceMode === "create") {
+                      if (busy || workspaceMode === "create") {
                         return;
                       }
 
@@ -495,6 +542,10 @@ export function RegisterPage() {
                         type="file"
                         accept=".json,.smos-backup,application/json"
                         onChange={(event) => {
+                          if (busy) {
+                            return;
+                          }
+
                           setWorkspaceBackup(event.target.files?.[0] ?? null);
                           setError("");
                         }}
@@ -524,7 +575,11 @@ export function RegisterPage() {
                         <input
                           type="checkbox"
                           checked={emptyRecoveryAcknowledged}
-                          onChange={(event) => setEmptyRecoveryAcknowledged(event.target.checked)}
+                          onChange={(event) => {
+                            if (!busy) {
+                              setEmptyRecoveryAcknowledged(event.target.checked);
+                            }
+                          }}
                           className="mt-0.5 size-5 shrink-0 accent-[#ff4629]"
                         />
                         <span className="text-xs font-black leading-5 text-white">
@@ -538,7 +593,11 @@ export function RegisterPage() {
                     <input
                       type="checkbox"
                       checked={acknowledged}
-                      onChange={(event) => setAcknowledged(event.target.checked)}
+                      onChange={(event) => {
+                        if (!busy) {
+                          setAcknowledged(event.target.checked);
+                        }
+                      }}
                       className="mt-0.5 size-5 shrink-0 accent-[#e3f596]"
                     />
                     <span className="text-sm font-black leading-6 text-limepop">
@@ -588,6 +647,7 @@ export function RegisterPage() {
                 <ArrowLeft size={19} />
                 {t("registerBack")}
               </Button>
+              </fieldset>
             </form>
           </Card>
 

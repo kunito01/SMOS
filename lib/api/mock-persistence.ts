@@ -260,6 +260,8 @@ const isProject = (value: unknown) =>
   isEntityArray(value.materials) &&
   isEntityArray(value.versions) &&
   isEntityArray(value.activity) &&
+  (value.archiveIdentity === undefined || typeof value.archiveIdentity === "string") &&
+  (value.importPlaceholder === undefined || typeof value.importPlaceholder === "boolean") &&
   (value.timelineConfigured === undefined || typeof value.timelineConfigured === "boolean") &&
   (value.timelineRows === undefined || isEntityArray(value.timelineRows)) &&
   (value.budget === undefined || isProjectBudget(value.budget)) &&

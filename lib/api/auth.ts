@@ -59,7 +59,6 @@ export type RegisterPayload = AuthCredentials & {
 };
 
 export type LocalAuthUser = User & {
-  workspaceFingerprint: string;
   workspaceId: string;
   workspaceRole: LocalWorkspaceRole;
 };
@@ -84,6 +83,7 @@ export type LocalAuthErrorCode =
   | "INVALID_WORKSPACE_CODE"
   | "NO_ACTIVE_SESSION"
   | "PASSWORD_TOO_SHORT"
+  | "RECOVERY_KEY_MISMATCH"
   | "REGISTRATION_FAILED"
   | "RESTORE_IN_PROGRESS"
   | "SECURE_CONTEXT_REQUIRED"
@@ -540,13 +540,6 @@ async function replaceLocalDeviceWithFullSiteBackup(
   return backup;
 }
 
-const createWorkspaceFingerprint = (workspaceId: string) => {
-  const compact = workspaceId.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
-  const fingerprint = compact.slice(-8).padStart(8, "0");
-
-  return `SMOS-${fingerprint.slice(0, 4)}-${fingerprint.slice(4)}`;
-};
-
 const masterKeysMatch = (left: WorkspaceMasterKey, right: WorkspaceMasterKey) => {
   if (left.length !== right.length) {
     return false;
@@ -574,7 +567,6 @@ const toAuthUser = (account: StoredLocalAccount, workspace: WorkspaceRecoveryMet
   email: account.email,
   avatar: account.avatar,
   createdAt: account.createdAt,
-  workspaceFingerprint: createWorkspaceFingerprint(workspace.workspaceId),
   workspaceId: workspace.workspaceId,
   workspaceRole: account.workspaceRole
 });
@@ -1065,18 +1057,6 @@ export async function getCurrentUser() {
   return mockApi(activeSession?.user ?? null);
 }
 
-export function getActiveWorkspaceIdentity() {
-  if (!activeSession) {
-    throw new LocalAuthError("NO_ACTIVE_SESSION", "No local workspace is unlocked");
-  }
-
-  return {
-    fingerprint: createWorkspaceFingerprint(activeSession.workspace.workspaceId),
-    role: activeSession.account.workspaceRole,
-    workspaceId: activeSession.workspace.workspaceId
-  };
-}
-
 export async function ensureActiveWorkspaceMember() {
   if (!activeSession) {
     throw new LocalAuthError("NO_ACTIVE_SESSION", "No local workspace is unlocked");
@@ -1126,13 +1106,10 @@ export async function decryptActiveWorkspaceFile<T>(
     const decrypted = await decryptWorkspaceEnvelope<T>(envelope, workspaceCode);
 
     try {
-      if (
-        decrypted.metadata.workspaceId !== activeSession.workspace.workspaceId ||
-        !masterKeysMatch(decrypted.masterKey, activeSession.masterKey)
-      ) {
-        throw new LocalAuthError("WORKSPACE_MISMATCH", "This encrypted file belongs to another workspace");
-      }
-
+      // The 16-digit recovery key is the permission boundary for imported
+      // project/workspace files. The active account only supplies the target
+      // storage context; its internal workspace ID does not need to match the
+      // source file.
       return decrypted.payload;
     } finally {
       decrypted.masterKey.fill(0);
@@ -1140,6 +1117,15 @@ export async function decryptActiveWorkspaceFile<T>(
   } catch (error) {
     if (error instanceof LocalAuthError) {
       throw error;
+    }
+
+    if (
+      error instanceof WorkspaceCryptoError &&
+      (error.code === "INVALID_WORKSPACE_CODE" || error.code === "RECOVERY_UNLOCK_FAILED")
+    ) {
+      throw new LocalAuthError("RECOVERY_KEY_MISMATCH", "The recovery key does not match this encrypted file", {
+        cause: error
+      });
     }
 
     if (error instanceof WorkspaceCryptoError) {
@@ -1152,12 +1138,48 @@ export async function decryptActiveWorkspaceFile<T>(
   }
 }
 
-/** Builds an encrypted migration package for every local account and workspace. */
-export async function createEncryptedFullSiteBackup(): Promise<EncryptedWorkspaceEnvelope> {
+/** Confirms that a 16-digit code unlocks the currently signed-in account. */
+export async function verifyActiveWorkspaceRecoveryCode(workspaceCode: string) {
   if (!activeSession) {
     throw new LocalAuthError("NO_ACTIVE_SESSION", "No local workspace is unlocked");
   }
 
+  let recoveredMasterKey: WorkspaceMasterKey;
+  try {
+    recoveredMasterKey = await unlockWorkspaceRecovery(activeSession.workspace, workspaceCode);
+  } catch (error) {
+    if (
+      error instanceof WorkspaceCryptoError &&
+      (error.code === "INVALID_WORKSPACE_CODE" || error.code === "RECOVERY_UNLOCK_FAILED")
+    ) {
+      throw new LocalAuthError("RECOVERY_KEY_MISMATCH", "The recovery key does not match the active account", {
+        cause: error
+      });
+    }
+
+    throw new LocalAuthError("STORAGE_CORRUPT", "The active account recovery metadata is invalid", {
+      cause: error
+    });
+  }
+
+  try {
+    if (!masterKeysMatch(recoveredMasterKey, activeSession.masterKey)) {
+      throw new LocalAuthError("RECOVERY_KEY_MISMATCH", "The recovery key does not match the active account");
+    }
+  } finally {
+    recoveredMasterKey.fill(0);
+  }
+}
+
+/** Builds an encrypted migration package for every local account and workspace. */
+export async function createEncryptedFullSiteBackup(
+  workspaceCode: string
+): Promise<EncryptedWorkspaceEnvelope> {
+  if (!activeSession) {
+    throw new LocalAuthError("NO_ACTIVE_SESSION", "No local workspace is unlocked");
+  }
+
+  await verifyActiveWorkspaceRecoveryCode(workspaceCode);
   await persistMockDatabase();
   const accounts = readAccounts();
   const workspaces = readWorkspaces();
@@ -1203,9 +1225,12 @@ export async function decryptFullSiteBackup(
   envelopeValue: unknown,
   workspaceCode: string
 ): Promise<FullSiteBackup> {
+  let envelopeDecrypted = false;
+
   try {
     const envelope = parseEncryptedWorkspaceEnvelope(envelopeValue, "device");
     const decrypted = await decryptWorkspaceEnvelope<unknown>(envelope, workspaceCode);
+    envelopeDecrypted = true;
 
     try {
       const backup = validateFullSiteBackup(decrypted.payload);
@@ -1243,46 +1268,22 @@ export async function decryptFullSiteBackup(
     if (error instanceof LocalAuthError) {
       throw error;
     }
+    if (
+      !envelopeDecrypted &&
+      error instanceof WorkspaceCryptoError &&
+      (error.code === "INVALID_WORKSPACE_CODE" || error.code === "RECOVERY_UNLOCK_FAILED")
+    ) {
+      throw new LocalAuthError("RECOVERY_KEY_MISMATCH", "The recovery key does not match this backup", {
+        cause: error
+      });
+    }
     if (error instanceof WorkspaceCryptoError || error instanceof IndexedDbStorageError) {
-      throw new LocalAuthError("BACKUP_INVALID", "The recovery key is incorrect or the file is damaged", {
+      throw new LocalAuthError("BACKUP_INVALID", "The encrypted backup is damaged or incomplete", {
         cause: error
       });
     }
     throw error;
   }
-}
-
-/** Preflights a full-site package and confirms that it belongs to the active workspace. */
-export async function decryptActiveFullSiteBackup(
-  envelopeValue: unknown,
-  workspaceCode: string
-): Promise<FullSiteBackup> {
-  if (!activeSession) {
-    throw new LocalAuthError("NO_ACTIVE_SESSION", "No local workspace is unlocked");
-  }
-
-  const backup = await decryptFullSiteBackup(envelopeValue, workspaceCode);
-  if (backup.protectorWorkspaceId !== activeSession.workspace.workspaceId) {
-    throw new LocalAuthError("WORKSPACE_MISMATCH", "This full-site backup belongs to another workspace");
-  }
-
-  const protectorWorkspace = backup.authentication.workspaces.find(
-    (workspace) => workspace.workspaceId === backup.protectorWorkspaceId
-  );
-  if (!protectorWorkspace) {
-    throw new LocalAuthError("BACKUP_INVALID", "The backup protector workspace is missing");
-  }
-
-  const backupMasterKey = await unlockWorkspaceRecovery(protectorWorkspace, workspaceCode);
-  try {
-    if (!masterKeysMatch(backupMasterKey, activeSession.masterKey)) {
-      throw new LocalAuthError("WORKSPACE_MISMATCH", "This full-site backup belongs to another workspace");
-    }
-  } finally {
-    backupMasterKey.fill(0);
-  }
-
-  return backup;
 }
 
 /** Replaces the whole local device registry and encrypted database after confirmation. */

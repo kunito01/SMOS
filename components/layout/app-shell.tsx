@@ -10,7 +10,6 @@ import {
   Building2,
   CheckCircle2,
   CircleDollarSign,
-  Fingerprint,
   FolderKanban,
   LayoutDashboard,
   LogOut,
@@ -355,20 +354,6 @@ export function AppShell({ beforeNavigate, children }: AppShellProps) {
             </Link>
 
             <div className="ml-auto flex items-center gap-2 max-[482px]:gap-1 max-[370px]:gap-[3px]">
-              {user ? (
-                <div
-                  className="hidden min-w-0 items-center gap-2 rounded-full bg-white/62 px-3 py-2 text-ink shadow-sm ring-1 ring-white/60 lg:inline-flex"
-                  title={`${t("workspaceIdentity")} · ${user.workspaceFingerprint}`}
-                >
-                  <Fingerprint size={16} className="shrink-0 text-coral" />
-                  <span className="max-w-40 truncate text-[11px] font-black uppercase tracking-[0.08em] text-ink/55">
-                    {t("workspaceIdentity")}
-                  </span>
-                  <strong className="whitespace-nowrap font-mono text-xs tracking-[0.08em]">
-                    {user.workspaceFingerprint}
-                  </strong>
-                </div>
-              ) : null}
               <LanguageToggle compact variant="dropdown" />
               <Button
                 variant="ghost"
@@ -397,23 +382,6 @@ export function AppShell({ beforeNavigate, children }: AppShellProps) {
               </Button>
             </div>
           </header>
-
-          {user ? (
-            <div className="px-4 pb-3 sm:px-6 lg:hidden">
-              <div
-                className="inline-flex max-w-full items-center gap-2 rounded-full bg-white/62 px-3 py-1.5 text-ink shadow-sm ring-1 ring-white/60"
-                title={`${t("workspaceIdentity")} · ${user.workspaceFingerprint}`}
-              >
-                <Fingerprint size={15} className="shrink-0 text-coral" />
-                <span className="hidden truncate text-[10px] font-black uppercase tracking-[0.08em] text-ink/55 min-[390px]:inline">
-                  {t("workspaceIdentity")}
-                </span>
-                <strong className="whitespace-nowrap font-mono text-[11px] tracking-[0.08em]">
-                  {user.workspaceFingerprint}
-                </strong>
-              </div>
-            </div>
-          ) : null}
 
           <div
             ref={mobileNavRef}

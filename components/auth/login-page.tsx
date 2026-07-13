@@ -114,8 +114,12 @@ export function LoginPage() {
       window.location.reload();
     } catch (cause) {
       setRestoreError(
-        cause instanceof LocalAuthError && cause.code === "DEVICE_NOT_EMPTY"
-          ? t("loginRestoreDeviceNotEmpty")
+        cause instanceof LocalAuthError
+          ? cause.code === "DEVICE_NOT_EMPTY"
+            ? t("loginRestoreDeviceNotEmpty")
+            : cause.code === "RECOVERY_KEY_MISMATCH"
+              ? t("backupRecoveryKeyMismatch")
+              : t("loginRestoreDeviceBackupError")
           : t("loginRestoreDeviceBackupError")
       );
     } finally {

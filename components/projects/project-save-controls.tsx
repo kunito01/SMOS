@@ -4,12 +4,22 @@ import { useRef, useState } from "react";
 import { Download, FolderOpen, Save, Trash2 } from "lucide-react";
 import { WorkspaceKeyDialog } from "@/components/auth/workspace-key-dialog";
 import { authApi, projectsApi } from "@/lib/api";
+import { LocalAuthError } from "@/lib/api/auth";
+import {
+  ProjectImportTargetError,
+  type ProjectImportPlan
+} from "@/lib/api/projects";
 import type { TranslationKey } from "@/lib/i18n/translations";
 import {
   parseEncryptedWorkspaceEnvelope,
   type EncryptedWorkspaceEnvelope
 } from "@/lib/security/workspace-crypto";
 import type { Project } from "@/lib/types";
+import {
+  createProjectSave,
+  validateProjectSave,
+  type ValidatedProjectSave
+} from "@/lib/utils/project-import";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { DeleteConfirmDialog } from "@/components/ui/delete-confirm-dialog";
@@ -23,28 +33,16 @@ type ProjectSaveControlsProps = {
   t: (key: TranslationKey) => string;
 };
 
-type ProjectSaveFile = {
-  schema: "studio-map-os.project-save.v1";
-  savedAt: string;
-  project: Project;
-};
-
-type LocalWritableFile = {
-  close: () => Promise<void>;
-  write: (data: Blob) => Promise<void>;
+type PendingProjectImport = {
+  archive: ValidatedProjectSave;
+  plan: ProjectImportPlan;
 };
 
 type LocalFileHandle = {
-  createWritable: () => Promise<LocalWritableFile>;
   getFile?: () => Promise<File>;
 };
 
-type LocalDirectoryHandle = {
-  getFileHandle: (name: string, options?: { create?: boolean }) => Promise<LocalFileHandle>;
-};
-
 type WindowWithFilePickers = Window & {
-  showDirectoryPicker?: () => Promise<LocalDirectoryHandle>;
   showOpenFilePicker?: (options?: {
     excludeAcceptAllOption?: boolean;
     multiple?: boolean;
@@ -55,7 +53,6 @@ type WindowWithFilePickers = Window & {
   }) => Promise<LocalFileHandle[]>;
 };
 
-const saveSchema = "studio-map-os.project-save.v1" as const;
 const maxEncryptedProjectFileBytes = 16 * 1024 * 1024;
 
 const filePickerOptions = {
@@ -69,28 +66,8 @@ const filePickerOptions = {
   ]
 };
 
-const createProjectSave = (project: Project): ProjectSaveFile => ({
-  schema: saveSchema,
-  savedAt: new Date().toISOString(),
-  project
-});
-
 const createProjectFileName = (exportedAt: string) =>
   `studio-map-os-project-${exportedAt.replace(/[:.]/g, "-")}.smos-project.json`;
-
-const validateProjectSave = (value: unknown): ProjectSaveFile => {
-  if (!value || typeof value !== "object") {
-    throw new Error("Invalid save file");
-  }
-
-  const saveFile = value as Partial<ProjectSaveFile>;
-
-  if (saveFile.schema !== saveSchema || !saveFile.project || typeof saveFile.project.id !== "string") {
-    throw new Error("Invalid save file");
-  }
-
-  return saveFile as ProjectSaveFile;
-};
 
 const downloadFallback = (content: string, fileName: string) => {
   const url = URL.createObjectURL(new Blob([content], { type: "application/json" }));
@@ -101,7 +78,7 @@ const downloadFallback = (content: string, fileName: string) => {
   document.body.append(link);
   link.click();
   link.remove();
-  URL.revokeObjectURL(url);
+  window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
 };
 
 export function ProjectSaveControls({
@@ -115,30 +92,24 @@ export function ProjectSaveControls({
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [busy, setBusy] = useState<"delete" | "load" | "save" | null>(null);
   const [pendingEncryptedSave, setPendingEncryptedSave] = useState<EncryptedWorkspaceEnvelope | null>(null);
+  const [pendingProjectImport, setPendingProjectImport] = useState<PendingProjectImport | null>(null);
   const [unlockError, setUnlockError] = useState("");
 
   const saveProject = async () => {
-    const pickerWindow = window as WindowWithFilePickers;
-
     setBusy("save");
 
     try {
-      const encryptedSave = await authApi.encryptActiveWorkspaceFile("project", createProjectSave(project));
+      const exportProject = await projectsApi.ensureProjectArchiveIdentity(project.id);
+      const encryptedSave = await authApi.encryptActiveWorkspaceFile(
+        "project",
+        createProjectSave(exportProject)
+      );
       const content = JSON.stringify(encryptedSave, null, 2);
-      const blob = new Blob([content], { type: "application/json" });
       const fileName = createProjectFileName(encryptedSave.exportedAt);
 
-      if (pickerWindow.showDirectoryPicker) {
-        const directory = await pickerWindow.showDirectoryPicker();
-        const fileHandle = await directory.getFileHandle(fileName, { create: true });
-        const writable = await fileHandle.createWritable();
+      downloadFallback(content, fileName);
 
-        await writable.write(blob);
-        await writable.close();
-      } else {
-        downloadFallback(content, fileName);
-      }
-
+      onLoaded(exportProject);
       setNotice(t("projectSavedFile"));
     } catch (error) {
       if (!(error instanceof DOMException && error.name === "AbortError")) {
@@ -160,6 +131,7 @@ export function ProjectSaveControls({
       const encryptedSave = parseEncryptedWorkspaceEnvelope(await file.text(), "project");
 
       setUnlockError("");
+      setPendingProjectImport(null);
       setPendingEncryptedSave(encryptedSave);
     } catch {
       setNotice(t("workspaceEncryptedBackupOnly"));
@@ -182,14 +154,57 @@ export function ProjectSaveControls({
         workspaceCode,
         "project"
       );
-      const saveFile = validateProjectSave(payload);
-      const nextProject = await projectsApi.replaceProject(project.id, saveFile.project);
+      const archive = validateProjectSave(payload);
+      const plan = await projectsApi.inspectProjectImport(project.id, archive);
 
       setPendingEncryptedSave(null);
-      onLoaded(nextProject);
-      setNotice(t("projectLoadedFile"));
-    } catch {
-      setUnlockError(t("workspaceKeyMismatchOrCorrupt"));
+      setPendingProjectImport({ archive, plan });
+    } catch (cause) {
+      if (cause instanceof ProjectImportTargetError) {
+        setUnlockError(
+          cause.reason === "name"
+            ? t("projectImportNameMismatch")
+            : cause.reason === "legacy"
+              ? t("projectImportLegacyRestricted")
+              : t("projectImportTargetMismatch")
+        );
+      } else if (cause instanceof LocalAuthError && cause.code === "RECOVERY_KEY_MISMATCH") {
+        setUnlockError(t("backupRecoveryKeyMismatch"));
+      } else {
+        setUnlockError(t("projectFileInvalid"));
+      }
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const confirmProjectImport = async () => {
+    if (!pendingProjectImport) {
+      return;
+    }
+
+    setBusy("load");
+
+    try {
+      const result = await projectsApi.replaceProjectFromArchive(
+        project.id,
+        pendingProjectImport.archive
+      );
+
+      setPendingProjectImport(null);
+      onLoaded(result.project);
+      setNotice(
+        result.mode === "blank-target"
+          ? t("projectImportSuccessBlank")
+          : t("projectImportSuccessSame")
+      );
+    } catch (cause) {
+      setPendingProjectImport(null);
+      setNotice(
+        cause instanceof ProjectImportTargetError && cause.reason === "name"
+          ? t("projectImportNameMismatch")
+          : t("projectImportTargetMismatch")
+      );
     } finally {
       setBusy(null);
     }
@@ -303,6 +318,29 @@ export function ProjectSaveControls({
           setDeleteOpen(false);
           void deleteProject();
         }}
+      />
+      <DeleteConfirmDialog
+        open={Boolean(pendingProjectImport)}
+        busy={busy === "load"}
+        title={
+          pendingProjectImport?.plan.mode === "blank-target"
+            ? t("projectImportConfirmBlankTitle")
+            : t("projectImportConfirmSameTitle")
+        }
+        description={
+          pendingProjectImport?.plan.mode === "blank-target"
+            ? t("projectImportConfirmBlankBody")
+            : t("projectImportConfirmSameBody")
+        }
+        warning={
+          pendingProjectImport
+            ? `${t("projectImportSourceLabel")}: ${pendingProjectImport.plan.sourceName} · ${t("projectImportTargetLabel")}: ${pendingProjectImport.plan.targetName}`
+            : ""
+        }
+        cancelLabel={t("cancel")}
+        confirmLabel={t("projectImportConfirmAction")}
+        onCancel={() => setPendingProjectImport(null)}
+        onConfirm={() => void confirmProjectImport()}
       />
       <WorkspaceKeyDialog
         open={Boolean(pendingEncryptedSave)}
