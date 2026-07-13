@@ -100,6 +100,7 @@ export const trTranslations = {
   navLibraries: "Kitaplıklar",
   navArchive: "Arşiv",
   navShare: "Paylaş",
+  navGreeting: "Merhaba, {name}!",
   headerCreativeStudio: "Yaratıcı Stüdyo",
   headerLiveWorkspace: "Canlı Çalışma Alanı",
   search: "Ara",

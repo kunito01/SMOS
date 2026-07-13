@@ -100,6 +100,7 @@ export const ptTranslations = {
   navLibraries: "Bibliotecas",
   navArchive: "Arquivo",
   navShare: "Compartilhar",
+  navGreeting: "Olá, {name}!",
   headerCreativeStudio: "Estúdio Criativo",
   headerLiveWorkspace: "Espaço de trabalho ativo",
   search: "Pesquisar",

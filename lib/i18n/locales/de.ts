@@ -100,6 +100,7 @@ export const deTranslations = {
   navLibraries: "Bibliotheken",
   navArchive: "Archiv",
   navShare: "Freigeben",
+  navGreeting: "Hallo, {name}!",
   headerCreativeStudio: "Kreativstudio",
   headerLiveWorkspace: "Aktiver Arbeitsbereich",
   search: "Suchen",

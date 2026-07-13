@@ -100,6 +100,7 @@ export const thTranslations = {
   navLibraries: "คลังข้อมูล",
   navArchive: "คลัง",
   navShare: "แชร์",
+  navGreeting: "สวัสดี {name}!",
   headerCreativeStudio: "สตูดิโอสร้างสรรค์",
   headerLiveWorkspace: "เวิร์กสเปซที่ใช้งานอยู่",
   search: "ค้นหา",

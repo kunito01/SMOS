@@ -100,6 +100,7 @@ export const koTranslations = {
   navLibraries: "라이브러리",
   navArchive: "보관함",
   navShare: "공유",
+  navGreeting: "안녕하세요, {name}님!",
   headerCreativeStudio: "크리에이티브 스튜디오",
   headerLiveWorkspace: "활성 작업 공간",
   search: "검색",

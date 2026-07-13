@@ -100,6 +100,7 @@ export const ruTranslations = {
   navLibraries: "Библиотеки",
   navArchive: "Архив",
   navShare: "Общий доступ",
+  navGreeting: "Привет, {name}!",
   headerCreativeStudio: "Творческая студия",
   headerLiveWorkspace: "Рабочее пространство",
   search: "Поиск",

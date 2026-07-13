@@ -100,6 +100,7 @@ export const esTranslations = {
   navLibraries: "Bibliotecas",
   navArchive: "Archivo",
   navShare: "Compartir",
+  navGreeting: "¡Hola, {name}!",
   headerCreativeStudio: "Estudio creativo",
   headerLiveWorkspace: "Espacio de trabajo activo",
   search: "Buscar",

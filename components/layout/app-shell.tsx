@@ -41,6 +41,9 @@ const navItems = [
 const responsiveHeaderControlClass =
   "max-[482px]:size-10 max-[482px]:[&_svg]:size-[18px] max-[400px]:size-9 max-[400px]:[&_svg]:size-4 max-[370px]:size-[30px] max-[370px]:[&_svg]:size-3.5";
 
+const formatNavigationGreeting = (template: string, name: string) =>
+  template.replace("{name}", () => name);
+
 type AppShellProps = {
   beforeNavigate?: () => boolean;
   children: React.ReactNode;
@@ -99,6 +102,10 @@ export function AppShell({ beforeNavigate, children }: AppShellProps) {
   const [dueTodayItems, setDueTodayItems] = useState<DueTodayItem[]>([]);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const workspaceId = user?.workspaceId;
+  const registeredName = user?.name.trim();
+  const navigationGreeting = registeredName
+    ? formatNavigationGreeting(t("navGreeting"), registeredName)
+    : null;
 
   const canNavigate = () => beforeNavigate?.() ?? true;
 
@@ -348,12 +355,22 @@ export function AppShell({ beforeNavigate, children }: AppShellProps) {
         </aside>
 
         <main className="relative z-0 flex min-w-0 flex-1 flex-col overflow-hidden rounded-studio-xl bg-white/[0.34] shadow-soft ring-1 ring-white/[0.34] backdrop-blur-xl">
-          <header className="flex items-center justify-between gap-3 px-4 py-4 max-[482px]:gap-2 max-[370px]:gap-1.5 sm:px-6 xl:px-8">
-            <Link href="/dashboard" prefetch={false} onNavigate={handleLinkNavigate} className="min-w-0">
-              <BrandLockup subtitle={t("loginEyebrow")} size="shell" />
-            </Link>
+          <header className="flex items-start justify-between gap-3 px-4 py-4 max-[482px]:gap-2 max-[370px]:gap-1.5 sm:px-6 xl:px-8">
+            <div className="min-w-0 flex-1">
+              <Link href="/dashboard" prefetch={false} onNavigate={handleLinkNavigate} className="block w-fit max-w-full">
+                <BrandLockup subtitle={t("loginEyebrow")} size="shell" />
+              </Link>
+              {navigationGreeting ? (
+                <p
+                  className="mt-1.5 break-words text-xs font-black leading-tight text-[rgb(28,35,40)] sm:text-sm"
+                  title={navigationGreeting}
+                >
+                  {navigationGreeting}
+                </p>
+              ) : null}
+            </div>
 
-            <div className="ml-auto flex items-center gap-2 max-[482px]:gap-1 max-[370px]:gap-[3px]">
+            <div className="ml-auto flex shrink-0 items-center gap-2 self-start max-[482px]:gap-1 max-[370px]:gap-[3px]">
               <LanguageToggle compact variant="dropdown" />
               <Button
                 variant="ghost"
