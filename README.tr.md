@@ -50,7 +50,7 @@ Mevcut sürüm, kurulabilir ve Local-First bir PWA'dır. İş verileri cihazda k
 - **Daha kapsamlı proje teslimi** — iş akışlarını projelere bağlayın; Demo ve resmî yayın noktalarını, ödemeleri ve zaman çizelgelerini yönetin; paylaşılabilir HTML proje raporları dışa aktarın.
 - **Bağlantılı maliyet kitaplıkları** — kişi ve yazılım maliyet şablonlarını yeniden kullanıp eşitleyin, dağılıma göre aşama bütçeleri hesaplayın ve yaklaşan abonelik ödemeleri için anımsatıcılar alın.
 - **Daha güvenli düzenleme ve gezinme** — kaydedilmemiş değişiklik koruması, özel işlem onayları, geliştirilmiş arşiv ve depolama denetimleri ile daha açık kaydetme, silme, çıkış ve kurtarma durumları.
-- **PWA ve uluslararası arayüz** — GitHub Pages/PWA dağıtımı, duyarlı gezinme ve pencereler, uzun metinler ve on bir arayüz dilinde eşitlenen içerik geliştirildi.
+- **PWA ve uluslararası arayüz** — GitHub Pages/PWA, gezinme ve pencereler geliştirildi; on bir üretim diline on ikinci eğlencelik Sümer çivi yazısı seçeneği eklendi.
 
 ## Ekran Görüntüleri
 
@@ -69,7 +69,7 @@ Mevcut sürüm, kurulabilir ve Local-First bir PWA'dır. İş verileri cihazda k
 | Aşama bütçeleri, alacaklar ve çoklu para birimi toplamları | Şifrelenmiş cihaz, çalışma alanı ve proje yedekleri |
 | Kişi, yazılım aboneliği ve maliyet şablonu kitaplıkları | Eski tarayıcı verilerinin taşınması ve işlemsel kurtarma |
 | Projeyi arşivleme, geri yükleme ve kalıcı olarak silme | Alan düzeyinde denetlenen salt okunur paylaşım anlık görüntüleri |
-| Masaüstü, tablet ve dar mobil ekran düzenleri | Kurulabilir PWA, çevrimdışı geri dönüş sayfası ve on bir arayüz dili |
+| Masaüstü, tablet ve dar mobil ekran düzenleri | Kurulabilir PWA, çevrimdışı geri dönüş sayfası ve on iki dil seçeneği |
 
 ## Başlıca Özellikler
 
@@ -81,7 +81,7 @@ Mevcut sürüm, kurulabilir ve Local-First bir PWA'dır. İş verileri cihazda k
 - **Yeniden kullanılabilir kitaplıklar** — kişileri, yazılım araçlarını, abonelikleri ve maliyet şablonlarını yönetin.
 - **Arşiv ve taşınabilirlik** — projeleri arşivleyin, tek bir projeyi dışa aktarın veya tarayıcıdaki tüm Studio Map OS verilerini yedekleyin.
 - **Salt okunur paylaşım** — proje anlık görüntüsünün zaman çizelgelerini, teslimatları, kişileri, araçları, malzemeleri, sürümleri ve maliyet önizlemelerini içerip içermeyeceğini seçin.
-- **Uluslararası arayüz** — İngilizce, Basitleştirilmiş Çince, Japonca, İspanyolca, Portekizce, Almanca, Fransızca, Rusça, Türkçe, Korece veya Tayca kullanın.
+- **Uluslararası arayüz** — İngilizce, Basitleştirilmiş Çince, Japonca, İspanyolca, Portekizce, Almanca, Fransızca, Rusça, Türkçe, Korece, Tayca veya açıkça akademik olmayan eğlencelik Sümer çivi yazısını kullanın.
 
 ## Teknoloji
 
@@ -233,7 +233,7 @@ Salt okunur paylaşım kayıtları şu anda oluşturuldukları tarayıcıda ve s
 
 ## Uluslararasılaştırma
 
-Arayüz on bir dili destekler. Özel bir anahtar bulunmadığında yerel ayar dosyaları İngilizceye geri döner; Rusça ve Türkçe sözlükler şu anda tüm çeviri anahtarlarını kapsar. Çeviri kapsamı ve ifade iyileştirmelerine Issues ve Pull Requests üzerinden katkıda bulunabilirsiniz.
+Arayüz on iki dil seçeneği sunar. Sümer çivi yazısı bilinçli olarak eğlence amaçlı bir sözde çeviridir: güvenlikle ilgili metinler İngilizce yönlendirmeyi korur; tarihler, sayılar, para birimleri ve simgeler İngilizce seçeneğiyle aynı biçimi ve normal Latin arayüz yazı tipini kullanır. Akademik kullanım için değildir. Diğer yerel ayarlar özel anahtar olmadığında İngilizceye döner.
 
 ## Proje Yapısı
 

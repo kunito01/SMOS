@@ -342,6 +342,12 @@ const createProjectReportHtmlWithCover = (data: ProjectReportData, embeddedCover
   const nonceBytes = new Uint8Array(16);
   globalThis.crypto?.getRandomValues?.(nonceBytes);
   const scriptNonce = Array.from(nonceBytes, (byte) => byte.toString(16).padStart(2, "0")).join("") || "smos-project-report";
+  const cuneiformFontStyle = data.language === "sux"
+    ? `@font-face{font-family:"SMOS Cuneiform";font-style:normal;font-weight:400;font-display:swap;src:local("Noto Sans Cuneiform"),url("https://fonts.gstatic.com/s/notosanscuneiform/v18/bMrrmTWK7YY-MF22aHGGd7H8PhJtvBDWgb8.ttf") format("truetype");unicode-range:U+12000-123FF,U+12400-1247F,U+12480-1254F}`
+    : "";
+  const reportFontFamily = data.language === "sux"
+    ? `"SMOS Cuneiform",Inter,ui-rounded,"SF Pro Rounded","SF Pro Display",system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif`
+    : `Inter,ui-rounded,"SF Pro Rounded","SF Pro Display",system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif`;
 
   return `<!doctype html>
 <html lang="${escapeHtml(data.language)}">
@@ -349,13 +355,14 @@ const createProjectReportHtmlWithCover = (data: ProjectReportData, embeddedCover
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="referrer" content="no-referrer">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'nonce-${scriptNonce}'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; font-src https://fonts.gstatic.com; img-src data:; style-src 'unsafe-inline'; script-src 'nonce-${scriptNonce}'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
   <title>${escapeHtml(data.projectName)}</title>
   <style>
+    ${cuneiformFontStyle}
     :root{color-scheme:light;--ink:#1c2328;--muted:#5d6a72;--aqua:#8edbe8;--aqua-strong:#03b5aa;--lime:#e3f596;--coral:#f94a22;--pink:#f7567c;--cloud:#f4e9d8;--cream:#fffae3;--white:#fff;--deep:#023436;--radius-xl:2.4rem;--radius-lg:1.7rem;--radius-md:1.2rem}
     *{box-sizing:border-box}
     html{background:#edf9f7}
-    body{margin:0;color:var(--ink);font-family:Inter,ui-rounded,"SF Pro Rounded","SF Pro Display",system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:radial-gradient(circle at 8% 8%,rgba(142,219,232,.58),transparent 28rem),radial-gradient(circle at 92% 36%,rgba(227,245,150,.75),transparent 31rem),linear-gradient(150deg,#f9fffd,#f6f2e9);font-weight:650;line-height:1.5}
+    body{margin:0;color:var(--ink);font-family:${reportFontFamily};background:radial-gradient(circle at 8% 8%,rgba(142,219,232,.58),transparent 28rem),radial-gradient(circle at 92% 36%,rgba(227,245,150,.75),transparent 31rem),linear-gradient(150deg,#f9fffd,#f6f2e9);font-weight:650;line-height:1.5}
     h1,h2,h3,p{margin:0;overflow-wrap:anywhere}
     h1,h2,h3,strong,.metric__value{font-weight:900}
     .report{width:min(100%,94rem);margin:0 auto;padding:clamp(.85rem,2.4vw,2.4rem)}

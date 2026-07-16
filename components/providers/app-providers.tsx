@@ -15,7 +15,13 @@ import type {
 } from "@/lib/api/auth";
 import type { CloudKitUserIdentity } from "@/lib/storage/cloudkit/cloudkit-client";
 import { keepNumericWordPairsTogether } from "@/lib/i18n/non-breaking";
-import { Language, TranslationKey, languageLocales, languages, translations } from "@/lib/i18n/translations";
+import {
+  Language,
+  TranslationKey,
+  languageDocumentTags,
+  languages,
+  translations
+} from "@/lib/i18n/translations";
 
 type AuthContextValue = {
   user: LocalAuthUser | null;
@@ -80,7 +86,7 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    document.documentElement.lang = languageLocales[language];
+    document.documentElement.lang = languageDocumentTags[language];
   }, [language]);
 
   const setLanguage = useCallback((nextLanguage: Language) => {

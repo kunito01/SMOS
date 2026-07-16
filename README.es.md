@@ -50,7 +50,7 @@ La versión actual es una PWA instalable y local-first. Los datos de negocio per
 - **Entregas de proyecto más completas** — vincula flujos a proyectos, gestiona hitos de Demo y lanzamiento oficial, pagos y cronogramas, y exporta informes HTML compartibles.
 - **Bibliotecas de costes vinculadas** — reutiliza y sincroniza plantillas de personas y software, calcula presupuestos por fase según la asignación y recibe recordatorios de pagos de suscripciones.
 - **Edición y navegación más seguras** — protección frente a cambios sin guardar, confirmaciones específicas, mejores controles de archivo y almacenamiento, y estados más claros al guardar, eliminar, cerrar sesión y recuperar.
-- **PWA e interfaz internacional** — mejora la distribución en GitHub Pages/PWA, la navegación y los modales adaptables, los textos largos y la redacción sincronizada en once idiomas.
+- **PWA e interfaz internacional** — mejora la distribución en GitHub Pages/PWA, la navegación y los modales, mantiene once idiomas de producción y añade una duodécima opción lúdica de cuneiforme sumerio.
 
 ## Capturas de pantalla
 
@@ -69,7 +69,7 @@ La versión actual es una PWA instalable y local-first. Los datos de negocio per
 | Presupuestos por fase, cuentas por cobrar y totales en varias divisas | Copias de seguridad cifradas del dispositivo, del espacio de trabajo y de proyectos |
 | Bibliotecas de personas, suscripciones de software y plantillas de costes | Migración de datos heredados del navegador y recuperación transaccional |
 | Archivo, restauración y eliminación permanente de proyectos | Instantáneas compartidas de solo lectura con control por campos |
-| Diseños para escritorio, tableta y móviles estrechos | PWA instalable, página alternativa sin conexión y once idiomas de interfaz |
+| Diseños para escritorio, tableta y móviles estrechos | PWA instalable, página alternativa sin conexión y doce opciones de idioma |
 
 ## Funciones principales
 
@@ -81,7 +81,7 @@ La versión actual es una PWA instalable y local-first. Los datos de negocio per
 - **Bibliotecas reutilizables** — gestiona personas, herramientas de software, suscripciones y plantillas de costes.
 - **Archivo y portabilidad** — archiva proyectos, exporta un proyecto concreto o crea una copia de seguridad de todos los datos de Studio Map OS en el navegador.
 - **Uso compartido de solo lectura** — elige si una instantánea del proyecto incluye cronogramas, entregables, personas, herramientas, materiales, versiones y vistas previas de costes.
-- **Interfaz internacional** — utiliza la aplicación en inglés, chino simplificado, japonés, español, portugués, alemán, francés, ruso, turco, coreano o tailandés.
+- **Interfaz internacional** — utiliza inglés, chino simplificado, japonés, español, portugués, alemán, francés, ruso, turco, coreano, tailandés o la opción recreativa de cuneiforme sumerio, expresamente no académica.
 
 ## Tecnología
 
@@ -233,7 +233,7 @@ Los registros compartidos de solo lectura permanecen actualmente en el navegador
 
 ## Internacionalización
 
-La interfaz admite once idiomas. Cuando una clave específica no está disponible, los archivos de configuración regional recurren al inglés; los diccionarios de ruso y turco cubren actualmente todas las claves de traducción. Se agradecen mejoras de cobertura y redacción mediante Issues y Pull Requests.
+La interfaz ofrece doce opciones de idioma. El cuneiforme sumerio es una pseudotraducción deliberadamente recreativa: los textos sensibles conservan indicaciones en inglés y las fechas, cifras, monedas y símbolos usan el mismo formato y la misma fuente latina habitual que la opción en inglés. No está destinado a uso académico. Las demás configuraciones regionales recurren al inglés cuando falta una clave específica.
 
 ## Estructura del proyecto
 

@@ -50,7 +50,7 @@ The current version is an installable, local-first PWA. Business data stays on t
 - **Richer project delivery** — attach workflows to projects, manage demo and official release checkpoints, configure payments and timelines, and export shareable HTML project reports.
 - **Linked cost libraries** — reuse and synchronize people/software cost templates, calculate allocation-aware phase budgets, and receive upcoming software-subscription payment reminders.
 - **Safer editing and navigation** — unsaved-change guards, dedicated action confirmations, improved archive/storage controls, and clearer save, delete, logout, and recovery states.
-- **PWA and international UI** — expanded GitHub Pages/PWA delivery, responsive navigation and modals, improved long-text handling, and synchronized copy across eleven interface languages.
+- **PWA and international UI** — expanded GitHub Pages/PWA delivery, responsive navigation and modals, improved long-text handling, synchronized copy across eleven production languages, and a twelfth entertainment Sumerian cuneiform option.
 
 ## Screenshots
 
@@ -69,7 +69,7 @@ The current version is an installable, local-first PWA. Business data stays on t
 | Phase budgets, receivables, and multi-currency totals | Encrypted device, workspace, and project backups |
 | People, software subscriptions, and cost-template libraries | Legacy browser-data migration and transactional recovery |
 | Project archive, restore, and permanent deletion | Field-controlled read-only share snapshots |
-| Desktop, tablet, and narrow-mobile layouts | Installable PWA, offline fallback, and eleven interface languages |
+| Desktop, tablet, and narrow-mobile layouts | Installable PWA, offline fallback, and twelve interface language options |
 
 ## Main features
 
@@ -81,7 +81,7 @@ The current version is an installable, local-first PWA. Business data stays on t
 - **Reusable libraries** — maintain people, software tools, subscriptions, and cost templates.
 - **Archive and portability** — archive projects, export an individual project, or back up all Studio Map OS data in the browser.
 - **Read-only sharing** — choose whether a project snapshot includes timelines, deliverables, people, tools, materials, versions, and cost previews.
-- **International interface** — use English, Simplified Chinese, Japanese, Spanish, Portuguese, German, French, Russian, Turkish, Korean, or Thai.
+- **International interface** — use English, Simplified Chinese, Japanese, Spanish, Portuguese, German, French, Russian, Turkish, Korean, Thai, or the explicitly non-academic Sumerian cuneiform entertainment locale.
 
 ## Technology
 
@@ -233,7 +233,7 @@ Read-only share records currently stay in the browser and website origin that ge
 
 ## Internationalization
 
-The interface supports eleven languages. Locale files fall back to English when a dedicated key is unavailable; the Russian and Turkish dictionaries currently cover every translation key. Translation coverage and wording improvements are welcome through Issues and Pull Requests.
+The interface offers twelve language options. The Sumerian cuneiform option is a deliberately playful pseudo-translation: safety-sensitive copy keeps English guidance, while dates, numbers, currencies, and symbols use the same formatting and regular Latin UI font as the English option. It is not intended for academic use. Other locale files fall back to English when a dedicated key is unavailable; the Russian and Turkish dictionaries currently cover every translation key.
 
 ## Project structure
 

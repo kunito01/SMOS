@@ -31,7 +31,8 @@ export function LanguageToggle({ compact = false, className, variant = "segmente
     ru: { compact: "RU", full: "Русский" },
     tr: { compact: "TR", full: "Türkçe" },
     ko: { compact: "KO", full: "한국어" },
-    th: { compact: "TH", full: "ไทย" }
+    th: { compact: "TH", full: "ไทย" },
+    sux: { compact: "𒅴", full: "𒅴𒂠 · 苏美尔楔形文字（娱乐版）" }
   };
 
   useEffect(() => {
@@ -151,7 +152,7 @@ export function LanguageToggle({ compact = false, className, variant = "segmente
           >
             <div
               ref={menuScrollRef}
-              className="studio-scroll grid max-h-[min(24rem,calc(100dvh-7rem))] gap-0.5 overflow-y-auto overscroll-contain p-0.5"
+              className="studio-scroll grid max-h-[min(27rem,calc(100dvh-7rem))] gap-0.5 overflow-y-auto overscroll-contain p-0.5"
               onScroll={() => {
                 const menu = menuScrollRef.current;
                 if (menu) {
@@ -169,6 +170,7 @@ export function LanguageToggle({ compact = false, className, variant = "segmente
                   role="menuitemradio"
                   aria-checked={language === item}
                   aria-label={labels[item].full}
+                  title={labels[item].full}
                   onClick={() => {
                     setLanguage(item);
                     setDropdownOpen(false);

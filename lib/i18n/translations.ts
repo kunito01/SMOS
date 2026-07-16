@@ -4,11 +4,12 @@ import { frTranslations } from "@/lib/i18n/locales/fr";
 import { koTranslations } from "@/lib/i18n/locales/ko";
 import { ptTranslations } from "@/lib/i18n/locales/pt";
 import { ruTranslations } from "@/lib/i18n/locales/ru";
+import { createSumerianJokeTranslations } from "@/lib/i18n/locales/sux";
 import { thTranslations } from "@/lib/i18n/locales/th";
 import { trTranslations } from "@/lib/i18n/locales/tr";
 import { storageTranslations, type StorageTranslationKey } from "@/lib/i18n/storage-translations";
 
-export const languages = ["en", "zh", "ja", "es", "pt", "de", "fr", "ru", "tr", "ko", "th"] as const;
+export const languages = ["en", "zh", "ja", "sux", "es", "pt", "de", "fr", "ru", "tr", "ko", "th"] as const;
 
 export type Language = (typeof languages)[number];
 
@@ -23,7 +24,24 @@ export const languageLocales: Record<Language, string> = {
   ru: "ru-RU",
   tr: "tr-TR",
   ko: "ko-KR",
-  th: "th-TH"
+  th: "th-TH",
+  // Locale-aware dates and numbers intentionally match the English option.
+  sux: "en-US"
+};
+
+export const languageDocumentTags: Record<Language, string> = {
+  en: "en-US",
+  zh: "zh-CN",
+  ja: "ja-JP",
+  es: "es-ES",
+  pt: "pt-BR",
+  de: "de-DE",
+  fr: "fr-FR",
+  ru: "ru-RU",
+  tr: "tr-TR",
+  ko: "ko-KR",
+  th: "th-TH",
+  sux: "sux"
 };
 
 const baseTranslations = {
@@ -2441,7 +2459,11 @@ export const translations = {
   ru: { ...baseTranslations.en, ...ruTranslations, ...storageTranslations.ru },
   tr: { ...baseTranslations.en, ...trTranslations, ...storageTranslations.tr },
   ko: { ...baseTranslations.en, ...koTranslations, ...storageTranslations.ko },
-  th: { ...baseTranslations.en, ...thTranslations, ...storageTranslations.th }
+  th: { ...baseTranslations.en, ...thTranslations, ...storageTranslations.th },
+  sux: createSumerianJokeTranslations({
+    ...baseTranslations.en,
+    ...storageTranslations.en
+  })
 } as const satisfies Record<Language, Record<TranslationKey, string>>;
 
 export type TranslationKey = keyof typeof baseTranslations.en | StorageTranslationKey;

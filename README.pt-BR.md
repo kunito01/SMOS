@@ -50,7 +50,7 @@ A versão atual é uma PWA instalável e local-first. Os dados de negócio perma
 - **Entrega de projetos mais completa** — vincule fluxos aos projetos, gerencie marcos de Demo e lançamento oficial, pagamentos e cronogramas, e exporte relatórios HTML compartilháveis.
 - **Bibliotecas de custos vinculadas** — reutilize e sincronize modelos de pessoas e software, calcule orçamentos de fase conforme a alocação e receba lembretes de pagamentos de assinaturas.
 - **Edição e navegação mais seguras** — proteção contra alterações não salvas, confirmações específicas, melhores controles de arquivo e armazenamento e estados mais claros para salvar, excluir, sair e recuperar.
-- **PWA e interface internacional** — melhorias na distribuição via GitHub Pages/PWA, navegação e modais responsivos, textos longos e conteúdo sincronizado em onze idiomas.
+- **PWA e interface internacional** — melhorias na distribuição via GitHub Pages/PWA, navegação e modais, manutenção de onze idiomas de produção e inclusão de uma décima segunda opção lúdica em cuneiforme sumério.
 
 ## Capturas de tela
 
@@ -69,7 +69,7 @@ A versão atual é uma PWA instalável e local-first. Os dados de negócio perma
 | Orçamentos por fase, valores a receber e totais em várias moedas | Backups criptografados do dispositivo, do espaço de trabalho e de projetos |
 | Bibliotecas de pessoas, assinaturas de software e modelos de custos | Migração de dados legados do navegador e recuperação transacional |
 | Arquivamento, restauração e exclusão permanente de projetos | Instantâneos compartilhados somente para leitura com controle por campo |
-| Layouts para desktop, tablet e telas móveis estreitas | PWA instalável, página alternativa offline e onze idiomas de interface |
+| Layouts para desktop, tablet e telas móveis estreitas | PWA instalável, página alternativa offline e doze opções de idioma |
 
 ## Principais recursos
 
@@ -81,7 +81,7 @@ A versão atual é uma PWA instalável e local-first. Os dados de negócio perma
 - **Bibliotecas reutilizáveis** — gerencie pessoas, ferramentas de software, assinaturas e modelos de custos.
 - **Arquivo e portabilidade** — arquive projetos, exporte um projeto específico ou faça backup de todos os dados do Studio Map OS no navegador.
 - **Compartilhamento somente para leitura** — escolha se um instantâneo do projeto inclui cronogramas, entregáveis, pessoas, ferramentas, materiais, versões e prévias de custos.
-- **Interface internacional** — use o aplicativo em inglês, chinês simplificado, japonês, espanhol, português, alemão, francês, russo, turco, coreano ou tailandês.
+- **Interface internacional** — use inglês, chinês simplificado, japonês, espanhol, português, alemão, francês, russo, turco, coreano, tailandês ou a opção recreativa em cuneiforme sumério, explicitamente não acadêmica.
 
 ## Tecnologia
 
@@ -233,7 +233,7 @@ Os registros compartilhados somente para leitura permanecem atualmente no navega
 
 ## Internacionalização
 
-A interface oferece suporte a onze idiomas. Os arquivos de localidade recorrem ao inglês quando uma chave específica não está disponível; os dicionários de russo e turco cobrem atualmente todas as chaves de tradução. Melhorias de cobertura e redação são bem-vindas por meio de Issues e Pull Requests.
+A interface oferece doze opções de idioma. O cuneiforme sumério é uma pseudotradução deliberadamente recreativa: textos sensíveis mantêm orientações em inglês, enquanto datas, números, moedas e símbolos usam o mesmo formato e a mesma fonte latina normal da opção em inglês. Não se destina ao uso acadêmico. Os demais arquivos de localidade recorrem ao inglês quando uma chave específica não está disponível.
 
 ## Estrutura do projeto
 

@@ -50,7 +50,7 @@ Die aktuelle Version ist eine installierbare Local-First-PWA. Geschäftsdaten ve
 - **Erweiterte Projektübergabe** — Workflows mit Projekten verknüpfen, Demo- und offizielle Veröffentlichungen, Zahlungen und Zeitpläne verwalten sowie teilbare HTML-Projektberichte exportieren.
 - **Verknüpfte Kostenbibliotheken** — Kostenmodelle für Personen und Software wiederverwenden und synchronisieren, zuordnungsbasierte Phasenbudgets berechnen und Erinnerungen für bevorstehende Abonnementzahlungen erhalten.
 - **Sicheres Bearbeiten und Navigieren** — Schutz vor ungespeicherten Änderungen, gezielte Bestätigungen, verbesserte Archiv- und Speichersteuerung sowie klarere Zustände für Speichern, Löschen, Abmelden und Wiederherstellen.
-- **PWA und internationale Oberfläche** — GitHub-Pages-/PWA-Bereitstellung, responsive Navigation und Dialoge, lange Texte sowie synchronisierte Inhalte in elf Oberflächensprachen verbessern.
+- **PWA und internationale Oberfläche** — GitHub-Pages-/PWA-Bereitstellung, responsive Navigation und Dialoge sowie elf reguläre Sprachen verbessern und eine zwölfte, spielerische sumerische Keilschriftoption ergänzen.
 
 ## Screenshots
 
@@ -69,7 +69,7 @@ Die aktuelle Version ist eine installierbare Local-First-PWA. Geschäftsdaten ve
 | Phasenbudgets, Forderungen und Summen in mehreren Währungen | Verschlüsselte Geräte-, Arbeitsbereichs- und Projekt-Backups |
 | Bibliotheken für Personen, Softwareabonnements und Kostenvorlagen | Migration älterer Browserdaten und transaktionale Wiederherstellung |
 | Projektarchivierung, Wiederherstellung und endgültige Löschung | Feldgesteuerte, schreibgeschützte Freigabe-Snapshots |
-| Layouts für Desktop, Tablet und schmale Mobilgeräte | Installierbare PWA, Offline-Fallback und elf Oberflächensprachen |
+| Layouts für Desktop, Tablet und schmale Mobilgeräte | Installierbare PWA, Offline-Fallback und zwölf Sprachoptionen |
 
 ## Hauptmerkmale
 
@@ -81,7 +81,7 @@ Die aktuelle Version ist eine installierbare Local-First-PWA. Geschäftsdaten ve
 - **Wiederverwendbare Bibliotheken** — Personen, Softwarewerkzeuge, Abonnements und Kostenvorlagen pflegen.
 - **Archivierung und Portabilität** — Projekte archivieren, einzelne Projekte exportieren oder sämtliche Studio Map OS-Daten im Browser sichern.
 - **Schreibgeschützte Freigabe** — auswählen, ob ein Projekt-Snapshot Zeitpläne, Liefergegenstände, Personen, Werkzeuge, Materialien, Versionen und Kostenvorschauen enthält.
-- **Internationale Benutzeroberfläche** — Englisch, vereinfachtes Chinesisch, Japanisch, Spanisch, Portugiesisch, Deutsch, Französisch, Russisch, Türkisch, Koreanisch oder Thailändisch verwenden.
+- **Internationale Benutzeroberfläche** — Englisch, vereinfachtes Chinesisch, Japanisch, Spanisch, Portugiesisch, Deutsch, Französisch, Russisch, Türkisch, Koreanisch, Thailändisch oder die ausdrücklich nicht wissenschaftliche sumerische Keilschrift-Spaßsprache verwenden.
 
 ## Technologie
 
@@ -233,7 +233,7 @@ Schreibgeschützte Freigabedatensätze verbleiben derzeit im Browser und im Webs
 
 ## Internationalisierung
 
-Die Benutzeroberfläche unterstützt elf Sprachen. Wenn ein spezifischer Schlüssel fehlt, greifen Locale-Dateien auf Englisch zurück; die russischen und türkischen Wörterbücher decken derzeit sämtliche Übersetzungsschlüssel ab. Verbesserungen der Übersetzungsabdeckung und Formulierungen sind über Issues und Pull Requests willkommen.
+Die Benutzeroberfläche bietet zwölf Sprachoptionen. Die sumerische Keilschrift ist eine bewusst spielerische Pseudoübersetzung: sicherheitsrelevante Texte behalten englische Hinweise, während Datum, Zahlen, Währungen und Symbole dasselbe Format und dieselbe normale lateinische UI-Schrift wie die englische Option verwenden. Sie ist nicht für wissenschaftliche Zwecke gedacht. Andere Locale-Dateien greifen bei fehlenden Schlüsseln auf Englisch zurück.
 
 ## Projektstruktur
 

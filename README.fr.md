@@ -50,7 +50,7 @@ La version actuelle est une PWA installable et local-first. Les données métier
 - **Livraison de projet enrichie** — associez des workflows aux projets, gérez les jalons de Demo et de sortie officielle, les paiements et les calendriers, puis exportez des rapports HTML partageables.
 - **Bibliothèques de coûts liées** — réutilisez et synchronisez les modèles de personnes et de logiciels, calculez les budgets de phase selon l’allocation et recevez des rappels de paiement d’abonnement.
 - **Édition et navigation plus sûres** — protection contre les modifications non enregistrées, confirmations dédiées, meilleurs contrôles d’archive et de stockage, et états plus clairs pour l’enregistrement, la suppression, la déconnexion et la récupération.
-- **PWA et interface internationale** — amélioration de la diffusion GitHub Pages/PWA, de la navigation et des fenêtres adaptatives, des textes longs et des contenus synchronisés dans onze langues.
+- **PWA et interface internationale** — amélioration de la diffusion GitHub Pages/PWA, de la navigation et des fenêtres, maintien de onze langues de production et ajout d’une douzième option ludique en cunéiforme sumérien.
 
 ## Captures d’écran
 
@@ -69,7 +69,7 @@ La version actuelle est une PWA installable et local-first. Les données métier
 | Budgets par phase, créances et totaux multidevises | Sauvegardes chiffrées de l’appareil, de l’espace de travail et des projets |
 | Bibliothèques de personnes, abonnements logiciels et modèles de coûts | Migration des anciennes données du navigateur et récupération transactionnelle |
 | Archivage, restauration et suppression définitive des projets | Instantanés partagés en lecture seule avec contrôle par champ |
-| Mises en page pour ordinateur, tablette et mobile étroit | PWA installable, page de repli hors ligne et onze langues d’interface |
+| Mises en page pour ordinateur, tablette et mobile étroit | PWA installable, page de repli hors ligne et douze options de langue |
 
 ## Principales fonctions
 
@@ -81,7 +81,7 @@ La version actuelle est une PWA installable et local-first. Les données métier
 - **Bibliothèques réutilisables** — gérez les personnes, les outils logiciels, les abonnements et les modèles de coûts.
 - **Archivage et portabilité** — archivez des projets, exportez un projet précis ou sauvegardez l’ensemble des données de Studio Map OS dans le navigateur.
 - **Partage en lecture seule** — choisissez si un instantané de projet comprend les calendriers, livrables, personnes, outils, ressources, versions et aperçus des coûts.
-- **Interface internationale** — utilisez l’application en anglais, chinois simplifié, japonais, espagnol, portugais, allemand, français, russe, turc, coréen ou thaï.
+- **Interface internationale** — utilisez l’anglais, le chinois simplifié, le japonais, l’espagnol, le portugais, l’allemand, le français, le russe, le turc, le coréen, le thaï ou l’option ludique en cunéiforme sumérien, explicitement non académique.
 
 ## Technologies
 
@@ -233,7 +233,7 @@ Les enregistrements partagés en lecture seule restent actuellement dans le navi
 
 ## Internationalisation
 
-L’interface prend en charge onze langues. Les fichiers de langue se replient sur l’anglais lorsqu’une clé dédiée n’est pas disponible ; les dictionnaires russe et turc couvrent actuellement toutes les clés de traduction. Les améliorations de couverture et de formulation sont les bienvenues via les Issues et Pull Requests.
+L’interface propose douze options de langue. Le cunéiforme sumérien est une pseudo-traduction volontairement ludique : les textes sensibles conservent une indication en anglais, tandis que les dates, nombres, devises et symboles utilisent le même format et la même police latine habituelle que l’option anglaise. Il n’est pas destiné à un usage académique. Les autres fichiers de langue se replient sur l’anglais lorsqu’une clé dédiée manque.
 
 ## Structure du projet
 
