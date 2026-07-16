@@ -17,6 +17,7 @@ import {
   Pencil,
   RotateCcw,
   Save,
+  Share2,
   Trash2,
   TrendingUp,
   UserRound,
@@ -35,6 +36,7 @@ import { AppShell } from "@/components/layout/app-shell";
 import { useI18n } from "@/components/providers/app-providers";
 import { ProjectTimelineChart } from "@/components/projects/project-timeline-chart";
 import { ProjectTimelineSettingsModal } from "@/components/projects/project-timeline-settings-modal";
+import { ProjectWorkflowSection } from "@/components/projects/project-workflow-section";
 import { ProjectPaymentSettings } from "@/components/projects/project-payment-settings";
 import { ProjectBasicsEditModal } from "@/components/projects/project-basics-edit-modal";
 import { ProjectReleaseBadges } from "@/components/projects/project-release-badges";
@@ -50,6 +52,7 @@ import {
   projectDescriptionKey,
   projectNameKeys,
   statusKeys,
+  taskTitleKeys,
   translateDomainLabel
 } from "@/lib/i18n/domain-labels";
 import { formatLocalizedDate } from "@/lib/i18n/formatters";
@@ -57,6 +60,7 @@ import type { Project, ProjectGroup, ProjectStatus, ProjectVersion } from "@/lib
 import { projectCostsPath } from "@/lib/utils/app-routes";
 import { cn } from "@/lib/utils/cn";
 import { findProjectReleaseVersion } from "@/lib/utils/project-release";
+import { downloadProjectReportHtml } from "@/lib/utils/project-report-share";
 
 type ProjectDetailData = {
   costSummary: ProjectCostSummary;
@@ -84,6 +88,7 @@ const summaryPanelColor = "#023436";
 const summaryAccentMetricColor = "#03b5aa";
 const summaryLightMetricColor = "#fffae3";
 const summaryFinanceMetricColor = "#f7567c";
+const reportPhaseColors = ["#e3f596", "#f4e9d8", "#8edbe8", "#f94a22", "#1c2328", "#d4a1df"];
 const releaseInputClass =
   "min-h-11 w-full min-w-0 rounded-2xl border border-white/10 bg-white px-3 py-2 text-sm font-black text-ink outline-none transition focus:border-limepop focus:ring-4 focus:ring-limepop/15 max-[560px]:min-h-10 max-[560px]:rounded-xl max-[560px]:px-2.5 max-[560px]:text-xs max-[360px]:min-h-9 max-[360px]:px-2";
 const releaseLabelClass = "break-words text-xs font-black uppercase leading-tight text-white/55 max-[560px]:text-[10px]";
@@ -121,6 +126,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
   const [archiveDialogOpen, setArchiveDialogOpen] = useState(false);
   const [releasePlan, setReleasePlan] = useState<ReleasePlanForm>(emptyReleasePlan);
   const [releaseSaving, setReleaseSaving] = useState(false);
+  const [reportSharing, setReportSharing] = useState(false);
   const [statusSaving, setStatusSaving] = useState<ProjectStatus | null>(null);
 
   const loadProject = async () => {
@@ -314,57 +320,250 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
     data?.project.description === defaultProjectDescription
       ? t(projectDescriptionKey)
       : data?.project.description ?? "";
+  const projectDisplayName = data
+    ? formatDemoEntityName(
+        translateDomainLabel(data.project.name, projectNameKeys, t),
+        data.project.id,
+        "project",
+        t,
+        data.project.isExample
+      )
+    : "";
+
+  const handleProjectReportShare = async () => {
+    if (!data || reportSharing) {
+      return;
+    }
+
+    setReportSharing(true);
+
+    try {
+      const project = data.project;
+      const peopleById = new Map(project.people.map((person) => [person.id, person]));
+      const toolsById = new Map(project.tools.map((tool) => [tool.id, tool]));
+      const linkedWorkflows = await projectsApi.listProjectWorkflows(project.id);
+      const collectionProgress = data.costSummary.plannedReceivable > 0
+        ? Math.min(100, Math.round((data.costSummary.receivedRevenue / data.costSummary.plannedReceivable) * 100))
+        : 0;
+
+      await downloadProjectReportHtml({
+        projectName: projectDisplayName,
+        description: projectDescription,
+        groupName: group ? getProjectGroupDisplayName(group, language, t) : undefined,
+        language,
+        coverImageUrl: project.coverImage,
+        dateRange: `${formatLocalizedDate(project.startDate, language)} - ${formatLocalizedDate(project.endDate, language)}`,
+        summaryMetrics: [
+          { label: t("averageProgressShort"), value: `${project.progress}%`, tone: "aqua" },
+          {
+            label: t("currentPhase"),
+            value: translateDomainLabel(currentPhase?.name ?? "", phaseNameKeys, t) || t("untitledStage"),
+            tone: "cloud"
+          },
+          { label: t("peopleTeam"), value: String(project.people.length), tone: "cloud" },
+          { label: t("tools"), value: String(project.tools.length), tone: "aqua" },
+          {
+            label: t("deliverables"),
+            value: `${projectDeliverables.filter((item) => !item.completed).length} / ${projectDeliverables.length}`,
+            tone: "cloud"
+          },
+          { label: t("tasks"), value: `${completedTaskCount} / ${projectTasks.length}`, tone: "cloud" },
+          {
+            label: t("receivedPayment"),
+            value: formatAmount(data.costSummary.receivedRevenue, data.costSummary.currency),
+            tone: "coral"
+          },
+          {
+            label: t("currentProfit"),
+            value: formatAmount(data.costSummary.actualProfit, data.costSummary.currency),
+            tone: "coral"
+          }
+        ],
+        status: {
+          label: t(statusKeys[project.status]),
+          tone: project.status
+        },
+        phases: project.phases.map((phase, phaseIndex) => {
+          const personIds = phase.personIds?.length
+            ? phase.personIds
+            : phase.assigneeId
+              ? [phase.assigneeId]
+              : [];
+          const toolIds = phase.toolIds?.length
+            ? phase.toolIds
+            : project.tools.slice(0, 2).map((tool) => tool.id);
+
+          return {
+            color: phase.color ?? reportPhaseColors[phaseIndex % reportPhaseColors.length],
+            name: translateDomainLabel(phase.name, phaseNameKeys, t) || t("untitledStage"),
+            status:
+              phase.status === "completed"
+                ? t("statusCompleted")
+                : phase.status === "active"
+                  ? t("statusActive")
+                  : t("statusPlanning"),
+            period: `${formatLocalizedDate(phase.startDate, language)} - ${formatLocalizedDate(phase.endDate, language)}`,
+            target: phase.description || t("phaseObjective"),
+            people: personIds
+              .map((personId) => peopleById.get(personId)?.name)
+              .filter((name): name is string => Boolean(name)),
+            tools: toolIds
+              .map((toolId) => toolsById.get(toolId)?.name)
+              .filter((name): name is string => Boolean(name)),
+            tasks: phase.deliverables.flatMap((deliverable) =>
+              deliverable.tasks.map((task) => ({
+                completed: task.completed,
+                dueDate: formatLocalizedDate(task.dueDate ?? phase.endDate, language),
+                owner: peopleById.get(task.assigneeId)?.name ?? t("owner"),
+                title: translateDomainLabel(task.title, taskTitleKeys, t) || t("untitledTask")
+              }))
+            ),
+            notes: phase.notes || t("noNotes")
+          };
+        }),
+        timelineRows: (project.timelineRows ?? []).map((row) => ({
+          label: row.label || t("customRowLabel"),
+          values: project.phases.map(
+            (phase) => row.values[phase.id] || t("emptyCell")
+          )
+        })),
+        workflows: linkedWorkflows,
+        paymentMetrics: [
+          {
+            label: t("plannedReceivable"),
+            value: formatAmount(data.costSummary.plannedReceivable, data.costSummary.currency),
+            tone: "lime"
+          },
+          {
+            label: t("receivedPayment"),
+            value: formatAmount(data.costSummary.receivedRevenue, data.costSummary.currency),
+            tone: "aqua"
+          },
+          {
+            label: t("actualCostSoFar"),
+            value: formatAmount(data.costSummary.actualCostSoFar, data.costSummary.currency),
+            tone: "cloud"
+          },
+          {
+            label: t("currentProfit"),
+            value: formatAmount(data.costSummary.actualProfit, data.costSummary.currency),
+            tone: "coral"
+          },
+          {
+            label: t("projectedProfit"),
+            value: formatAmount(data.costSummary.projectedProfit, data.costSummary.currency),
+            tone: "cloud"
+          }
+        ],
+        payments: (project.payments ?? []).map((payment) => ({
+          title: payment.title,
+          type: t(payment.type === "planned" ? "plannedReceivable" : "receivedPayment"),
+          amount: formatAmount(payment.amount, payment.currency),
+          dueDate: formatLocalizedDate(payment.dueDate, language),
+          receivedDate: payment.receivedDate ? formatLocalizedDate(payment.receivedDate, language) : undefined,
+          notes: payment.notes ?? ""
+        })),
+        collectionProgress,
+        collectionBody: t("paymentStatusBudgetBody"),
+        labels: {
+          collectionProgress: t("collectionProgress"),
+          dueDate: t("dueDate"),
+          notes: t("notes"),
+          owner: t("owner"),
+          paymentItems: t("paymentItems"),
+          paymentReceivedDate: t("paymentReceivedDate"),
+          paymentStatus: t("paymentStatus"),
+          people: t("stagePeople"),
+          projectContent: t("projectContent"),
+          projectSettings: t("projectSettings"),
+          projectStatus: t("projectStatus"),
+          projectSummary: t("projectSummary"),
+          projectTimeline:
+            project.timelineTitle && project.timelineTitle !== "Timeline board"
+              ? project.timelineTitle
+              : t("timelineBoard"),
+          period: t("period"),
+          stage: t("stage"),
+          status: t("projectStatus"),
+          target: t("timelineTarget"),
+          tasks: t("tasks"),
+          tools: t("stageTools"),
+          workflow: t("projectWorkflowTitle"),
+          workflowDownloadAttachment: t("workflowDownloadAttachment"),
+          workflowEmpty: t("projectWorkflowEmpty"),
+          workflowFitView: t("workflowFitView"),
+          workflowZoomIn: t("workflowZoomIn"),
+          workflowZoomOut: t("workflowZoomOut")
+        }
+      });
+    } finally {
+      setReportSharing(false);
+    }
+  };
 
   return (
     <AppShell>
-      <div className="studio-scroll flex-1 overflow-y-auto px-4 pb-8 sm:px-6 xl:px-8">
+      <div className="studio-scroll flex-1 overflow-auto px-4 pb-8 sm:px-6 xl:px-8">
         {!data ? (
           <LoadingState label={t("loading")} />
         ) : (
           <>
-            <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(340px,0.48fr)]">
+            <section
+              data-project-fixed-top="true"
+              className="flex w-full max-w-none shrink-0 flex-col gap-4"
+            >
               <ImageCard
                 imageUrl={data.project.coverImage}
-                title={formatDemoEntityName(
-                  translateDomainLabel(data.project.name, projectNameKeys, t),
-                  data.project.id,
-                  "project",
-                  t
-                )}
+                title={projectDisplayName}
                 meta={group ? getProjectGroupDisplayName(group, language, t) : ""}
-                heightClassName="min-h-[31rem] max-[560px]:min-h-[34rem] max-[420px]:min-h-[36rem] max-[360px]:min-h-[38rem]"
-                className="min-w-0 max-[560px]:p-4 max-[420px]:p-3 max-[560px]:[&>div.absolute]:left-4 max-[560px]:[&>div.absolute]:right-4 max-[420px]:[&>div.absolute]:left-3 max-[420px]:[&>div.absolute]:right-3 max-[560px]:[&>div.relative>h3]:max-w-full max-[560px]:[&>div.relative>h3]:break-words max-[560px]:[&>div.relative>h3]:text-[clamp(1.25rem,5vw,1.5rem)] max-[560px]:[&>div.relative>h3]:leading-tight"
+                heightClassName="h-[31rem] min-h-0 shrink-0"
+                className="min-w-0 [&>div.relative>h3]:max-w-56 [&>div.relative>h3]:text-2xl [&>div.relative>h3]:leading-none [&>div.relative>p]:text-sm"
                 action={
-                  <div className="flex max-w-[min(28rem,calc(100vw-7rem))] flex-wrap items-center justify-end gap-3 max-[560px]:w-full max-[560px]:max-w-none max-[560px]:gap-2 max-[360px]:gap-1.5">
+                  <div className="flex max-w-[36rem] items-center justify-end gap-3">
                     <ProjectReleaseBadges
                       project={data.project}
                       t={t}
                       size="hero"
-                      className="max-w-full max-[560px]:gap-1.5 max-[560px]:[&>span]:h-9 max-[560px]:[&>span]:min-h-9 max-[560px]:[&>span]:px-3 max-[560px]:[&>span]:text-xs max-[360px]:gap-1 max-[360px]:[&>span]:h-8 max-[360px]:[&>span]:min-h-8 max-[360px]:[&>span]:px-2 max-[360px]:[&>span]:text-[10px]"
+                      fixedLayout
+                      className="max-w-full gap-2 [&>span]:h-12 [&>span]:min-h-12 [&>span]:px-5 [&>span]:text-base"
                     />
+                    <Button
+                      variant="ghost"
+                      size="md"
+                      disabled={reportSharing}
+                      onClick={() => {
+                        void handleProjectReportShare();
+                      }}
+                      aria-label={t("navShare")}
+                      aria-busy={reportSharing}
+                      className="bg-white/82 px-4 font-black shadow-soft backdrop-blur"
+                    >
+                      <Share2 className="size-[18px]" />
+                      <span>{t("navShare")}</span>
+                    </Button>
                     <Button
                       variant="ghost"
                       size="icon"
                       onClick={() => setBasicsOpen(true)}
                       aria-label={t("editProjectBasics")}
-                      className="bg-white/82 font-black shadow-soft backdrop-blur max-[560px]:size-10 max-[360px]:size-9"
+                      className="bg-white/82 font-black shadow-soft backdrop-blur"
                     >
-                      <Pencil className="size-[18px] max-[560px]:size-4 max-[360px]:size-3.5" />
+                      <Pencil className="size-[18px]" />
                     </Button>
                   </div>
                 }
               >
-                <p className="max-w-2xl break-words text-base font-bold leading-7 text-white/80 [overflow-wrap:anywhere] max-[560px]:text-sm max-[560px]:leading-6 max-[360px]:text-xs max-[360px]:leading-5">
+                <p className="max-w-2xl break-words text-base font-bold leading-7 text-white/80 [overflow-wrap:anywhere]">
                   {projectDescription}
                 </p>
-                <div className="mt-5 flex min-w-0 flex-wrap items-center gap-3 max-[560px]:mt-4 max-[560px]:gap-2">
+                <div className="mt-5 flex min-w-0 flex-wrap items-center gap-3">
                   <Link className="min-w-0 max-w-full" href={data.project.archivedAt ? "/archive" : "/projects"} prefetch={false}>
                     <Button
                       variant="ghost"
                       size="md"
-                      className="min-w-0 max-w-full max-[560px]:h-10 max-[560px]:px-3 max-[560px]:text-xs max-[360px]:h-9 max-[360px]:px-2.5 max-[360px]:text-[10px]"
+                      className="min-w-0 max-w-full"
                     >
-                      <ArrowLeft className="size-[18px] shrink-0 max-[560px]:size-4" />
+                      <ArrowLeft className="size-[18px] shrink-0" />
                       <span className="truncate">{data.project.archivedAt ? t("navArchive") : t("allProjects")}</span>
                     </Button>
                   </Link>
@@ -374,21 +573,16 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
               <div className="grid gap-4">
                 <Card
                   tone="white"
-                  className="min-w-0 p-5 shadow-lift ring-1 ring-white/[0.34] backdrop-blur-xl max-[560px]:p-4 max-[360px]:p-3"
+                  className="min-w-0 p-5 shadow-lift ring-1 ring-white/[0.34] backdrop-blur-xl"
                   style={{ backgroundColor: summaryPanelColor }}
                 >
-                  <div className="flex min-w-0 items-start justify-between gap-4 max-[560px]:flex-col max-[560px]:items-stretch max-[560px]:gap-3">
+                  <div className="flex min-w-0 items-start justify-between gap-4">
                     <div className="min-w-0">
-                      <p className="break-words text-sm font-black uppercase leading-tight text-white max-[560px]:text-xs">
+                      <p className="break-words text-sm font-black uppercase leading-tight text-white">
                         {t("projectSummary")}
                       </p>
-                      <h2 className="mt-2 break-words text-3xl font-black leading-none text-white [overflow-wrap:anywhere] max-[560px]:text-[clamp(1.35rem,5.5vw,1.875rem)] max-[560px]:leading-tight">
-                        {formatDemoEntityName(
-                          translateDomainLabel(data.project.name, projectNameKeys, t),
-                          data.project.id,
-                          "project",
-                          t
-                        )}
+                      <h2 className="mt-2 break-words text-3xl font-black leading-none text-white [overflow-wrap:anywhere]">
+                        {projectDisplayName}
                       </h2>
                     </div>
                     <ProgressRing
@@ -396,10 +590,10 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
                       size={104}
                       strokeWidth={12}
                       label={`${t("averageProgressShort")} ${data.project.progress}%`}
-                      className="shrink-0 text-white max-[560px]:self-center"
+                      className="shrink-0 text-white"
                     />
                   </div>
-                  <div className="mt-5 grid min-w-0 grid-cols-6 gap-3 max-[560px]:mt-4 max-[560px]:gap-2">
+                  <div className="mt-5 grid min-w-0 grid-cols-6 gap-3">
                     {[
                       {
                         label: t("averageProgressShort"),
@@ -426,32 +620,40 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
                       { label: t("currentProfit"), value: formatAmount(paymentSummary.actualProfit, data.costSummary.currency), icon: TrendingUp, backgroundColor: summaryFinanceMetricColor }
                     ].map((item, index) => {
                       const Icon = item.icon;
+                      const isAtomicValue = index !== 1;
 
                       return (
                         <div
                           key={item.label}
                           className={cn(
-                            "min-w-0 rounded-studio p-3 shadow-soft ring-1 ring-white/[0.38] max-[560px]:rounded-2xl max-[560px]:p-[clamp(0.4rem,1.7vw,0.75rem)]",
+                            "min-w-0 rounded-studio p-3 shadow-soft ring-1 ring-white/[0.38]",
                             index < 6 ? "col-span-2" : "col-span-3"
                           )}
                           style={{ backgroundColor: item.backgroundColor }}
                         >
-                          <div className="flex min-w-0 items-center gap-2 max-[560px]:gap-1.5 max-[360px]:gap-1">
-                            <span className="grid size-8 shrink-0 place-items-center rounded-full bg-limepop text-ink max-[560px]:size-[clamp(1.5rem,6vw,2rem)]">
-                              <Icon className="size-4 max-[560px]:size-[clamp(12px,3.5vw,16px)]" />
+                          <div className="flex min-w-0 items-center gap-2">
+                            <span className="grid size-8 shrink-0 place-items-center rounded-full bg-limepop text-ink">
+                              <Icon className="size-4" />
                             </span>
-                            <span className="min-w-0 break-words text-xs font-black uppercase leading-tight text-ink/58 [overflow-wrap:anywhere] max-[560px]:text-[clamp(8px,2.3vw,12px)]">
+                            <span className="min-w-0 break-words text-xs font-black uppercase leading-tight text-ink/58 [overflow-wrap:anywhere]">
                               {item.label}
                             </span>
                           </div>
-                          <p className="mt-3 min-w-0 break-words text-2xl font-black leading-tight [overflow-wrap:anywhere] max-[560px]:mt-2 max-[560px]:text-[clamp(0.9rem,4vw,1.5rem)]">
+                          <p
+                            className={cn(
+                              "mt-3 min-w-0 font-black leading-tight",
+                              isAtomicValue
+                                ? "max-w-full whitespace-nowrap text-[clamp(0.72rem,2.1vw,1.5rem)] tabular-nums tracking-[-0.025em]"
+                                : "break-words text-2xl [overflow-wrap:anywhere]"
+                            )}
+                          >
                             {item.value}
                           </p>
                         </div>
                       );
                     })}
                   </div>
-                  <ProjectSummaryTimeline project={data.project} t={t} />
+                  <ProjectSummaryTimeline project={data.project} t={t} fixedLayout />
                 </Card>
               </div>
             </section>
@@ -496,6 +698,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
               </p>
             ) : null}
 
+            <ProjectWorkflowSection project={data.project} t={t} />
             <ProjectTimelineChart
               project={data.project}
               t={t}
@@ -781,6 +984,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
 	            />
 	            <DeleteConfirmDialog
 	              open={archiveDialogOpen}
+	              acknowledgementLabel={t("dangerousActionAcknowledgement")}
 	              title={data.project.archivedAt ? t("restoreProjectTitle") : t("archiveProjectTitle")}
 	              description={data.project.archivedAt ? t("restoreProjectDescription") : t("archiveProjectDescription")}
 	              warning={data.project.archivedAt ? t("restoreProjectWarning") : t("archiveProjectWarning")}

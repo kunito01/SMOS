@@ -24,6 +24,7 @@
   <a href="https://github.com/kunito01/SMOS/stargazers"><img src="https://img.shields.io/github/stars/kunito01/SMOS?style=flat-square&color=03b5aa" alt="GitHub stars" /></a>
   <a href="https://github.com/kunito01/SMOS/forks"><img src="https://img.shields.io/github/forks/kunito01/SMOS?style=flat-square&color=ffca0a" alt="GitHub forks" /></a>
   <a href="https://github.com/kunito01/SMOS/issues"><img src="https://img.shields.io/github/issues/kunito01/SMOS?style=flat-square&color=f7567c" alt="GitHub issues" /></a>
+  <img src="https://img.shields.io/badge/version-V_1.2-f7567c?style=flat-square" alt="Version V 1.2" />
   <img src="https://img.shields.io/badge/Next.js-15-1c2328?style=flat-square&logo=nextdotjs&logoColor=white" alt="Next.js 15" />
   <img src="https://img.shields.io/badge/React-19-03b5aa?style=flat-square&logo=react&logoColor=white" alt="React 19" />
   <img src="https://img.shields.io/badge/TypeScript-5-3178c6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript 5" />
@@ -38,7 +39,18 @@
 
 Studio Map OS connects brands, project groups, projects, people, software, costs, timelines, release checkpoints, and archives in one visual workspace. It helps independent creators operate several parallel projects without flattening the creative process into a generic task list.
 
-The current version is an installable, local-first PWA. Business data stays on the device, is encrypted with Web Crypto, and is persisted in IndexedDB. The Web App Manifest, Service Worker, offline fallback, application icons, and standalone packaging workflow are integrated. Accounts, recovery keys, and backups are also handled in the browser; a remote business backend and server authentication are not connected yet.
+The current version is an installable, local-first PWA. Business data stays on the device, is encrypted with Web Crypto, and is persisted in IndexedDB. The Web App Manifest, Service Worker, offline fallback, application icons, and standalone packaging workflow are integrated. Local accounts, recovery keys, and backups are handled in the browser. Apple / iCloud sign-in can optionally synchronize encrypted workspace data through the user’s private CloudKit database; no custom remote business backend or app-managed server authentication is included.
+
+## What’s new in V 1.2
+
+- **Two independent account paths** — keep using fully local IndexedDB accounts, or sign in separately with Apple / iCloud without making either path depend on the other.
+- **Encrypted CloudKit sync** — retain the encrypted device copy while syncing ciphertext through the user’s private CloudKit database, with account binding, mutation locks, change-tag checks, and explicit local/cloud conflict resolution.
+- **Safer device recovery** — use a one-time 16-digit recovery key, a device-bound non-exportable Web Crypto key, encrypted full-device/workspace/project backups, and guarded cross-device restore flows.
+- **Visual workflow builder** — create reusable workflow boards with connected nodes, colors, attachments, zoom controls, project links, automatic saving, and standalone HTML sharing.
+- **Richer project delivery** — attach workflows to projects, manage demo and official release checkpoints, configure payments and timelines, and export shareable HTML project reports.
+- **Linked cost libraries** — reuse and synchronize people/software cost templates, calculate allocation-aware phase budgets, and receive upcoming software-subscription payment reminders.
+- **Safer editing and navigation** — unsaved-change guards, dedicated action confirmations, improved archive/storage controls, and clearer save, delete, logout, and recovery states.
+- **PWA and international UI** — expanded GitHub Pages/PWA delivery, responsive navigation and modals, improved long-text handling, and synchronized copy across eleven interface languages.
 
 ## Screenshots
 
@@ -151,7 +163,7 @@ The bundle is written to `output/pwa/studio-map-os-pwa/`. It includes the standa
 | Route | Purpose |
 | --- | --- |
 | `/register` | Create a local account and workspace, or join one with an encrypted backup |
-| `/login` | Unlock a local account or restore a full-device backup |
+| `/login` | Unlock a local account, continue with Apple / iCloud, or restore a full-device backup |
 | `/offline` | Document fallback when Service Worker navigation fails |
 | `/dashboard` | Studio overview, scopes, metrics, and project maps |
 | `/companies` | Brand and project-group management |
@@ -162,7 +174,8 @@ The bundle is written to `output/pwa/studio-map-os-pwa/`. It includes the standa
 | `/project-share/?projectId=...` | Read-only share-field settings |
 | `/costs` | Studio-level cost totals and display-currency settings |
 | `/libraries` | People, software subscriptions, and cost-template libraries |
-| `/archive` | Archived projects plus device and workspace backup recovery |
+| `/workflow` | Reusable visual workflow boards, attachments, project links, and HTML sharing |
+| `/archive` | Archived projects, encrypted backups, and local/CloudKit storage controls |
 | `/share/?token=...` | Local read-only project snapshot |
 
 ## Data and security model

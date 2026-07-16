@@ -1,9 +1,10 @@
 {
   "name": "studio-map-os",
-  "version": "0.1.2",
+  "version": "1.2.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev --experimental-https --experimental-https-key certificates/localhost-key.pem --experimental-https-cert certificates/localhost.pem",
+    "dev:http": "next dev",
     "build": "next build",
     "package:pwa": "node scripts/package-pwa.mjs",
     "start": "next start",
@@ -11,6 +12,7 @@
   },
   "dependencies": {
     "@serwist/next": "9.5.11",
+    "@xyflow/react": "^12.11.2",
     "clsx": "^2.1.1",
     "framer-motion": "^12.23.0",
     "lucide-react": "^0.468.0",

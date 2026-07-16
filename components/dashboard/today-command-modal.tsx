@@ -67,7 +67,8 @@ export function TodayCommandModal({ open, project, tasks, onClose }: TodayComman
                     translateDomainLabel(project.name, projectNameKeys, t),
                     project.id,
                     "project",
-                    t
+                    t,
+                    project.isExample
                   )}
                 </h3>
                 <div className="mt-4 flex flex-wrap gap-2">

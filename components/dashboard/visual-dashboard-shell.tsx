@@ -451,7 +451,7 @@ export function VisualDashboardShell() {
             >
               <ImageCard
                 imageUrl={project.coverImage}
-                title={formatDemoEntityName(displayName(project.name, projectNameKeys), project.id, "project", t)}
+                title={formatDemoEntityName(displayName(project.name, projectNameKeys), project.id, "project", t, project.isExample)}
                 meta={displayGroupName(groupById.get(project.groupId))}
                 className="shadow-none"
                 action={<ProjectReleaseBadges project={project} t={t} className="max-w-48" />}
@@ -639,7 +639,7 @@ export function VisualDashboardShell() {
                                     />
                                     <span className="relative z-10 flex min-w-0 items-center justify-between gap-1.5 min-[400px]:gap-3">
                                       <span className="min-w-0 truncate">
-                                        {formatDemoEntityName(displayName(project.name, projectNameKeys), project.id, "project", t)}
+                                        {formatDemoEntityName(displayName(project.name, projectNameKeys), project.id, "project", t, project.isExample)}
                                       </span>
                                       <span className="flex shrink-0 items-center gap-1 text-ink/62 min-[400px]:gap-1.5">
                                         <Pill

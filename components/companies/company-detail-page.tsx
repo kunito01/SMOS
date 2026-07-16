@@ -148,17 +148,18 @@ export function CompanyDetailPage({ companyId }: { companyId: string }) {
 
   return (
     <AppShell>
-      <div className="studio-scroll flex-1 overflow-y-auto px-4 pb-8 sm:px-6 xl:px-8">
+      <div className="studio-scroll flex-1 overflow-auto px-4 pb-8 sm:px-6 xl:px-8">
         {!data ? (
           <LoadingState label={t("loading")} />
         ) : (
           <>
-            <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.48fr)]">
+            <section className="grid min-w-[1120px] gap-4">
               <ImageCard
                 imageUrl={data.company.coverImage}
                 title={formatDemoEntityName(data.company.name, data.company.id, "company", t)}
                 meta={t("companyOverview")}
                 heightClassName="min-h-[28rem]"
+                className="[&>div.relative>h3]:max-w-56 [&>div.relative>h3]:text-2xl [&>div.relative>h3]:leading-none [&>div.relative>p]:text-sm"
                 action={
                   <Button
                     variant="ghost"
@@ -184,7 +185,7 @@ export function CompanyDetailPage({ companyId }: { companyId: string }) {
                 </div>
               </ImageCard>
 
-              <div className="grid min-w-0 self-end grid-cols-5 gap-[clamp(4px,0.8vw,8px)]">
+              <div className="grid min-w-0 grid-cols-5 gap-3">
                 {[
                   { label: t("projectsCount"), value: data.overview.totalProjectCount, icon: Layers3, iconClassName: "bg-limepop text-ink" },
                   { label: t("projectGroupsCount"), value: data.groups.length, icon: FolderKanban, iconClassName: "bg-aqua text-ink" },
@@ -197,17 +198,17 @@ export function CompanyDetailPage({ companyId }: { companyId: string }) {
                   return (
                     <div
                       key={metric.label}
-                      className="min-h-[clamp(90px,20vw,128px)] min-w-0 overflow-hidden rounded-studio bg-white/72 p-[clamp(4px,1vw,10px)] shadow-soft"
+                      className="min-h-32 min-w-0 overflow-hidden rounded-studio bg-white/72 p-4 shadow-soft"
                     >
-                      <div className="flex h-full min-w-0 flex-col justify-between gap-[clamp(6px,1.5vw,14px)]">
-                        <span className={`grid size-[clamp(22px,5vw,36px)] shrink-0 place-items-center rounded-full ${metric.iconClassName}`}>
-                          <Icon className="size-[clamp(11px,2.5vw,17px)]" />
+                      <div className="flex h-full min-w-0 flex-col justify-between gap-3">
+                        <span className={`grid size-9 shrink-0 place-items-center rounded-full ${metric.iconClassName}`}>
+                          <Icon className="size-4" />
                         </span>
                         <div className="min-w-0">
-                          <p className="max-w-full whitespace-nowrap text-[clamp(1rem,3vw,2rem)] font-black leading-none tracking-[-0.03em] tabular-nums">
+                          <p className="max-w-full whitespace-nowrap text-3xl font-black leading-none tracking-[-0.03em] tabular-nums">
                             {metric.value}
                           </p>
-                          <p className="mt-[clamp(3px,0.8vw,7px)] max-w-full whitespace-nowrap text-[clamp(7px,0.8vw,9px)] font-black leading-none tracking-[-0.04em] text-muted">
+                          <p className="mt-1.5 max-w-full whitespace-nowrap text-xs font-black leading-none tracking-[-0.04em] text-muted">
                             {metric.label}
                           </p>
                         </div>

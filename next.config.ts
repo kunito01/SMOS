@@ -7,6 +7,7 @@ import type { NextConfig } from "next";
 const isDevelopment = process.env.NODE_ENV === "development";
 const isPortablePwaBuild = process.env.STUDIO_MAP_PWA_BUNDLE === "1";
 const isGithubPagesBuild = process.env.GITHUB_PAGES === "1";
+// Verification builds can use an isolated output directory without touching dev.
 const distDir = process.env.NEXT_DIST_DIR ?? ".next";
 const basePath = isGithubPagesBuild ? "/SMOS" : "";
 const withBasePath = (url: string) => `${basePath}${url}`;
@@ -24,6 +25,7 @@ const appShellRoutes = [
   "/project-share",
   "/costs",
   "/libraries",
+  "/workflow",
   "/archive",
   "/share"
 ];

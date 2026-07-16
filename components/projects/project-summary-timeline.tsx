@@ -10,10 +10,12 @@ import {
 import { formatLocalizedDate } from "@/lib/i18n/formatters";
 import type { TranslationKey } from "@/lib/i18n/translations";
 import type { Phase, Project } from "@/lib/types";
+import { cn } from "@/lib/utils/cn";
 
 type ProjectSummaryTimelineProps = {
   project: Project;
   t: (key: TranslationKey) => string;
+  fixedLayout?: boolean;
 };
 
 type TimelineBar = {
@@ -67,7 +69,7 @@ const phaseProgress = (phase: Phase, timelineStart: number, timelineEnd: number)
   };
 };
 
-export function ProjectSummaryTimeline({ project, t }: ProjectSummaryTimelineProps) {
+export function ProjectSummaryTimeline({ project, t, fixedLayout = false }: ProjectSummaryTimelineProps) {
   const { language } = useI18n();
   const phases = project.phases;
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -152,17 +154,32 @@ export function ProjectSummaryTimeline({ project, t }: ProjectSummaryTimelinePro
   };
 
   return (
-    <div className="mt-5 overflow-hidden rounded-studio bg-[#4f666a] p-3 ring-1 ring-white/30 max-[560px]:mt-4 max-[560px]:p-2.5 max-[420px]:rounded-xl max-[420px]:p-2">
-      <div className="mb-3 flex items-center justify-between gap-3 max-[560px]:mb-2 max-[560px]:gap-2 max-[420px]:flex-col max-[420px]:items-start max-[420px]:gap-1.5">
-        <p className="text-xs font-black uppercase text-white max-[560px]:text-[10px] max-[420px]:text-[9px]">{t("summaryTimeline")}</p>
-        <span className="max-w-full rounded-full bg-white/22 px-3 py-1 text-xs font-black text-white max-[560px]:px-2.5 max-[560px]:text-[10px] max-[420px]:px-2 max-[420px]:py-0.5 max-[420px]:text-[9px]">
+    <div
+      className={cn(
+        "mt-5 overflow-hidden rounded-studio bg-[#4f666a] p-3 ring-1 ring-white/30",
+        !fixedLayout && "max-[560px]:mt-4 max-[560px]:p-2.5 max-[420px]:rounded-xl max-[420px]:p-2"
+      )}
+    >
+      <div
+        className={cn(
+          "mb-3 flex items-center justify-between gap-3",
+          !fixedLayout && "max-[560px]:mb-2 max-[560px]:gap-2 max-[420px]:flex-col max-[420px]:items-start max-[420px]:gap-1.5"
+        )}
+      >
+        <p className={cn("text-xs font-black uppercase text-white", !fixedLayout && "max-[560px]:text-[10px] max-[420px]:text-[9px]")}>{t("summaryTimeline")}</p>
+        <span
+          className={cn(
+            "max-w-full rounded-full bg-white/22 px-3 py-1 text-xs font-black text-white",
+            !fixedLayout && "max-[560px]:px-2.5 max-[560px]:text-[10px] max-[420px]:px-2 max-[420px]:py-0.5 max-[420px]:text-[9px]"
+          )}
+        >
           {formatLocalizedDate(timelineStartDate, language)} - {formatLocalizedDate(timelineEndDate, language)}
         </span>
       </div>
 
       <div
         ref={scrollRef}
-        className="studio-scroll timeline-drag-surface overflow-x-auto pb-1 max-[420px]:pb-0.5"
+        className={cn("studio-scroll timeline-drag-surface overflow-x-auto pb-1", !fixedLayout && "max-[420px]:pb-0.5")}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={stopDrag}
@@ -170,7 +187,10 @@ export function ProjectSummaryTimeline({ project, t }: ProjectSummaryTimelinePro
         onPointerLeave={stopDrag}
       >
         <div
-          className="relative rounded-[1.4rem] bg-transparent shadow-inner [--summary-bar-height:2.125rem] [--summary-chart-height:15.25rem] [--summary-chart-width:48.75rem] [--summary-grid-gap:4.5rem] max-[560px]:rounded-[1.15rem] max-[560px]:[--summary-bar-height:1.875rem] max-[560px]:[--summary-chart-width:36rem] max-[560px]:[--summary-grid-gap:3.5rem] max-[420px]:rounded-xl max-[420px]:[--summary-bar-height:1.625rem] max-[420px]:[--summary-chart-height:13.5rem] max-[420px]:[--summary-chart-width:29rem] max-[420px]:[--summary-grid-gap:3rem] max-[360px]:[--summary-chart-width:26rem]"
+          className={cn(
+            "relative rounded-[1.4rem] bg-transparent shadow-inner [--summary-bar-height:2.125rem] [--summary-chart-height:15.25rem] [--summary-chart-width:48.75rem] [--summary-grid-gap:4.5rem]",
+            !fixedLayout && "max-[560px]:rounded-[1.15rem] max-[560px]:[--summary-bar-height:1.875rem] max-[560px]:[--summary-chart-width:36rem] max-[560px]:[--summary-grid-gap:3.5rem] max-[420px]:rounded-xl max-[420px]:[--summary-bar-height:1.625rem] max-[420px]:[--summary-chart-height:13.5rem] max-[420px]:[--summary-chart-width:29rem] max-[420px]:[--summary-grid-gap:3rem] max-[360px]:[--summary-chart-width:26rem]"
+          )}
           style={{
             backgroundImage:
               "linear-gradient(rgba(28,35,40,0.08) 1px, transparent 1px), linear-gradient(90deg, rgba(28,35,40,0.08) 1px, transparent 1px)",
@@ -181,10 +201,18 @@ export function ProjectSummaryTimeline({ project, t }: ProjectSummaryTimelinePro
         >
           {currentInRange ? (
             <div
-              className="absolute top-4 z-20 h-[calc(100%-1rem)] border-l border-dashed border-[#ff0099] max-[560px]:top-3 max-[560px]:h-[calc(100%-0.75rem)] max-[420px]:top-2.5"
+              className={cn(
+                "absolute top-4 z-20 h-[calc(100%-1rem)] border-l border-dashed border-[#ff0099]",
+                !fixedLayout && "max-[560px]:top-3 max-[560px]:h-[calc(100%-0.75rem)] max-[420px]:top-2.5"
+              )}
               style={{ left: `${currentRatio}%` }}
             >
-              <span className="absolute left-1/2 top-0 -translate-x-1/2 -translate-y-1/2 whitespace-nowrap rounded-full bg-[#ff0099] px-3 py-1 text-xs font-bold text-white shadow-soft max-[560px]:px-2 max-[560px]:py-0.5 max-[560px]:text-[10px] max-[420px]:px-1.5 max-[420px]:text-[8px]">
+              <span
+                className={cn(
+                  "absolute left-1/2 top-0 -translate-x-1/2 -translate-y-1/2 whitespace-nowrap rounded-full bg-[#ff0099] px-3 py-1 text-xs font-bold text-white shadow-soft",
+                  !fixedLayout && "max-[560px]:px-2 max-[560px]:py-0.5 max-[560px]:text-[10px] max-[420px]:px-1.5 max-[420px]:text-[8px]"
+                )}
+              >
                 {formatLocalizedDate(new Date(now), language, {
                   day: "numeric",
                   month: "short",
@@ -197,7 +225,10 @@ export function ProjectSummaryTimeline({ project, t }: ProjectSummaryTimelinePro
           {bars.map((bar) => (
             <div
               key={bar.id}
-              className="absolute z-10 flex min-w-[11rem] items-center justify-center overflow-hidden rounded-xl px-3 text-center text-sm font-black shadow-[0_10px_24px_rgba(17,31,38,0.12)] max-[560px]:min-w-[9rem] max-[560px]:px-2.5 max-[560px]:text-[11px] max-[420px]:min-w-[7.5rem] max-[420px]:rounded-lg max-[420px]:px-2 max-[420px]:text-[9px]"
+              className={cn(
+                "absolute z-10 flex min-w-[11rem] items-center justify-center overflow-hidden rounded-xl px-3 text-center text-sm font-black shadow-[0_10px_24px_rgba(17,31,38,0.12)]",
+                !fixedLayout && "max-[560px]:min-w-[9rem] max-[560px]:px-2.5 max-[560px]:text-[11px] max-[420px]:min-w-[7.5rem] max-[420px]:rounded-lg max-[420px]:px-2 max-[420px]:text-[9px]"
+              )}
               style={{
                 backgroundColor: bar.color,
                 color: bar.textColor,

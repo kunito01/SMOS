@@ -2,15 +2,15 @@ import type { Language, TranslationKey } from "@/lib/i18n/translations";
 import type { ActivityEvent, CostItem, Material, Person, ProjectGroup, ProjectStatus, ProjectVersion, Tool } from "@/lib/types";
 
 const demoCompanyIds = new Set(["company-northstar", "company-color-works"]);
-const demoProjectIds = new Set(Array.from({ length: 12 }, (_, index) => `project-${String(index + 1).padStart(2, "0")}`));
 
 export function formatDemoEntityName(
   value: string,
   id: string,
   kind: "company" | "project",
-  t: (key: TranslationKey) => string
+  t: (key: TranslationKey) => string,
+  isExample?: boolean
 ) {
-  const isDemo = kind === "company" ? demoCompanyIds.has(id) : demoProjectIds.has(id);
+  const isDemo = kind === "company" ? demoCompanyIds.has(id) : isExample === true;
   return isDemo ? `${value}${t("exampleNameSuffix")}` : value;
 }
 

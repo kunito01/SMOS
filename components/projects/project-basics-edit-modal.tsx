@@ -223,7 +223,8 @@ export function ProjectBasicsEditModal({
                         translateDomainLabel(name, projectNameKeys, t),
                         project.id,
                         "project",
-                        t
+                        t,
+                        project.isExample
                       )
                     : t("projectName")}
                 </h3>

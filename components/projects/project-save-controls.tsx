@@ -16,7 +16,6 @@ import {
 } from "@/lib/security/workspace-crypto";
 import type { Project } from "@/lib/types";
 import {
-  createProjectSave,
   validateProjectSave,
   type ValidatedProjectSave
 } from "@/lib/utils/project-import";
@@ -99,17 +98,17 @@ export function ProjectSaveControls({
     setBusy("save");
 
     try {
-      const exportProject = await projectsApi.ensureProjectArchiveIdentity(project.id);
+      const projectSave = await projectsApi.createStandaloneProjectSave(project.id);
       const encryptedSave = await authApi.encryptActiveWorkspaceFile(
         "project",
-        createProjectSave(exportProject)
+        projectSave
       );
       const content = JSON.stringify(encryptedSave, null, 2);
       const fileName = createProjectFileName(encryptedSave.exportedAt);
 
       downloadFallback(content, fileName);
 
-      onLoaded(exportProject);
+      onLoaded(projectSave.project);
       setNotice(t("projectSavedFile"));
     } catch (error) {
       if (!(error instanceof DOMException && error.name === "AbortError")) {
@@ -322,6 +321,7 @@ export function ProjectSaveControls({
       <DeleteConfirmDialog
         open={Boolean(pendingProjectImport)}
         busy={busy === "load"}
+        acknowledgementLabel={t("dangerousActionAcknowledgement")}
         title={
           pendingProjectImport?.plan.mode === "blank-target"
             ? t("projectImportConfirmBlankTitle")

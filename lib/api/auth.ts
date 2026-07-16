@@ -32,13 +32,60 @@ import {
   type WorkspaceMasterKey,
   type WorkspaceRecoveryMetadata
 } from "@/lib/security/workspace-crypto";
+import {
+  AppleDeviceVaultError,
+  createOrUpdateAppleDeviceVaultEntry,
+  deleteAppleDeviceVaultEntry,
+  unlockAppleDeviceVaultEntry
+} from "@/lib/security/apple-device-vault";
+import {
+  createCloudKitAppleAccountProfile,
+  fetchCloudKitAppleAccountProfile,
+  saveCloudKitAppleAccountProfile,
+  type CloudKitAppleAccountProfile,
+  type CloudKitAppleAccountProfileInput
+} from "@/lib/storage/cloudkit-account-provider";
+import {
+  assertCloudKitAuthenticatedUser,
+  getCloudKitAccountDisplay,
+  getCloudKitAccountFingerprint,
+  hasPersistedCloudKitSession,
+  signOutCloudKitSession,
+  type CloudKitUserIdentity
+} from "@/lib/storage/cloudkit/cloudkit-client";
 import { requestPersistentBrowserStorage } from "@/lib/storage/persistent-storage";
+import {
+  capturePortableWorkspaceStoragePreferences,
+  getStoredWorkspaceStoragePreference,
+  getWorkspaceStoragePreference,
+  listWorkspaceStoragePreferences,
+  parsePortableWorkspaceStoragePreference,
+  replaceWorkspaceStoragePreferences,
+  replaceWorkspaceStoragePreferencesFromBackup,
+  restoreWorkspaceStoragePreference,
+  setWorkspaceStorageProvider,
+  type PortableWorkspaceStoragePreference,
+  type WorkspaceStoragePreference
+} from "@/lib/storage/storage-preferences";
+import {
+  connectWorkspaceCloudKit,
+  manualSyncWorkspace,
+  pullWorkspaceFromCloudOnLogin,
+  resolveWorkspaceCloudConflict,
+  type WorkspaceConflictResolution
+} from "@/lib/storage/workspace-sync-coordinator";
+import {
+  bumpWorkspaceMutationEpoch,
+  withAuthMutationLock,
+  withDatabaseMutationLock
+} from "@/lib/storage/workspace-mutation-lock";
 import {
   IndexedDbStorageError,
   captureEncryptedDatabaseSnapshot,
   parseEncryptedDatabaseSnapshot,
   replaceEncryptedDatabaseSnapshot,
-  type EncryptedDatabaseSnapshot
+  type EncryptedDatabaseSnapshot,
+  type EncryptedWorkspaceBundleSnapshot
 } from "@/lib/storage/indexed-db";
 import type { User } from "@/lib/types";
 import { isMoneyCurrency, type MoneyCurrency } from "@/lib/utils/money";
@@ -72,9 +119,35 @@ export type RegisterResult = {
   user: LocalAuthUser;
 };
 
+export type AppleAccountLoginResolution =
+  | {
+      kind: "needs-setup";
+      suggestedName: string;
+    }
+  | {
+      kind: "needs-recovery";
+      displayName: string;
+    }
+  | {
+      kind: "ready";
+      user: LocalAuthUser;
+    };
+
+export type AppleAccountSetupPayload = {
+  identity: CloudKitUserIdentity;
+  name: string;
+  workspaceCode: string;
+};
+
+export type AppleAccountRecoveryPayload = {
+  identity: CloudKitUserIdentity;
+  workspaceCode: string;
+};
+
 export type LocalAuthErrorCode =
   | "ACCOUNT_EXISTS"
   | "BACKUP_INVALID"
+  | "BACKUP_CAPTURE_CHANGED"
   | "BACKUP_REQUIRED"
   | "BACKUP_TOO_LARGE"
   | "DEVICE_NOT_EMPTY"
@@ -93,7 +166,7 @@ export type LocalAuthErrorCode =
   | "WORKSPACE_MISMATCH"
   | "WORKSPACE_NOT_FOUND";
 
-export type StoredLocalAccount = {
+export type StoredPasswordAccount = {
   id: string;
   avatar: string;
   createdAt: string;
@@ -104,8 +177,23 @@ export type StoredLocalAccount = {
   workspaceRole: LocalWorkspaceRole;
 };
 
+export type StoredAppleAccount = {
+  id: string;
+  avatar: string;
+  authMethod: "apple-cloudkit";
+  appleAccountFingerprint: string;
+  createdAt: string;
+  email: string;
+  name: string;
+  workspaceId: string;
+  workspaceRole: "owner";
+};
+
+export type StoredLocalAccount = StoredPasswordAccount | StoredAppleAccount;
+
 export const fullSiteBackupSchema = "studio-map-os.full-site-device-backup" as const;
-export const fullSiteBackupVersion = 1 as const;
+const legacyFullSiteBackupVersion = 1 as const;
+export const fullSiteBackupVersion = 2 as const;
 
 export type FullSiteBackup = {
   schema: typeof fullSiteBackupSchema;
@@ -122,6 +210,7 @@ export type FullSiteBackup = {
     displayCurrency?: MoneyCurrency;
     lastAccountEmail?: string;
   };
+  storagePreferences: PortableWorkspaceStoragePreference[];
 };
 
 export type ImportedSiteBackup =
@@ -142,6 +231,7 @@ type LocalDeviceStorageSnapshot = {
   language: string | null;
   displayCurrency: string | null;
   lastAccountEmail: string | null;
+  storagePreferences: WorkspaceStoragePreference[];
   legacyPlaintextEntries: Array<[string, string]>;
   restoreRecoveryMarker: string | null;
 };
@@ -159,8 +249,37 @@ const legacyWorkspaceDatabaseSuffix = ".database";
 const restoreRecoveryStorageKey = "studio-map-os.full-site-restore-recovery.v1";
 const minimumPasswordLength = 8;
 
+const developmentTestAccount =
+  process.env.NODE_ENV === "development"
+    ? ({
+        name: "Studio Map OS Test",
+        email: "test@studio-map.test",
+        password: "StudioMapOS-Test!",
+        workspaceCode: "3305000000000001"
+      } as const)
+    : null;
+
 let activeSession: ActiveAuthSession | null = null;
 let fullSiteRestoreInProgress = false;
+
+const validateCloudBundleForSession = async (
+  snapshot: EncryptedWorkspaceBundleSnapshot,
+  session: ActiveAuthSession
+) => {
+  if (
+    snapshot.workspaceId !== session.workspace.workspaceId ||
+    snapshot.workspaceRecord === null
+  ) {
+    throw new LocalAuthError(
+      "WORKSPACE_MISMATCH",
+      "The CloudKit copy does not belong to the active workspace"
+    );
+  }
+
+  // Structural checks and transport hashes are not enough: authenticate the
+  // ciphertext with the unlocked in-memory key before replacing IndexedDB.
+  await decryptWorkspaceRecord(snapshot.workspaceRecord, session.masterKey);
+};
 
 export class LocalAuthError extends Error {
   constructor(
@@ -222,10 +341,8 @@ const isCanonicalIsoDate = (value: unknown): value is string => {
   return Number.isFinite(timestamp) && new Date(timestamp).toISOString() === value;
 };
 
-const isStoredLocalAccount = (value: unknown): value is StoredLocalAccount => {
-  if (
-    !isRecord(value) ||
-    !hasExactKeys(value, [
+const isStoredPasswordAccount = (value: unknown): value is StoredPasswordAccount => {
+  if (!isRecord(value) || !hasExactKeys(value, [
       "id",
       "avatar",
       "createdAt",
@@ -252,6 +369,33 @@ const isStoredLocalAccount = (value: unknown): value is StoredLocalAccount => {
     return false;
   }
 };
+
+const isStoredAppleAccount = (value: unknown): value is StoredAppleAccount =>
+  isRecord(value) &&
+  hasExactKeys(value, [
+    "id",
+    "avatar",
+    "authMethod",
+    "appleAccountFingerprint",
+    "createdAt",
+    "email",
+    "name",
+    "workspaceId",
+    "workspaceRole"
+  ]) &&
+  typeof value.id === "string" &&
+  typeof value.avatar === "string" &&
+  value.authMethod === "apple-cloudkit" &&
+  typeof value.appleAccountFingerprint === "string" &&
+  /^[a-f0-9]{64}$/.test(value.appleAccountFingerprint) &&
+  isCanonicalIsoDate(value.createdAt) &&
+  typeof value.email === "string" &&
+  typeof value.name === "string" &&
+  typeof value.workspaceId === "string" &&
+  value.workspaceRole === "owner";
+
+const isStoredLocalAccount = (value: unknown): value is StoredLocalAccount =>
+  isStoredPasswordAccount(value) || isStoredAppleAccount(value);
 
 const isWorkspaceRecoveryMetadata = (value: unknown): value is WorkspaceRecoveryMetadata => {
   try {
@@ -299,19 +443,36 @@ const readWorkspaces = () => readArray(workspacesStorageKey, isWorkspaceRecovery
 const normalizeEmail = (email: string) => email.trim().toLowerCase();
 
 export function validateFullSiteBackup(value: unknown): FullSiteBackup {
+  const isSupportedVersion =
+    isRecord(value) &&
+    (value.version === legacyFullSiteBackupVersion || value.version === fullSiteBackupVersion);
+  const expectedKeys =
+    isRecord(value) && value.version === fullSiteBackupVersion
+      ? [
+          "schema",
+          "version",
+          "exportedAt",
+          "protectorWorkspaceId",
+          "authentication",
+          "indexedDb",
+          "preferences",
+          "storagePreferences"
+        ]
+      : [
+          "schema",
+          "version",
+          "exportedAt",
+          "protectorWorkspaceId",
+          "authentication",
+          "indexedDb",
+          "preferences"
+        ];
+
   if (
     !isRecord(value) ||
-    !hasExactKeys(value, [
-      "schema",
-      "version",
-      "exportedAt",
-      "protectorWorkspaceId",
-      "authentication",
-      "indexedDb",
-      "preferences"
-    ]) ||
+    !isSupportedVersion ||
+    !hasExactKeys(value, expectedKeys) ||
     value.schema !== fullSiteBackupSchema ||
-    value.version !== fullSiteBackupVersion ||
     !isCanonicalIsoDate(value.exportedAt) ||
     typeof value.protectorWorkspaceId !== "string" ||
     !isRecord(value.authentication) ||
@@ -329,7 +490,8 @@ export function validateFullSiteBackup(value: unknown): FullSiteBackup {
     (value.preferences.displayCurrency !== undefined &&
       !isMoneyCurrency(value.preferences.displayCurrency)) ||
     (value.preferences.lastAccountEmail !== undefined &&
-      typeof value.preferences.lastAccountEmail !== "string")
+      typeof value.preferences.lastAccountEmail !== "string") ||
+    (value.version === fullSiteBackupVersion && !Array.isArray(value.storagePreferences))
   ) {
     throw new LocalAuthError("BACKUP_INVALID", "The full-site backup is invalid or unsupported");
   }
@@ -353,6 +515,40 @@ export function validateFullSiteBackup(value: unknown): FullSiteBackup {
       throw new LocalAuthError("BACKUP_INVALID", "The full-site backup contains a duplicate workspace");
     }
     workspaceIds.add(workspace.workspaceId);
+  }
+
+  let storagePreferences: PortableWorkspaceStoragePreference[];
+  if (value.version === legacyFullSiteBackupVersion) {
+    storagePreferences = workspaces.map((workspace) => ({
+      workspaceId: workspace.workspaceId,
+      provider: "indexeddb"
+    }));
+  } else {
+    try {
+      storagePreferences = (value.storagePreferences as unknown[]).map((preference) =>
+        parsePortableWorkspaceStoragePreference(preference)
+      );
+    } catch (error) {
+      throw new LocalAuthError(
+        "BACKUP_INVALID",
+        "The full-site storage preferences are invalid",
+        { cause: error }
+      );
+    }
+
+    const storageWorkspaceIds = new Set(
+      storagePreferences.map((preference) => preference.workspaceId)
+    );
+    if (
+      storageWorkspaceIds.size !== storagePreferences.length ||
+      storageWorkspaceIds.size !== workspaceIds.size ||
+      [...workspaceIds].some((workspaceId) => !storageWorkspaceIds.has(workspaceId))
+    ) {
+      throw new LocalAuthError(
+        "BACKUP_INVALID",
+        "The full-site storage preferences are inconsistent"
+      );
+    }
   }
 
   if (!workspaceIds.has(value.protectorWorkspaceId)) {
@@ -397,7 +593,8 @@ export function validateFullSiteBackup(value: unknown): FullSiteBackup {
       language: value.preferences.language as Language | undefined,
       displayCurrency: value.preferences.displayCurrency as MoneyCurrency | undefined,
       lastAccountEmail
-    }
+    },
+    storagePreferences
   };
 }
 
@@ -408,9 +605,24 @@ const captureLocalDeviceStorage = async (): Promise<LocalDeviceStorageSnapshot> 
   language: window.localStorage.getItem(languageStorageKey),
   displayCurrency: window.localStorage.getItem(displayCurrencyStorageKey),
   lastAccountEmail: window.localStorage.getItem(lastEmailStorageKey),
+  storagePreferences: listWorkspaceStoragePreferences(),
   legacyPlaintextEntries: captureLegacyPlaintextEntries(),
   restoreRecoveryMarker: window.localStorage.getItem(restoreRecoveryStorageKey)
 });
+
+const bumpDatabaseSnapshotWorkspaceEpochs = (
+  ...snapshots: EncryptedDatabaseSnapshot<EncryptedPublicSharePayload>[]
+) => {
+  const workspaceIds = new Set(
+    snapshots.flatMap((snapshot) =>
+      snapshot.bundles.map((bundle) => bundle.workspaceId)
+    )
+  );
+
+  for (const workspaceId of workspaceIds) {
+    bumpWorkspaceMutationEpoch(workspaceId);
+  }
+};
 
 const restoreStoredValue = (key: string, value: string | null) => {
   if (value === null) {
@@ -456,10 +668,15 @@ const restoreLegacyPlaintextEntries = (entries: Array<[string, string]>) => {
   }
 };
 
-const restoreLocalDeviceStorage = async (snapshot: LocalDeviceStorageSnapshot) => {
+const restoreLocalDeviceStorage = async (
+  snapshot: LocalDeviceStorageSnapshot,
+  replacedIndexedDb: EncryptedDatabaseSnapshot<EncryptedPublicSharePayload>
+) => {
   await replaceEncryptedDatabaseSnapshot(snapshot.indexedDb);
+  bumpDatabaseSnapshotWorkspaceEpochs(replacedIndexedDb, snapshot.indexedDb);
   writeArray(accountsStorageKey, snapshot.accounts);
   writeArray(workspacesStorageKey, snapshot.workspaces);
+  replaceWorkspaceStoragePreferences(snapshot.storagePreferences);
   restoreStoredValue(languageStorageKey, snapshot.language);
   restoreStoredValue(displayCurrencyStorageKey, snapshot.displayCurrency);
   restoreStoredValue(lastEmailStorageKey, snapshot.lastAccountEmail);
@@ -467,7 +684,7 @@ const restoreLocalDeviceStorage = async (snapshot: LocalDeviceStorageSnapshot) =
   restoreStoredValue(restoreRecoveryStorageKey, snapshot.restoreRecoveryMarker);
 };
 
-async function replaceLocalDeviceWithFullSiteBackup(
+async function replaceLocalDeviceWithFullSiteBackupUnlocked(
   backupValue: unknown,
   options: { requireEmptyDevice?: boolean } = {}
 ) {
@@ -497,13 +714,17 @@ async function replaceLocalDeviceWithFullSiteBackup(
 
   try {
     await replaceEncryptedDatabaseSnapshot(backup.indexedDb);
+    bumpDatabaseSnapshotWorkspaceEpochs(previous.indexedDb, backup.indexedDb);
     writeArray(accountsStorageKey, backup.authentication.accounts);
     writeArray(workspacesStorageKey, backup.authentication.workspaces);
+    replaceWorkspaceStoragePreferencesFromBackup(backup.storagePreferences);
     restoreStoredValue(languageStorageKey, backup.preferences.language ?? null);
     restoreStoredValue(displayCurrencyStorageKey, backup.preferences.displayCurrency ?? null);
     restoreStoredValue(
       lastEmailStorageKey,
-      backup.preferences.lastAccountEmail ?? backup.authentication.accounts[0]?.email ?? null
+      backup.preferences.lastAccountEmail ??
+        backup.authentication.accounts.find(isStoredPasswordAccount)?.email ??
+        null
     );
     window.localStorage.removeItem(legacyAuthStorageKey);
     clearLegacyPlaintextEntries();
@@ -511,7 +732,7 @@ async function replaceLocalDeviceWithFullSiteBackup(
   } catch (error) {
     let rollbackSucceeded = false;
     try {
-      await restoreLocalDeviceStorage(previous);
+      await restoreLocalDeviceStorage(previous, backup.indexedDb);
       rollbackSucceeded = true;
     } catch {
       try {
@@ -538,6 +759,15 @@ async function replaceLocalDeviceWithFullSiteBackup(
   activeSession = null;
   deactivateMockDatabaseWorkspace();
   return backup;
+}
+
+async function replaceLocalDeviceWithFullSiteBackup(
+  backupValue: unknown,
+  options: { requireEmptyDevice?: boolean } = {}
+) {
+  return withDatabaseMutationLock(() =>
+    replaceLocalDeviceWithFullSiteBackupUnlocked(backupValue, options)
+  );
 }
 
 const masterKeysMatch = (left: WorkspaceMasterKey, right: WorkspaceMasterKey) => {
@@ -700,7 +930,9 @@ const setActiveSession = async (
   await activateMockDatabaseWorkspace(workspace.workspaceId, masterKey);
   activeSession?.masterKey.fill(0);
   activeSession = { account, masterKey, user, workspace };
-  rememberLastEmail(account.email);
+  if (isStoredPasswordAccount(account)) {
+    rememberLastEmail(account.email);
+  }
 
   return user;
 };
@@ -734,7 +966,7 @@ export function hasUnclaimedLegacyData() {
   return canUseStorage() && readAccounts().length === 0 && hasLegacyMockDatabase();
 }
 
-export async function register(payload: RegisterPayload): Promise<RegisterResult> {
+async function registerUnlocked(payload: RegisterPayload): Promise<RegisterResult> {
   requireStorage();
   requireCompletedRestoreState();
 
@@ -764,6 +996,7 @@ export async function register(payload: RegisterPayload): Promise<RegisterResult
   let startedEmptyWorkspace = false;
   let backupToRestore: ReturnType<typeof validateMockDatabaseBackup> | null = null;
   let discardCorruptBundleForVerifiedRecovery = false;
+  let previousStoragePreference: WorkspaceStoragePreference | null = null;
 
   try {
     const decodedBackup =
@@ -892,10 +1125,12 @@ export async function register(payload: RegisterPayload): Promise<RegisterResult
     }
     const claimedLegacyData =
       payload.workspaceMode === "create" && previousAccounts.length === 0 && hasLegacyMockDatabase();
+    const registeredWorkspaceId = workspace.workspaceId;
     const workspaceStorageSnapshot = await captureMockDatabaseWorkspaceStorage(
-      workspace.workspaceId,
+      registeredWorkspaceId,
       { discardCorruptBundleForVerifiedRecovery }
     );
+    previousStoragePreference = getStoredWorkspaceStoragePreference(registeredWorkspaceId);
 
     try {
       upsertWorkspace(workspace);
@@ -931,6 +1166,7 @@ export async function register(payload: RegisterPayload): Promise<RegisterResult
       }
 
       void requestPersistentBrowserStorage();
+      setWorkspaceStorageProvider(registeredWorkspaceId, "indexeddb");
 
       return mockApi({
         claimedLegacyData,
@@ -950,7 +1186,8 @@ export async function register(payload: RegisterPayload): Promise<RegisterResult
       const rollbackSteps: Array<() => void | Promise<void>> = [
         () => writeArray(accountsStorageKey, previousAccounts),
         () => writeArray(workspacesStorageKey, previousWorkspaces),
-        () => restoreMockDatabaseWorkspaceStorage(workspaceStorageSnapshot)
+        () => restoreMockDatabaseWorkspaceStorage(workspaceStorageSnapshot),
+        () => restoreWorkspaceStoragePreference(registeredWorkspaceId, previousStoragePreference)
       ];
 
       for (const rollback of rollbackSteps) {
@@ -972,12 +1209,670 @@ export async function register(payload: RegisterPayload): Promise<RegisterResult
   }
 }
 
+export async function register(payload: RegisterPayload): Promise<RegisterResult> {
+  return withAuthMutationLock(() => registerUnlocked(payload));
+}
+
+const applePrivateEmail = (fingerprint: string) =>
+  `apple.${fingerprint.slice(0, 16)}@private.studio-map.local`;
+
+const appleSuggestedName = (identity: CloudKitUserIdentity) =>
+  getCloudKitAccountDisplay(identity).displayName ?? "";
+
+const createStoredAppleAccount = (
+  profile: Pick<
+    CloudKitAppleAccountProfile,
+    "accountId" | "createdAt" | "displayName" | "workspaceId" | "workspaceRole"
+  >,
+  fingerprint: string
+): StoredAppleAccount => ({
+  id: profile.accountId,
+  avatar: "",
+  authMethod: "apple-cloudkit",
+  appleAccountFingerprint: fingerprint,
+  createdAt: profile.createdAt,
+  email: applePrivateEmail(fingerprint),
+  name: profile.displayName,
+  workspaceId: profile.workspaceId,
+  workspaceRole: "owner"
+});
+
+const upsertStoredAppleAccount = (account: StoredAppleAccount) => {
+  const accounts = readAccounts();
+  const conflicting = accounts.find(
+    (item) =>
+      item.id === account.id ||
+      normalizeEmail(item.email) === normalizeEmail(account.email) ||
+      (isStoredAppleAccount(item) &&
+        item.appleAccountFingerprint === account.appleAccountFingerprint)
+  );
+
+  if (
+    conflicting &&
+    (!isStoredAppleAccount(conflicting) ||
+      conflicting.id !== account.id ||
+      conflicting.workspaceId !== account.workspaceId ||
+      conflicting.appleAccountFingerprint !== account.appleAccountFingerprint)
+  ) {
+    throw new LocalAuthError(
+      "WORKSPACE_MISMATCH",
+      "This device already links the Apple account to another Studio Map OS workspace."
+    );
+  }
+
+  const next = accounts.filter(
+    (item) =>
+      item.id !== account.id &&
+      (!isStoredAppleAccount(item) ||
+        item.appleAccountFingerprint !== account.appleAccountFingerprint)
+  );
+  writeArray(accountsStorageKey, [...next, account]);
+};
+
+const requireAppleFingerprint = async (identity: CloudKitUserIdentity) => {
+  const fingerprint = await getCloudKitAccountFingerprint(identity);
+  if (!fingerprint) {
+    throw new LocalAuthError(
+      "INVALID_CREDENTIALS",
+      "Apple ID did not provide a usable account identity."
+    );
+  }
+  return fingerprint;
+};
+
+const activateAppleAccountSession = async (input: {
+  account: StoredAppleAccount;
+  identity: CloudKitUserIdentity;
+  masterKey: WorkspaceMasterKey;
+  workspace: WorkspaceRecoveryMetadata;
+}) => {
+  const { account, identity, masterKey, workspace } = input;
+  const currentPreference = getWorkspaceStoragePreference(workspace.workspaceId);
+  if (currentPreference.provider !== "cloudkit") {
+    setWorkspaceStorageProvider(workspace.workspaceId, "cloudkit");
+  }
+
+  let user: LocalAuthUser;
+  let recoveredMissingLocalBundle = false;
+  try {
+    try {
+      user = await setActiveSession(account, workspace, masterKey);
+    } catch (localActivationError) {
+      user = toAuthUser(account, workspace);
+      activeSession?.masterKey.fill(0);
+      activeSession = { account, masterKey, user, workspace };
+
+      const cloudSession = activeSession;
+      const recovery = await pullWorkspaceFromCloudOnLogin(workspace.workspaceId, {
+        authenticatedUser: identity,
+        forceRemoteRestore: true,
+        validateRemoteBundle: (snapshot) =>
+          validateCloudBundleForSession(snapshot, cloudSession)
+      });
+      if (!recovery.didReplaceLocalBundle) {
+        throw localActivationError;
+      }
+
+      await activateMockDatabaseWorkspace(workspace.workspaceId, masterKey);
+      recoveredMissingLocalBundle = true;
+    }
+
+    const cloudSession = activeSession;
+    if (!cloudSession || cloudSession.workspace.workspaceId !== workspace.workspaceId) {
+      throw new LocalAuthError("NO_ACTIVE_SESSION", "No Apple workspace is unlocked.");
+    }
+
+    if (!recoveredMissingLocalBundle) {
+      const cloudPull = await pullWorkspaceFromCloudOnLogin(workspace.workspaceId, {
+        authenticatedUser: identity,
+        validateRemoteBundle: (snapshot) =>
+          validateCloudBundleForSession(snapshot, cloudSession)
+      });
+      if (cloudPull.didReplaceLocalBundle) {
+        await activateMockDatabaseWorkspace(workspace.workspaceId, masterKey);
+      }
+    }
+
+    upsertWorkspace(workspace);
+    upsertStoredAppleAccount(account);
+    await upsertWorkspaceMember(account);
+    await createOrUpdateAppleDeviceVaultEntry(
+      {
+        appleAccountFingerprint: account.appleAccountFingerprint,
+        workspaceId: workspace.workspaceId,
+        masterKey
+      }
+    );
+    void requestPersistentBrowserStorage();
+    return user;
+  } catch (error) {
+    activeSession?.masterKey.fill(0);
+    masterKey.fill(0);
+    activeSession = null;
+    deactivateMockDatabaseWorkspace();
+    throw error;
+  }
+};
+
+const assertAppleProfileOwnership = (
+  profile: CloudKitAppleAccountProfile,
+  fingerprint: string
+) => {
+  if (profile.appleAccountFingerprint !== fingerprint) {
+    throw new LocalAuthError(
+      "WORKSPACE_MISMATCH",
+      "The CloudKit profile belongs to a different Apple account."
+    );
+  }
+};
+
+const toAppleProfileInput = (
+  profile: CloudKitAppleAccountProfile,
+  status: CloudKitAppleAccountProfileInput["status"]
+): CloudKitAppleAccountProfileInput => ({
+  accountId: profile.accountId,
+  appleAccountFingerprint: profile.appleAccountFingerprint,
+  createdAt: profile.createdAt,
+  displayName: profile.displayName,
+  recoveryMetadata: profile.recoveryMetadata,
+  status,
+  updatedAt: new Date().toISOString(),
+  workspaceId: profile.workspaceId,
+  workspaceRole: "owner"
+});
+
+const activateAppleProvisioningWorkspace = async (input: {
+  account: StoredAppleAccount;
+  fingerprint: string;
+  masterKey: WorkspaceMasterKey;
+  workspace: WorkspaceRecoveryMetadata;
+  allowCreate: boolean;
+}) => {
+  const { account, fingerprint, masterKey, workspace, allowCreate } = input;
+  upsertWorkspace(workspace);
+  upsertStoredAppleAccount(account);
+  setWorkspaceStorageProvider(workspace.workspaceId, "indexeddb");
+  await activateMockDatabaseWorkspace(workspace.workspaceId, masterKey, {
+    allowCreate,
+    initialDatabase: "examples"
+  });
+  await upsertWorkspaceMember(account);
+  activeSession?.masterKey.fill(0);
+  activeSession = {
+    account,
+    masterKey,
+    user: toAuthUser(account, workspace),
+    workspace
+  };
+  setWorkspaceStorageProvider(workspace.workspaceId, "cloudkit");
+  await createOrUpdateAppleDeviceVaultEntry({
+    appleAccountFingerprint: fingerprint,
+    workspaceId: workspace.workspaceId,
+    masterKey
+  });
+  return activeSession;
+};
+
+const finalizeAppleProvisioning = async (
+  profile: CloudKitAppleAccountProfile,
+  identity: CloudKitUserIdentity
+) => {
+  const session = activeSession;
+  if (!session || session.workspace.workspaceId !== profile.workspaceId) {
+    throw new LocalAuthError("NO_ACTIVE_SESSION", "The Apple workspace was not activated.");
+  }
+
+  const syncResult = await connectWorkspaceCloudKit(profile.workspaceId, {
+    authenticatedUser: identity,
+    validateRemoteBundle: (snapshot) => validateCloudBundleForSession(snapshot, session)
+  });
+  if (syncResult.outcome !== "synced") {
+    throw new LocalAuthError(
+      "REGISTRATION_FAILED",
+      syncResult.preference.lastError ||
+        "The first encrypted iCloud copy could not be verified. Your local data was kept for retry."
+    );
+  }
+
+  await assertCloudKitAuthenticatedUser(identity);
+  try {
+    await saveCloudKitAppleAccountProfile(
+      toAppleProfileInput(profile, "ready"),
+      identity,
+      { expectedRecordChangeTag: profile.recordChangeTag }
+    );
+  } catch (saveError) {
+    // The server may have committed the ready state even if the response was
+    // lost. Re-read the fixed private record before reporting failure.
+    const confirmed = await fetchCloudKitAppleAccountProfile(identity).catch(() => null);
+    if (
+      !confirmed ||
+      confirmed.status !== "ready" ||
+      confirmed.workspaceId !== profile.workspaceId ||
+      confirmed.appleAccountFingerprint !== profile.appleAccountFingerprint
+    ) {
+      throw saveError;
+    }
+  }
+
+  void requestPersistentBrowserStorage();
+  return session.user;
+};
+
+const debugAppleAuth = (step: string) => {
+  if (process.env.NODE_ENV === "development") {
+    console.debug(`[apple-auth] ${step}`);
+  }
+};
+
+/** Resolves an authenticated Apple identity into setup, recovery, or login. */
+async function inspectAppleAccountUnlocked(
+  identityInput: CloudKitUserIdentity
+): Promise<AppleAccountLoginResolution> {
+  debugAppleAuth("inspect: start");
+  requireStorage();
+  requireCompletedRestoreState();
+
+  const identity = await assertCloudKitAuthenticatedUser(identityInput);
+  debugAppleAuth("inspect: identity asserted");
+  const fingerprint = await requireAppleFingerprint(identity);
+  const profile = await fetchCloudKitAppleAccountProfile(identity);
+  debugAppleAuth(`inspect: profile ${profile ? profile.status : "not found"}`);
+  if (!profile) {
+    return {
+      kind: "needs-setup",
+      suggestedName: appleSuggestedName(identity)
+    };
+  }
+  assertAppleProfileOwnership(profile, fingerprint);
+
+  let masterKey: WorkspaceMasterKey;
+  try {
+    masterKey = await unlockAppleDeviceVaultEntry({
+      appleAccountFingerprint: fingerprint,
+      workspaceId: profile.workspaceId
+    });
+    debugAppleAuth("inspect: device vault unlocked");
+  } catch (error) {
+    if (
+      error instanceof AppleDeviceVaultError &&
+      ["VAULT_ENTRY_NOT_FOUND", "INVALID_VAULT_RECORD", "UNLOCK_FAILED"].includes(error.code)
+    ) {
+      debugAppleAuth(`inspect: vault miss (${error.code}) -> needs-recovery`);
+      return { kind: "needs-recovery", displayName: profile.displayName };
+    }
+    throw error;
+  }
+
+  const account = createStoredAppleAccount(profile, fingerprint);
+  debugAppleAuth("inspect: activating session");
+  const user = await activateAppleAccountSession({
+    account,
+    identity,
+    masterKey,
+    workspace: profile.recoveryMetadata
+  });
+  debugAppleAuth("inspect: session active");
+  if (profile.status === "provisioning") {
+    try {
+      await finalizeAppleProvisioning(profile, identity);
+    } catch (error) {
+      await logoutAppleSession();
+      throw error;
+    }
+  }
+  return mockApi({ kind: "ready" as const, user });
+}
+
+/**
+ * Serialized with registration, provisioning, and recovery: resolving an Apple
+ * identity mutates the active session, account registry, and device vault, so
+ * it must not interleave with the other auth mutations across tabs.
+ */
+export async function inspectAppleAccount(
+  identityInput: CloudKitUserIdentity
+): Promise<AppleAccountLoginResolution> {
+  debugAppleAuth("inspect: waiting for auth mutation lock");
+  return withAuthMutationLock(() => inspectAppleAccountUnlocked(identityInput));
+}
+
+/**
+ * Offline entry for a device that already joined an Apple account. Runs only
+ * when the Apple identity cannot be verified because CloudKit is unreachable;
+ * an online "signed out" answer must still require a fresh Apple sign-in.
+ * Three conditions gate the unlock: the persisted CloudKit session cookie
+ * still exists (an explicit sign-out deletes it), this device holds the
+ * account's vault entry, and the encrypted workspace is present locally.
+ * Returns null whenever any condition fails, so callers fall back to the
+ * normal online flow.
+ */
+async function unlockAppleAccountOfflineUnlocked(): Promise<{ user: LocalAuthUser } | null> {
+  requireStorage();
+  requireCompletedRestoreState();
+
+  if (!hasPersistedCloudKitSession()) {
+    debugAppleAuth("offline unlock: no persisted session cookie");
+    return null;
+  }
+
+  const appleAccounts = readAccounts().filter(isStoredAppleAccount);
+  if (appleAccounts.length !== 1) {
+    // Zero accounts: nothing to unlock. Two or more: the right account cannot
+    // be determined without verifying the Apple identity online.
+    debugAppleAuth(
+      `offline unlock: ${appleAccounts.length} local Apple accounts, need exactly 1`
+    );
+    return null;
+  }
+
+  const account = appleAccounts[0];
+  const workspace = readWorkspaces().find(
+    (item) => item.workspaceId === account.workspaceId
+  );
+  if (!workspace) {
+    debugAppleAuth("offline unlock: workspace metadata missing");
+    return null;
+  }
+
+  let masterKey: WorkspaceMasterKey;
+  try {
+    masterKey = await unlockAppleDeviceVaultEntry({
+      appleAccountFingerprint: account.appleAccountFingerprint,
+      workspaceId: account.workspaceId
+    });
+  } catch (error) {
+    debugAppleAuth(
+      `offline unlock: vault unavailable (${
+        error instanceof AppleDeviceVaultError ? error.code : "unexpected"
+      })`
+    );
+    return null;
+  }
+
+  try {
+    const user = await setActiveSession(account, workspace, masterKey);
+    debugAppleAuth("offline unlock: session active (local only)");
+    return mockApi({ user });
+  } catch (error) {
+    masterKey.fill(0);
+    debugAppleAuth("offline unlock: local activation failed");
+    throw error;
+  }
+}
+
+export async function unlockAppleAccountOffline(): Promise<{ user: LocalAuthUser } | null> {
+  return withAuthMutationLock(() => unlockAppleAccountOfflineUnlocked());
+}
+
+async function provisionAppleAccountUnlocked(
+  payload: AppleAccountSetupPayload
+): Promise<RegisterResult> {
+  requireStorage();
+  requireCompletedRestoreState();
+
+  const requestedName = payload.name.trim();
+  if (!requestedName || requestedName.length > 80) {
+    throw new LocalAuthError("REGISTRATION_FAILED", "Enter a name between 1 and 80 characters.");
+  }
+  if (!isValidWorkspaceCode(payload.workspaceCode)) {
+    throw new LocalAuthError("INVALID_WORKSPACE_CODE", "The recovery key must contain 16 digits.");
+  }
+
+  const identity = await assertCloudKitAuthenticatedUser(payload.identity);
+  const fingerprint = await requireAppleFingerprint(identity);
+  let profile = await fetchCloudKitAppleAccountProfile(identity);
+  if (profile) {
+    assertAppleProfileOwnership(profile, fingerprint);
+    if (profile.status === "ready") {
+      throw new LocalAuthError(
+        "ACCOUNT_EXISTS",
+        "This Apple ID account already has a Studio Map OS profile."
+      );
+    }
+  }
+
+  const previousAccounts = readAccounts();
+  const previousWorkspaces = readWorkspaces();
+  const existingLocalAccount = previousAccounts.find(
+    (item): item is StoredAppleAccount =>
+      isStoredAppleAccount(item) && item.appleAccountFingerprint === fingerprint
+  );
+
+  let account: StoredAppleAccount;
+  let workspace: WorkspaceRecoveryMetadata;
+  let masterKey: WorkspaceMasterKey;
+  let createdNewLocalWorkspace = false;
+
+  if (profile) {
+    workspace = profile.recoveryMetadata;
+    account = createStoredAppleAccount(profile, fingerprint);
+    try {
+      masterKey = await unlockWorkspaceRecovery(workspace, payload.workspaceCode);
+    } catch (error) {
+      if (error instanceof WorkspaceCryptoError) {
+        throw new LocalAuthError("RECOVERY_KEY_MISMATCH", "The 16-digit recovery key is incorrect.", { cause: error });
+      }
+      throw error;
+    }
+  } else if (existingLocalAccount) {
+    const localWorkspace = previousWorkspaces.find(
+      (item) => item.workspaceId === existingLocalAccount.workspaceId
+    );
+    if (!localWorkspace) {
+      throw new LocalAuthError("WORKSPACE_NOT_FOUND", "The local Apple workspace is unavailable.");
+    }
+    workspace = localWorkspace;
+    account = existingLocalAccount;
+    try {
+      masterKey = await unlockWorkspaceRecovery(workspace, payload.workspaceCode);
+    } catch (error) {
+      if (error instanceof WorkspaceCryptoError) {
+        throw new LocalAuthError("RECOVERY_KEY_MISMATCH", "The 16-digit recovery key is incorrect.", { cause: error });
+      }
+      throw error;
+    }
+  } else {
+    const existingWorkspace = await findWorkspaceByCode(payload.workspaceCode);
+    if (existingWorkspace) {
+      existingWorkspace.masterKey.fill(0);
+      throw new LocalAuthError("WORKSPACE_CODE_IN_USE", "This recovery key already unlocks a local workspace.");
+    }
+    const createdWorkspace = await createWorkspaceRecovery(payload.workspaceCode);
+    workspace = createdWorkspace.metadata;
+    masterKey = createdWorkspace.masterKey;
+    const createdAt = new Date().toISOString();
+    account = createStoredAppleAccount(
+      {
+        accountId: createId("account"),
+        createdAt,
+        displayName: requestedName,
+        workspaceId: workspace.workspaceId,
+        workspaceRole: "owner"
+      },
+      fingerprint
+    );
+    createdNewLocalWorkspace = true;
+  }
+
+  const previousPreference = getStoredWorkspaceStoragePreference(workspace.workspaceId);
+  const workspaceStorageSnapshot = await captureMockDatabaseWorkspaceStorage(workspace.workspaceId);
+  let profileCreationAttempted = Boolean(profile);
+
+  try {
+    await activateAppleProvisioningWorkspace({
+      account,
+      fingerprint,
+      masterKey,
+      workspace,
+      allowCreate: createdNewLocalWorkspace
+    });
+
+    if (!profile) {
+      const createdAt = account.createdAt;
+      const provisioningInput: CloudKitAppleAccountProfileInput = {
+        accountId: account.id,
+        appleAccountFingerprint: fingerprint,
+        createdAt,
+        displayName: account.name,
+        recoveryMetadata: workspace,
+        status: "provisioning",
+        updatedAt: new Date().toISOString(),
+        workspaceId: workspace.workspaceId,
+        workspaceRole: "owner"
+      };
+      profileCreationAttempted = true;
+      try {
+        profile = await createCloudKitAppleAccountProfile(provisioningInput, identity);
+      } catch (createError) {
+        const confirmed = await fetchCloudKitAppleAccountProfile(identity).catch(() => null);
+        if (
+          !confirmed ||
+          confirmed.workspaceId !== workspace.workspaceId ||
+          confirmed.appleAccountFingerprint !== fingerprint
+        ) {
+          throw createError;
+        }
+        profile = confirmed;
+      }
+    }
+
+    if (!profile) {
+      throw new LocalAuthError("REGISTRATION_FAILED", "The Apple account profile was not created.");
+    }
+    assertAppleProfileOwnership(profile, fingerprint);
+    const user = profile.status === "ready"
+      ? activeSession?.user
+      : await finalizeAppleProvisioning(profile, identity);
+    if (!user) {
+      throw new LocalAuthError("NO_ACTIVE_SESSION", "The Apple workspace was not activated.");
+    }
+
+    return mockApi({
+      claimedLegacyData: false,
+      joinedExistingWorkspace: false,
+      startedEmptyWorkspace: false,
+      token: "apple-cloudkit-workspace-session",
+      user
+    });
+  } catch (error) {
+    if (activeSession?.masterKey === masterKey) {
+      activeSession.masterKey.fill(0);
+      activeSession = null;
+      deactivateMockDatabaseWorkspace();
+    } else {
+      masterKey.fill(0);
+    }
+
+    // Before any CloudKit create could have committed, a brand-new local setup
+    // can be rolled back safely. Once the request was attempted, retain the
+    // encrypted local copy and device vault so a retry can reconcile an
+    // uncertain server response without destroying the user's only data.
+    if (createdNewLocalWorkspace && !profileCreationAttempted) {
+      await deleteAppleDeviceVaultEntry({
+        appleAccountFingerprint: fingerprint,
+        workspaceId: workspace.workspaceId
+      }).catch(() => false);
+      writeArray(accountsStorageKey, previousAccounts);
+      writeArray(workspacesStorageKey, previousWorkspaces);
+      await restoreMockDatabaseWorkspaceStorage(workspaceStorageSnapshot).catch(() => undefined);
+      restoreWorkspaceStoragePreference(workspace.workspaceId, previousPreference);
+    }
+
+    if (error instanceof LocalAuthError) {
+      throw error;
+    }
+    throw new LocalAuthError(
+      "REGISTRATION_FAILED",
+      "The Apple ID account is not ready yet. Your encrypted local copy was kept for retry.",
+      { cause: error }
+    );
+  }
+}
+
+/** Creates or resumes an Apple-backed workspace after the one-time key was saved. */
+export async function provisionAppleAccount(
+  payload: AppleAccountSetupPayload
+): Promise<RegisterResult> {
+  return withAuthMutationLock(() => provisionAppleAccountUnlocked(payload));
+}
+
+async function recoverAppleAccountUnlocked(
+  payload: AppleAccountRecoveryPayload
+): Promise<{ token: string; user: LocalAuthUser }> {
+  requireStorage();
+  requireCompletedRestoreState();
+
+  const identity = await assertCloudKitAuthenticatedUser(payload.identity);
+  const fingerprint = await requireAppleFingerprint(identity);
+  const profile = await fetchCloudKitAppleAccountProfile(identity);
+  if (!profile) {
+    throw new LocalAuthError("WORKSPACE_NOT_FOUND", "No Studio Map OS profile exists for this Apple ID account.");
+  }
+  assertAppleProfileOwnership(profile, fingerprint);
+
+  let masterKey: WorkspaceMasterKey;
+  try {
+    masterKey = await unlockWorkspaceRecovery(profile.recoveryMetadata, payload.workspaceCode);
+  } catch (error) {
+    if (error instanceof WorkspaceCryptoError) {
+      throw new LocalAuthError("RECOVERY_KEY_MISMATCH", "The 16-digit recovery key is incorrect.", { cause: error });
+    }
+    throw error;
+  }
+
+  const previousAccounts = readAccounts();
+  const previousWorkspaces = readWorkspaces();
+  const previousPreference = getStoredWorkspaceStoragePreference(profile.workspaceId);
+  // Never delete or overwrite an unreadable local ciphertext merely to attempt
+  // cloud recovery. If it cannot be snapshotted, abort and leave it untouched.
+  const workspaceStorageSnapshot = await captureMockDatabaseWorkspaceStorage(profile.workspaceId);
+  const account = createStoredAppleAccount(profile, fingerprint);
+
+  try {
+    upsertWorkspace(profile.recoveryMetadata);
+    upsertStoredAppleAccount(account);
+    let user = await activateAppleAccountSession({
+      account,
+      identity,
+      masterKey,
+      workspace: profile.recoveryMetadata
+    });
+    if (profile.status === "provisioning") {
+      user = await finalizeAppleProvisioning(profile, identity);
+    }
+    return mockApi({ token: "apple-cloudkit-workspace-session", user });
+  } catch (error) {
+    if (activeSession?.masterKey === masterKey) {
+      activeSession.masterKey.fill(0);
+      activeSession = null;
+      deactivateMockDatabaseWorkspace();
+    } else {
+      masterKey.fill(0);
+    }
+    writeArray(accountsStorageKey, previousAccounts);
+    writeArray(workspacesStorageKey, previousWorkspaces);
+    restoreWorkspaceStoragePreference(profile.workspaceId, previousPreference);
+    await restoreMockDatabaseWorkspaceStorage(workspaceStorageSnapshot).catch(() => undefined);
+    throw error;
+  }
+}
+
+/** Unlocks an existing Apple workspace once on a new device, then enrolls it. */
+export async function recoverAppleAccount(
+  payload: AppleAccountRecoveryPayload
+): Promise<{ token: string; user: LocalAuthUser }> {
+  return withAuthMutationLock(() => recoverAppleAccountUnlocked(payload));
+}
+
 export async function login(payload: AuthCredentials) {
   requireStorage();
   requireCompletedRestoreState();
 
   const email = normalizeEmail(payload.email);
-  const account = readAccounts().find((item) => normalizeEmail(item.email) === email);
+  const account = readAccounts().find(
+    (item): item is StoredPasswordAccount =>
+      isStoredPasswordAccount(item) && normalizeEmail(item.email) === email
+  );
 
   if (!account) {
     throw new LocalAuthError("INVALID_CREDENTIALS", "The email address or password is incorrect");
@@ -1010,7 +1905,52 @@ export async function login(payload: AuthCredentials) {
   try {
     let user: LocalAuthUser;
     try {
-      user = await setActiveSession(account, workspace, masterKey);
+      let recoveredMissingLocalBundle = false;
+
+      try {
+        user = await setActiveSession(account, workspace, masterKey);
+      } catch (localActivationError) {
+        const storagePreference = getWorkspaceStoragePreference(workspace.workspaceId);
+        if (storagePreference.provider !== "cloudkit") {
+          throw localActivationError;
+        }
+
+        // The password has already unlocked the in-memory workspace key. Keep a
+        // temporary authenticated session long enough to verify and restore the
+        // encrypted CloudKit copy when IndexedDB is missing or corrupt.
+        user = toAuthUser(account, workspace);
+        activeSession?.masterKey.fill(0);
+        activeSession = { account, masterKey, user, workspace };
+
+        const cloudSession = activeSession;
+        const recovery = await pullWorkspaceFromCloudOnLogin(workspace.workspaceId, {
+          forceRemoteRestore: true,
+          validateRemoteBundle: (snapshot) =>
+            validateCloudBundleForSession(snapshot, cloudSession)
+        });
+
+        if (!recovery.didReplaceLocalBundle) {
+          throw localActivationError;
+        }
+
+        await activateMockDatabaseWorkspace(workspace.workspaceId, masterKey);
+        recoveredMissingLocalBundle = true;
+      }
+
+      const cloudSession = activeSession;
+      if (!cloudSession || cloudSession.workspace.workspaceId !== workspace.workspaceId) {
+        throw new LocalAuthError("NO_ACTIVE_SESSION", "No local workspace is unlocked");
+      }
+
+      if (!recoveredMissingLocalBundle) {
+        const cloudPull = await pullWorkspaceFromCloudOnLogin(workspace.workspaceId, {
+          validateRemoteBundle: (snapshot) =>
+            validateCloudBundleForSession(snapshot, cloudSession)
+        });
+        if (cloudPull.didReplaceLocalBundle) {
+          await activateMockDatabaseWorkspace(workspace.workspaceId, masterKey);
+        }
+      }
       await upsertWorkspaceMember(account);
       void requestPersistentBrowserStorage();
     } catch (error) {
@@ -1033,7 +1973,60 @@ export async function login(payload: AuthCredentials) {
   }
 }
 
-export async function logout() {
+export async function loginDevelopmentTestAccount() {
+  const testAccount = developmentTestAccount;
+
+  if (!testAccount) {
+    throw new LocalAuthError(
+      "INVALID_CREDENTIALS",
+      "The built-in test account is available only in local development"
+    );
+  }
+
+  const localAccounts = readAccounts();
+  const existingAccount = localAccounts.some(
+    (account) => normalizeEmail(account.email) === testAccount.email
+  );
+
+  if (existingAccount) {
+    const result = await login({
+      email: testAccount.email,
+      password: testAccount.password
+    });
+
+    try {
+      await verifyActiveWorkspaceRecoveryCode(testAccount.workspaceCode);
+      return result;
+    } catch (error) {
+      await logout();
+      throw error;
+    }
+  }
+
+  if (localAccounts.length > 0 || hasLegacyMockDatabase()) {
+    throw new LocalAuthError(
+      "DEVICE_NOT_EMPTY",
+      "The built-in test account can be created only in an empty local development origin"
+    );
+  }
+
+  const result = await register({
+    name: testAccount.name,
+    email: testAccount.email,
+    password: testAccount.password,
+    workspaceCode: testAccount.workspaceCode,
+    workspaceMode: "create"
+  });
+
+  await handshake(result.user.id);
+
+  return {
+    token: result.token,
+    user: result.user
+  };
+}
+
+const clearLocalSession = () => {
   activeSession?.masterKey.fill(0);
   activeSession = null;
   deactivateMockDatabaseWorkspace();
@@ -1041,8 +2034,34 @@ export async function logout() {
   if (canUseStorage()) {
     window.localStorage.removeItem(legacyAuthStorageKey);
   }
+};
+
+export async function logout() {
+  const wasAppleBacked = Boolean(
+    activeSession && isStoredAppleAccount(activeSession.account)
+  );
+  clearLocalSession();
+
+  if (wasAppleBacked) {
+    // Without this, the persisted ckSession cookie lets the login page resolve
+    // the Apple identity again and silently re-enter the workspace, making
+    // logout a no-op on shared machines. The device vault stays intact, so the
+    // next Apple sign-in on this device does not need the recovery key again.
+    await signOutCloudKitSession();
+  }
 
   return mockApi({ ok: true });
+}
+
+/** Clears only an Apple-backed Studio Map OS session when CloudKit signs out. */
+export async function logoutAppleSession() {
+  if (!activeSession || !isStoredAppleAccount(activeSession.account)) {
+    return false;
+  }
+
+  // CloudKit itself reported the sign-out, so only local state needs clearing.
+  clearLocalSession();
+  return true;
 }
 
 export async function handshake(userId: string) {
@@ -1074,6 +2093,52 @@ export async function reloadActiveWorkspaceDatabase() {
     activeSession.workspace.workspaceId,
     activeSession.masterKey
   );
+}
+
+/** Syncs the signed-in workspace without exposing its master key to UI code. */
+export async function syncActiveWorkspaceCloud(
+  authenticatedUser?: CloudKitUserIdentity
+) {
+  if (!activeSession) {
+    throw new LocalAuthError("NO_ACTIVE_SESSION", "No local workspace is unlocked");
+  }
+
+  const session = activeSession;
+  return manualSyncWorkspace(session.workspace.workspaceId, {
+    authenticatedUser,
+    validateRemoteBundle: (snapshot) => validateCloudBundleForSession(snapshot, session)
+  });
+}
+
+/** Enables/reconnects CloudKit while validating downloads with the active key. */
+export async function connectActiveWorkspaceCloudKit(
+  authenticatedUser?: CloudKitUserIdentity
+) {
+  if (!activeSession) {
+    throw new LocalAuthError("NO_ACTIVE_SESSION", "No local workspace is unlocked");
+  }
+
+  const session = activeSession;
+  return connectWorkspaceCloudKit(session.workspace.workspaceId, {
+    authenticatedUser,
+    validateRemoteBundle: (snapshot) => validateCloudBundleForSession(snapshot, session)
+  });
+}
+
+/** Resolves a CloudKit conflict without exposing the active workspace key. */
+export async function resolveActiveWorkspaceCloudConflict(
+  resolution: WorkspaceConflictResolution,
+  authenticatedUser?: CloudKitUserIdentity
+) {
+  if (!activeSession) {
+    throw new LocalAuthError("NO_ACTIVE_SESSION", "No local workspace is unlocked");
+  }
+
+  const session = activeSession;
+  return resolveWorkspaceCloudConflict(session.workspace.workspaceId, resolution, {
+    authenticatedUser,
+    validateRemoteBundle: (snapshot) => validateCloudBundleForSession(snapshot, session)
+  });
 }
 
 export async function encryptActiveWorkspaceFile<T>(
@@ -1175,45 +2240,131 @@ export async function verifyActiveWorkspaceRecoveryCode(workspaceCode: string) {
 export async function createEncryptedFullSiteBackup(
   workspaceCode: string
 ): Promise<EncryptedWorkspaceEnvelope> {
-  if (!activeSession) {
+  const session = activeSession;
+  if (!session) {
     throw new LocalAuthError("NO_ACTIVE_SESSION", "No local workspace is unlocked");
   }
 
   await verifyActiveWorkspaceRecoveryCode(workspaceCode);
   await persistMockDatabase();
-  const accounts = readAccounts();
-  const workspaces = readWorkspaces();
-  const workspaceIds = new Set(workspaces.map((workspace) => workspace.workspaceId));
-  const capturedIndexedDb = await captureEncryptedDatabaseSnapshot<EncryptedPublicSharePayload>();
-  const indexedDb = parseEncryptedDatabaseSnapshot<EncryptedPublicSharePayload>({
-    ...capturedIndexedDb,
-    bundles: capturedIndexedDb.bundles.filter((bundle) => workspaceIds.has(bundle.workspaceId))
-  });
-  const storedLanguage = window.localStorage.getItem(languageStorageKey);
-  const storedDisplayCurrency = window.localStorage.getItem(displayCurrencyStorageKey);
-  const lastAccountEmail = window.localStorage.getItem(lastEmailStorageKey);
-  const backup = validateFullSiteBackup({
-    schema: fullSiteBackupSchema,
-    version: fullSiteBackupVersion,
-    exportedAt: new Date().toISOString(),
-    protectorWorkspaceId: activeSession.workspace.workspaceId,
-    authentication: { accounts, workspaces },
-    indexedDb,
-    preferences: {
-      ...(languages.includes(storedLanguage as Language) ? { language: storedLanguage } : {}),
-      ...(isMoneyCurrency(storedDisplayCurrency)
-        ? { displayCurrency: storedDisplayCurrency }
-        : {}),
-      ...(lastAccountEmail ? { lastAccountEmail } : {})
+  const captured = await withDatabaseMutationLock(async () => {
+    if (activeSession !== session) {
+      throw new LocalAuthError(
+        "NO_ACTIVE_SESSION",
+        "The active workspace changed before the full-site backup could be captured"
+      );
     }
-  });
 
-  return encryptWorkspaceEnvelope({
-    kind: "device",
-    payload: backup,
-    metadata: activeSession.workspace,
-    masterKey: activeSession.masterKey
+    // Capture every registry/preference value synchronously before the first
+    // IndexedDB await. Some account flows update localStorage immediately and
+    // then wait for this database lock, so reading these values afterwards
+    // could combine a newer registry with an older encrypted database.
+    const accounts = readAccounts();
+    const workspaces = readWorkspaces();
+    const workspaceIds = new Set(workspaces.map((workspace) => workspace.workspaceId));
+    const storedLanguage = window.localStorage.getItem(languageStorageKey);
+    const storedDisplayCurrency = window.localStorage.getItem(displayCurrencyStorageKey);
+    const lastAccountEmail = window.localStorage.getItem(lastEmailStorageKey);
+    const storagePreferences = capturePortableWorkspaceStoragePreferences([...workspaceIds]);
+    const localStateSignature = JSON.stringify({
+      accounts,
+      workspaces,
+      storedLanguage,
+      storedDisplayCurrency,
+      lastAccountEmail,
+      storagePreferences
+    });
+
+    const capturedIndexedDb =
+      await captureEncryptedDatabaseSnapshot<EncryptedPublicSharePayload>();
+
+    // IndexedDB capture yields while the database lock is held. Recheck the
+    // session before copying its key so logout or account switching cannot
+    // produce a backup protected by a stale/cleared in-memory key.
+    if (activeSession !== session) {
+      throw new LocalAuthError(
+        "NO_ACTIVE_SESSION",
+        "The active workspace changed while the full-site backup was being captured"
+      );
+    }
+
+    const refreshedAccounts = readAccounts();
+    const refreshedWorkspaces = readWorkspaces();
+    const refreshedWorkspaceIds = new Set(
+      refreshedWorkspaces.map((workspace) => workspace.workspaceId)
+    );
+    const refreshedLanguage = window.localStorage.getItem(languageStorageKey);
+    const refreshedDisplayCurrency = window.localStorage.getItem(displayCurrencyStorageKey);
+    const refreshedLastAccountEmail = window.localStorage.getItem(lastEmailStorageKey);
+    const refreshedStoragePreferences = capturePortableWorkspaceStoragePreferences([
+      ...refreshedWorkspaceIds
+    ]);
+    const refreshedLocalStateSignature = JSON.stringify({
+      accounts: refreshedAccounts,
+      workspaces: refreshedWorkspaces,
+      storedLanguage: refreshedLanguage,
+      storedDisplayCurrency: refreshedDisplayCurrency,
+      lastAccountEmail: refreshedLastAccountEmail,
+      storagePreferences: refreshedStoragePreferences
+    });
+
+    if (refreshedLocalStateSignature !== localStateSignature) {
+      throw new LocalAuthError(
+        "BACKUP_CAPTURE_CHANGED",
+        "Local data changed while the full-site backup was being captured. Please try again."
+      );
+    }
+
+    const indexedDb = parseEncryptedDatabaseSnapshot<EncryptedPublicSharePayload>({
+      ...capturedIndexedDb,
+      bundles: capturedIndexedDb.bundles.filter((bundle) => workspaceIds.has(bundle.workspaceId))
+    });
+
+    return {
+      accounts,
+      workspaces,
+      workspaceIds,
+      indexedDb,
+      storedLanguage,
+      storedDisplayCurrency,
+      lastAccountEmail,
+      storagePreferences,
+      protectorWorkspace: structuredClone(session.workspace),
+      masterKey: new Uint8Array(session.masterKey)
+    };
   });
+  try {
+    const backup = validateFullSiteBackup({
+      schema: fullSiteBackupSchema,
+      version: fullSiteBackupVersion,
+      exportedAt: new Date().toISOString(),
+      protectorWorkspaceId: captured.protectorWorkspace.workspaceId,
+      authentication: {
+        accounts: captured.accounts,
+        workspaces: captured.workspaces
+      },
+      indexedDb: captured.indexedDb,
+      storagePreferences: captured.storagePreferences,
+      preferences: {
+        ...(languages.includes(captured.storedLanguage as Language)
+          ? { language: captured.storedLanguage }
+          : {}),
+        ...(isMoneyCurrency(captured.storedDisplayCurrency)
+          ? { displayCurrency: captured.storedDisplayCurrency }
+          : {}),
+        ...(captured.lastAccountEmail ? { lastAccountEmail: captured.lastAccountEmail } : {})
+      }
+    });
+
+    return await encryptWorkspaceEnvelope({
+      kind: "device",
+      payload: backup,
+      metadata: captured.protectorWorkspace,
+      masterKey: captured.masterKey
+    });
+  } finally {
+    captured.masterKey.fill(0);
+  }
 }
 
 /**

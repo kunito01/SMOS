@@ -281,6 +281,12 @@ export const sanitizeProjectForPublicShare = (
   link: ShareLink,
   workspaceTools: Tool[]
 ): Project => {
+  // Workflow attachments may contain private source files. They are never
+  // published through a project share unless a separate, explicit capability
+  // and sanitization policy is added in the future.
+  const projectWithoutWorkflows = { ...project };
+  delete projectWithoutWorkflows.workflows;
+  delete projectWithoutWorkflows.workflowIds;
   const canShowCost = link.allowCostPreview && project.shareSettings.allowCostPreview;
   const showDeliverables = project.shareSettings.showDeliverables;
   const showTimeline = project.shareSettings.showTimeline;
@@ -317,7 +323,7 @@ export const sanitizeProjectForPublicShare = (
     : [];
 
   return structuredClone({
-    ...project,
+    ...projectWithoutWorkflows,
     timelineTitle: undefined,
     timelineRows: undefined,
     people: showPeople

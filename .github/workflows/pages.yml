@@ -41,6 +41,10 @@ jobs:
         run: npx tsc --noEmit --incremental false
 
       - name: Build static PWA for GitHub Pages
+        env:
+          NEXT_PUBLIC_CLOUDKIT_API_TOKEN: ${{ secrets.CLOUDKIT_API_TOKEN }}
+          NEXT_PUBLIC_CLOUDKIT_CONTAINER_ID: ${{ vars.CLOUDKIT_CONTAINER_ID }}
+          NEXT_PUBLIC_CLOUDKIT_ENVIRONMENT: production
         run: GITHUB_PAGES=1 npm run build
 
       - name: Verify exported PWA

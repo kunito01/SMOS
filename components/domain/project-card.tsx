@@ -37,7 +37,8 @@ export function ProjectCard({ project, groups, t, href = projectPath(project.id)
           translateDomainLabel(project.name, projectNameKeys, t),
           project.id,
           "project",
-          t
+          t,
+          project.isExample
         )}
         meta={group ? getProjectGroupDisplayName(group, language, t) : ""}
         className="min-h-72 transition duration-200 hover:-translate-y-1"

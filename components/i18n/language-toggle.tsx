@@ -15,7 +15,9 @@ type LanguageToggleProps = {
 export function LanguageToggle({ compact = false, className, variant = "segmented" }: LanguageToggleProps) {
   const { language, setLanguage, t } = useI18n();
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [showScrollCue, setShowScrollCue] = useState(false);
   const dropdownRef = useRef<HTMLDivElement | null>(null);
+  const menuScrollRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const labels: Record<Language, { compact: string; full: string }> = {
@@ -56,6 +58,29 @@ export function LanguageToggle({ compact = false, className, variant = "segmente
     return () => {
       document.removeEventListener("pointerdown", handlePointerDown);
       document.removeEventListener("keydown", handleEscape);
+    };
+  }, [dropdownOpen]);
+
+  useEffect(() => {
+    if (!dropdownOpen) {
+      return;
+    }
+
+    const updateScrollCue = () => {
+      const menu = menuScrollRef.current;
+      if (!menu) {
+        return;
+      }
+
+      setShowScrollCue(menu.scrollTop + menu.clientHeight < menu.scrollHeight - 2);
+    };
+
+    const frame = window.requestAnimationFrame(updateScrollCue);
+    window.addEventListener("resize", updateScrollCue);
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener("resize", updateScrollCue);
     };
   }, [dropdownOpen]);
 
@@ -122,32 +147,56 @@ export function LanguageToggle({ compact = false, className, variant = "segmente
           <div
             role="menu"
             aria-label={t("languageSwitch")}
-            className="smos-dropdown-panel smos-dropdown-enter studio-scroll absolute right-0 top-[calc(100%+0.5rem)] z-[130] grid max-h-[min(28rem,calc(100dvh-9rem))] w-20 gap-1 overflow-y-auto p-1.5"
+            className="smos-dropdown-panel smos-dropdown-enter absolute right-0 top-[calc(100%+0.5rem)] z-[130] w-20 overflow-hidden p-1"
           >
-            {languages.map((item, index) => (
-              <button
-                key={item}
-                ref={(element) => {
-                  optionRefs.current[index] = element;
-                }}
-                type="button"
-                role="menuitemradio"
-                aria-checked={language === item}
-                aria-label={labels[item].full}
-                onClick={() => {
-                  setLanguage(item);
-                  setDropdownOpen(false);
-                  triggerRef.current?.focus();
-                }}
-                onKeyDown={(event) => handleOptionKeyDown(event, index)}
-                className={cn(
-                  "grid h-10 w-full place-items-center rounded-full text-sm font-black leading-none text-ink outline-none transition hover:bg-white focus-visible:ring-2 focus-visible:ring-coral/50",
-                  language === item && "bg-[#ffc700]"
-                )}
+            <div
+              ref={menuScrollRef}
+              className="studio-scroll grid max-h-[min(24rem,calc(100dvh-7rem))] gap-0.5 overflow-y-auto overscroll-contain p-0.5"
+              onScroll={() => {
+                const menu = menuScrollRef.current;
+                if (menu) {
+                  setShowScrollCue(menu.scrollTop + menu.clientHeight < menu.scrollHeight - 2);
+                }
+              }}
+            >
+              {languages.map((item, index) => (
+                <button
+                  key={item}
+                  ref={(element) => {
+                    optionRefs.current[index] = element;
+                  }}
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={language === item}
+                  aria-label={labels[item].full}
+                  onClick={() => {
+                    setLanguage(item);
+                    setDropdownOpen(false);
+                    triggerRef.current?.focus();
+                  }}
+                  onKeyDown={(event) => handleOptionKeyDown(event, index)}
+                  className={cn(
+                    "grid h-8 w-full shrink-0 place-items-center rounded-full text-xs font-black leading-none text-ink outline-none transition hover:bg-white focus-visible:ring-2 focus-visible:ring-coral/50",
+                    language === item && "bg-[#ffc700]"
+                  )}
+                >
+                  {labels[item].compact}
+                </button>
+              ))}
+            </div>
+
+            {showScrollCue ? (
+              <div
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-x-1 bottom-1 flex h-7 items-end justify-center rounded-b-[1rem] bg-gradient-to-t from-[#e9e5df] via-[#e9e5df]/90 to-transparent pb-0.5"
               >
-                {labels[item].compact}
-              </button>
-            ))}
+                <ChevronDown
+                  className="size-3 animate-bounce text-ink/65 motion-reduce:animate-none"
+                  size={12}
+                  strokeWidth={2.5}
+                />
+              </div>
+            ) : null}
           </div>
         ) : null}
       </div>

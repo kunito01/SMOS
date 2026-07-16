@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Notable } from "next/font/google";
 import { AppProviders } from "@/components/providers/app-providers";
+import "@xyflow/react/dist/style.css";
 import "./globals.css";
 
 const notable = Notable({
@@ -10,6 +11,7 @@ const notable = Notable({
   weight: "400"
 });
 
+// The same shell runs at the site root locally and below /SMOS on GitHub Pages.
 const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
 export const metadata: Metadata = {

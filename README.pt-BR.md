@@ -24,6 +24,7 @@
   <a href="https://github.com/kunito01/SMOS/stargazers"><img src="https://img.shields.io/github/stars/kunito01/SMOS?style=flat-square&color=03b5aa" alt="Estrelas no GitHub" /></a>
   <a href="https://github.com/kunito01/SMOS/forks"><img src="https://img.shields.io/github/forks/kunito01/SMOS?style=flat-square&color=ffca0a" alt="Forks no GitHub" /></a>
   <a href="https://github.com/kunito01/SMOS/issues"><img src="https://img.shields.io/github/issues/kunito01/SMOS?style=flat-square&color=f7567c" alt="Issues no GitHub" /></a>
+  <img src="https://img.shields.io/badge/version-V_1.2-f7567c?style=flat-square" alt="Version V 1.2" />
   <img src="https://img.shields.io/badge/Next.js-15-1c2328?style=flat-square&logo=nextdotjs&logoColor=white" alt="Next.js 15" />
   <img src="https://img.shields.io/badge/React-19-03b5aa?style=flat-square&logo=react&logoColor=white" alt="React 19" />
   <img src="https://img.shields.io/badge/TypeScript-5-3178c6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript 5" />
@@ -38,7 +39,18 @@
 
 O Studio Map OS conecta marcas, grupos de projetos, projetos, pessoas, software, custos, cronogramas, marcos de lançamento e arquivos em um único espaço de trabalho visual. Ele ajuda profissionais independentes a conduzir vários projetos em paralelo sem reduzir o processo criativo a uma lista de tarefas genérica.
 
-A versão atual é uma PWA instalável e local-first. Os dados de negócio permanecem no dispositivo, são criptografados com Web Crypto e armazenados de forma persistente no IndexedDB. Estão integrados o Web App Manifest, o Service Worker, a página alternativa offline, os ícones do aplicativo e o fluxo de empacotamento independente. Contas, chaves de recuperação e backups também são gerenciados no navegador; ainda não há conexão com um backend empresarial remoto nem com autenticação de servidor.
+A versão atual é uma PWA instalável e local-first. Os dados de negócio permanecem no dispositivo, são criptografados com Web Crypto e armazenados de forma persistente no IndexedDB. Estão integrados o Web App Manifest, o Service Worker, a página alternativa offline, os ícones do aplicativo e o fluxo de empacotamento independente. Contas locais, chaves de recuperação e backups são gerenciados no navegador. O login com Apple / iCloud pode sincronizar opcionalmente os dados criptografados do espaço de trabalho pelo banco privado do CloudKit do usuário; não estão incluídos um backend empresarial remoto próprio nem autenticação de servidor gerenciada pelo aplicativo.
+
+## Novidades da V 1.2
+
+- **Duas opções de conta independentes** — continue usando contas IndexedDB totalmente locais ou entre separadamente com Apple / iCloud, sem dependência entre as opções.
+- **Sincronização criptografada com o CloudKit** — mantenha a cópia criptografada no dispositivo e sincronize apenas o texto cifrado com o banco privado do CloudKit, com vínculo de conta, bloqueios de gravação, verificação de change tags e resolução explícita de conflitos.
+- **Recuperação de dispositivo mais segura** — use uma chave de recuperação de 16 dígitos exibida uma única vez, uma chave Web Crypto não exportável vinculada ao dispositivo e backups criptografados do dispositivo, espaço de trabalho e projeto.
+- **Editor visual de fluxos de trabalho** — crie quadros reutilizáveis com nós conectados, cores, anexos, zoom, vínculos com projetos, salvamento automático e compartilhamento em HTML independente.
+- **Entrega de projetos mais completa** — vincule fluxos aos projetos, gerencie marcos de Demo e lançamento oficial, pagamentos e cronogramas, e exporte relatórios HTML compartilháveis.
+- **Bibliotecas de custos vinculadas** — reutilize e sincronize modelos de pessoas e software, calcule orçamentos de fase conforme a alocação e receba lembretes de pagamentos de assinaturas.
+- **Edição e navegação mais seguras** — proteção contra alterações não salvas, confirmações específicas, melhores controles de arquivo e armazenamento e estados mais claros para salvar, excluir, sair e recuperar.
+- **PWA e interface internacional** — melhorias na distribuição via GitHub Pages/PWA, navegação e modais responsivos, textos longos e conteúdo sincronizado em onze idiomas.
 
 ## Capturas de tela
 
@@ -151,7 +163,7 @@ O pacote é gravado em `output/pwa/studio-map-os-pwa/`. Ele inclui o servidor in
 | Rota | Finalidade |
 | --- | --- |
 | `/register` | Criar uma conta local e um espaço de trabalho, ou entrar em um deles usando um backup criptografado |
-| `/login` | Desbloquear uma conta local ou restaurar um backup completo do dispositivo |
+| `/login` | Desbloquear uma conta local, usar Apple / iCloud ou restaurar um backup completo do dispositivo |
 | `/offline` | Página alternativa do documento quando a navegação do Service Worker falha |
 | `/dashboard` | Visão geral do estúdio, escopos, métricas e mapas de projetos |
 | `/companies` | Gerenciamento de marcas e grupos de projetos |
@@ -162,7 +174,8 @@ O pacote é gravado em `output/pwa/studio-map-os-pwa/`. Ele inclui o servidor in
 | `/project-share/?projectId=...` | Configurações dos campos compartilhados no modo somente para leitura |
 | `/costs` | Totais de custos do estúdio e configurações da moeda de exibição |
 | `/libraries` | Bibliotecas de pessoas, assinaturas de software e modelos de custos |
-| `/archive` | Projetos arquivados e recuperação de backups do dispositivo e do espaço de trabalho |
+| `/workflow` | Quadros visuais reutilizáveis, anexos, vínculos com projetos e compartilhamento em HTML |
+| `/archive` | Projetos arquivados, backups criptografados e controles de armazenamento local/CloudKit |
 | `/share/?token=...` | Instantâneo local do projeto somente para leitura |
 
 ## Modelo de dados e segurança

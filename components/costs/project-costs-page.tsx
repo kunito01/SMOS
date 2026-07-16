@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { ArrowLeft, Banknote, Calculator, ChevronDown, CircleDollarSign, ReceiptText, Save, TrendingUp } from "lucide-react";
 import { CostCurrencySelector } from "@/components/costs/cost-currency-selector";
 import {
@@ -12,6 +13,7 @@ import { useCostDisplayCurrency } from "@/components/costs/use-cost-display-curr
 import { MetricTile } from "@/components/domain/metric-tile";
 import { AppShell } from "@/components/layout/app-shell";
 import { useI18n } from "@/components/providers/app-providers";
+import { ActionConfirmDialog } from "@/components/ui/action-confirm-dialog";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { LoadingState } from "@/components/ui/loading-state";
@@ -120,8 +122,51 @@ const mergeBudgetSaveTarget = (
   return next;
 };
 
+type BudgetUsageLine = {
+  startDate: string;
+  endDate: string;
+  allocationPercent: number;
+};
+
+const isValidBudgetDate = (value: string) => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return false;
+  }
+
+  const milliseconds = Date.parse(`${value}T00:00:00Z`);
+  return Number.isFinite(milliseconds) && new Date(milliseconds).toISOString().slice(0, 10) === value;
+};
+
+const getUsageValidationIssue = (
+  line: BudgetUsageLine,
+  phase: Pick<Project["phases"][number], "startDate" | "endDate">
+) => {
+  if (
+    !line.startDate ||
+    !line.endDate ||
+    !Number.isFinite(line.allocationPercent) ||
+    line.allocationPercent <= 0 ||
+    line.allocationPercent > 100
+  ) {
+    return "required" as const;
+  }
+
+  if (
+    !isValidBudgetDate(line.startDate) ||
+    !isValidBudgetDate(line.endDate) ||
+    line.endDate < line.startDate ||
+    line.startDate < phase.startDate ||
+    line.endDate > phase.endDate
+  ) {
+    return "outside" as const;
+  }
+
+  return null;
+};
+
 export function ProjectCostsPage({ projectId }: { projectId: string }) {
   const { t } = useI18n();
+  const router = useRouter();
   const {
     displayCurrency,
     exchangeRateBasis,
@@ -137,6 +182,10 @@ export function ProjectCostsPage({ projectId }: { projectId: string }) {
   const [budgetOpen, setBudgetOpen] = useState(false);
   const [isSavingBudget, setIsSavingBudget] = useState(false);
   const [budgetMessage, setBudgetMessage] = useState("");
+  const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false);
+  const [discardConfirmOpen, setDiscardConfirmOpen] = useState(false);
+  const pendingNavigationRef = useRef<(() => void) | null>(null);
+  const approvedNavigationRef = useRef(false);
 
   useEffect(() => {
     if (!isCurrencyReady) {
@@ -172,6 +221,9 @@ export function ProjectCostsPage({ projectId }: { projectId: string }) {
     setBudgetBaseline(null);
     setBudgetOpen(false);
     setBudgetMessage("");
+    setLeaveConfirmOpen(false);
+    setDiscardConfirmOpen(false);
+    pendingNavigationRef.current = null;
   }, [projectId]);
 
   const actualCosts = useMemo(
@@ -193,6 +245,8 @@ export function ProjectCostsPage({ projectId }: { projectId: string }) {
       return;
     }
 
+    // Browsers require their own native prompt for refresh/tab-close and do not
+    // allow an application-styled dialog in the beforeunload lifecycle.
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
       event.preventDefault();
       event.returnValue = "";
@@ -203,8 +257,23 @@ export function ProjectCostsPage({ projectId }: { projectId: string }) {
   }, [isBudgetDirty]);
 
   const confirmBudgetNavigation = useCallback(
-    () => !isBudgetDirty || window.confirm(t("projectBudgetLeaveWarning")),
-    [isBudgetDirty, t]
+    (proceed: () => void) => {
+      if (approvedNavigationRef.current) {
+        approvedNavigationRef.current = false;
+        return true;
+      }
+
+      if (!isBudgetDirty) {
+        return true;
+      }
+
+      if (!pendingNavigationRef.current) {
+        pendingNavigationRef.current = proceed;
+      }
+      setLeaveConfirmOpen(true);
+      return false;
+    },
+    [isBudgetDirty]
   );
 
   const toggleBudgetChecklist = () => {
@@ -227,15 +296,20 @@ export function ProjectCostsPage({ projectId }: { projectId: string }) {
     setBudgetOpen((current) => !current);
   };
 
-  const discardBudgetChanges = () => {
-    if (isBudgetDirty && !window.confirm(t("discardProjectBudgetWarning"))) {
-      return;
-    }
-
+  const resetBudgetChanges = () => {
     setBudgetDraft(null);
     setBudgetBaseline(null);
     setBudgetOpen(false);
     setBudgetMessage("");
+  };
+
+  const discardBudgetChanges = () => {
+    if (isBudgetDirty) {
+      setDiscardConfirmOpen(true);
+      return;
+    }
+
+    resetBudgetChanges();
   };
 
   const saveBudget = async (target?: ProjectBudgetSaveTarget) => {
@@ -243,19 +317,52 @@ export function ProjectCostsPage({ projectId }: { projectId: string }) {
       return false;
     }
 
-    const targetSoftwareLine = target?.kind === "softwareCost"
-      ? budgetDraft.phases
-          .find((phase) => phase.phaseId === target.phaseId)
-          ?.softwareCosts.find((line) => line.id === target.lineId)
-      : undefined;
-    const hasInvalidSoftwareUsage = targetSoftwareLine
-      ? targetSoftwareLine.amount > 0 && targetSoftwareLine.periods < 1
-      : !target && budgetDraft.phases.some((phase) => (
-          phase.softwareCosts.some((line) => line.amount > 0 && line.periods < 1)
-        ));
+    const usageIssues = budgetDraft.phases.flatMap((phaseBudget) => {
+      if (target && target.kind !== "personnel" && target.kind !== "softwareCost") {
+        return [];
+      }
+      if (target && target.phaseId !== phaseBudget.phaseId) {
+        return [];
+      }
 
-    if (hasInvalidSoftwareUsage) {
-      setBudgetMessage(t("projectBudgetSoftwareUsageRequired"));
+      const phase = data.project.phases.find((item) => item.id === phaseBudget.phaseId);
+      if (!phase) {
+        return ["outside" as const];
+      }
+
+      const personnelIssues = phaseBudget.personnel.flatMap((line) => {
+        if (
+          line.headcount <= 0 ||
+          line.hourlyRate <= 0 ||
+          (target?.kind === "personnel" && target.lineId !== line.id) ||
+          target?.kind === "softwareCost"
+        ) {
+          return [];
+        }
+        const issue = getUsageValidationIssue(line, phase);
+        return issue ? [issue] : [];
+      });
+      const softwareIssues = phaseBudget.softwareCosts.flatMap((line) => {
+        if (
+          line.amount <= 0 ||
+          (target?.kind === "softwareCost" && target.lineId !== line.id) ||
+          target?.kind === "personnel"
+        ) {
+          return [];
+        }
+        const issue = getUsageValidationIssue(line, phase);
+        return issue ? [issue] : [];
+      });
+
+      return [...personnelIssues, ...softwareIssues];
+    });
+
+    if (usageIssues.length > 0) {
+      setBudgetMessage(t(
+        usageIssues.includes("outside")
+          ? "projectBudgetUsageOutsidePhase"
+          : "projectBudgetUsageRangeRequired"
+      ));
       return false;
     }
 
@@ -303,47 +410,48 @@ export function ProjectCostsPage({ projectId }: { projectId: string }) {
             <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.45fr)]">
               <Card
                 tone="dark"
-                className="relative overflow-hidden bg-cover bg-center p-6 sm:p-8"
-                style={{
-                  backgroundImage: `linear-gradient(180deg, rgba(17, 31, 38, 0.5), rgba(17, 31, 38, 0.82)), url(${data.project.coverImage})`
-                }}
+                className="image-vignette relative overflow-hidden bg-cover bg-center p-6 text-white sm:p-8"
+                style={{ backgroundImage: `url(${data.project.coverImage})` }}
               >
-                <div className="flex flex-wrap items-start justify-between gap-4">
-                  <p className="text-sm font-black uppercase text-white/55">{t("costsPrivateTitle")}</p>
-                  <CostCurrencySelector
-                    currency={displayCurrency}
-                    exchangeRateBasis={exchangeRateBasis}
-                    exchangeRateSnapshot={exchangeRateSnapshot}
-                    isRateUpdating={isRateUpdating}
-                    onCurrencyChange={setDisplayCurrency}
-                  />
-                </div>
-                <h1 className="mt-4 max-w-4xl text-lg font-black leading-[0.96] sm:text-3xl">
-                  {formatDemoEntityName(
-                    translateDomainLabel(data.project.name, projectNameKeys, t),
-                    data.project.id,
-                    "project",
-                    t
-                  )}
-                </h1>
-                <p className="mt-5 max-w-2xl text-base font-bold leading-7 text-white/65">
-                  {t("projectBudgetCostsBody")}
-                </p>
-                <div className="mt-6 flex flex-wrap gap-3">
-                  <Link
-                    href={projectPath(data.project.id)}
-                    prefetch={false}
-                    onNavigate={(event) => {
-                      if (!confirmBudgetNavigation()) {
-                        event.preventDefault();
-                      }
-                    }}
-                  >
-                    <Button variant="ghost" size="md">
-                      <ArrowLeft size={18} />
-                      {t("projectWorkspace")}
-                    </Button>
-                  </Link>
+                <div className="relative z-10">
+                  <div className="flex flex-wrap items-start justify-between gap-4">
+                    <p className="text-sm font-black uppercase text-white/70">{t("costsPrivateTitle")}</p>
+                    <CostCurrencySelector
+                      currency={displayCurrency}
+                      exchangeRateBasis={exchangeRateBasis}
+                      exchangeRateSnapshot={exchangeRateSnapshot}
+                      isRateUpdating={isRateUpdating}
+                      onCurrencyChange={setDisplayCurrency}
+                    />
+                  </div>
+                  <h1 className="mt-4 max-w-4xl text-lg font-black leading-[0.96] sm:text-3xl">
+                    {formatDemoEntityName(
+                      translateDomainLabel(data.project.name, projectNameKeys, t),
+                      data.project.id,
+                      "project",
+                      t,
+                      data.project.isExample
+                    )}
+                  </h1>
+                  <p className="mt-5 max-w-2xl text-base font-bold leading-7 text-white/80">
+                    {t("projectBudgetCostsBody")}
+                  </p>
+                  <div className="mt-6 flex flex-wrap gap-3">
+                    <Link
+                      href={projectPath(data.project.id)}
+                      prefetch={false}
+                      onNavigate={(event) => {
+                        if (!confirmBudgetNavigation(() => router.push(projectPath(data.project.id)))) {
+                          event.preventDefault();
+                        }
+                      }}
+                    >
+                      <Button variant="ghost" size="md">
+                        <ArrowLeft size={18} />
+                        {t("projectWorkspace")}
+                      </Button>
+                    </Link>
+                  </div>
                 </div>
               </Card>
 
@@ -519,6 +627,39 @@ export function ProjectCostsPage({ projectId }: { projectId: string }) {
           </>
         )}
       </div>
+      <ActionConfirmDialog
+        open={leaveConfirmOpen}
+        title={t("unsavedChangesTitle")}
+        description={t("projectBudgetLeaveWarning")}
+        warning={t("unsavedChangesWarning")}
+        cancelLabel={t("cancel")}
+        confirmLabel={t("leaveWithoutSaving")}
+        onCancel={() => {
+          pendingNavigationRef.current = null;
+          setLeaveConfirmOpen(false);
+        }}
+        onConfirm={() => {
+          const proceed = pendingNavigationRef.current;
+          pendingNavigationRef.current = null;
+          approvedNavigationRef.current = true;
+          setLeaveConfirmOpen(false);
+          resetBudgetChanges();
+          proceed?.();
+        }}
+      />
+      <ActionConfirmDialog
+        open={discardConfirmOpen}
+        title={t("unsavedChangesTitle")}
+        description={t("discardProjectBudgetWarning")}
+        warning={t("unsavedChangesWarning")}
+        cancelLabel={t("cancel")}
+        confirmLabel={t("confirmDiscardChanges")}
+        onCancel={() => setDiscardConfirmOpen(false)}
+        onConfirm={() => {
+          setDiscardConfirmOpen(false);
+          resetBudgetChanges();
+        }}
+      />
     </AppShell>
   );
 }

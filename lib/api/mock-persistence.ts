@@ -1,4 +1,5 @@
 import {
+  bundledExampleProjectIds,
   createEmptyMockDatabase,
   createMockDatabase,
   createProjectPayments,
@@ -22,9 +23,25 @@ import {
   restoreEncryptedWorkspaceBundle,
   type EncryptedWorkspaceBundleSnapshot
 } from "@/lib/storage/indexed-db";
-import type { Company, CostLibraryItem, Person, Project, ProjectGroup, ProjectVersion, ShareLink, Tool, User } from "@/lib/types";
+import { noteWorkspaceLocalSave } from "@/lib/storage/workspace-sync-coordinator";
+import {
+  bumpWorkspaceMutationEpoch,
+  getWorkspaceMutationEpoch,
+  withWorkspaceMutationLock
+} from "@/lib/storage/workspace-mutation-lock";
+import type { Company, CostLibraryItem, Person, Project, ProjectGroup, ProjectVersion, ProjectWorkflow, ShareLink, Tool, User } from "@/lib/types";
+import { synchronizeCostTemplateLinks } from "@/lib/utils/cost-template-links";
 import { isMoneyCurrency, type MoneyCurrency } from "@/lib/utils/money";
 import { normalizeProjectBudgetForPhases } from "@/lib/utils/project-budget-normalize";
+import {
+  isProjectWorkflowIds,
+  isProjectWorkflows,
+  isWorkflowLibrary,
+  normalizeProjectWorkflow,
+  normalizeProjectWorkflowIds,
+  normalizeProjectWorkflows,
+  normalizeWorkflowLibrary
+} from "@/lib/utils/project-workflow";
 
 const legacyStorageKey = "studio-map-os.mock-database";
 const legacyClaimMarkerStorageKey = "studio-map-os.mock-database.claimed-workspace-id";
@@ -53,6 +70,7 @@ export type PersistedMockDatabase = {
   people: Person[];
   tools: Tool[];
   costLibrary: CostLibraryItem[];
+  workflows: ProjectWorkflow[];
   shareLinks: ShareLink[];
 };
 
@@ -115,10 +133,14 @@ const isProjectGroup = (value: unknown) => {
 };
 
 const isPerson = (value: unknown) =>
-  isRecord(value) && hasStrings(value, ["id", "name", "role", "avatar", "type"]);
+  isRecord(value) &&
+  hasStrings(value, ["id", "name", "role", "avatar", "type"]) &&
+  (value.costTemplateId === undefined || typeof value.costTemplateId === "string");
 
 const isTool = (value: unknown) =>
-  isRecord(value) && hasStrings(value, ["id", "name", "category"]);
+  isRecord(value) &&
+  hasStrings(value, ["id", "name", "category"]) &&
+  (value.costTemplateId === undefined || typeof value.costTemplateId === "string");
 
 const isCostLibraryItem = (value: unknown) =>
   isRecord(value) &&
@@ -141,6 +163,9 @@ const isFiniteNonNegativeInteger = (value: unknown) =>
 const isPercentage = (value: unknown) =>
   isFiniteNonNegativeNumber(value) && value <= 100;
 
+const hasBudgetUsageRange = (value: Record<string, unknown>) =>
+  hasStrings(value, ["startDate", "endDate"]) && isPercentage(value.allocationPercent);
+
 const isProjectBudgetPersonnelLine = (value: unknown) =>
   isRecord(value) &&
   hasStrings(value, ["id", "roleLevel", "currency"]) &&
@@ -148,7 +173,7 @@ const isProjectBudgetPersonnelLine = (value: unknown) =>
   isMoneyCurrency(value.currency) &&
   isFiniteNonNegativeInteger(value.headcount) &&
   isFiniteNonNegativeNumber(value.hourlyRate) &&
-  isFiniteNonNegativeInteger(value.days);
+  (hasBudgetUsageRange(value) || isFiniteNonNegativeInteger(value.days));
 
 const isProjectBudgetTravel = (value: unknown) =>
   isRecord(value) &&
@@ -184,7 +209,7 @@ const isProjectBudgetSoftwareCostLine = (value: unknown) =>
   isMoneyCurrency(value.currency) &&
   (value.billingCycle === "monthly" || value.billingCycle === "yearly") &&
   isFiniteNonNegativeNumber(value.amount) &&
-  isFiniteNonNegativeInteger(value.periods);
+  (hasBudgetUsageRange(value) || isFiniteNonNegativeInteger(value.periods));
 
 const isProjectPhaseBudget = (value: unknown) =>
   isRecord(value) &&
@@ -261,9 +286,12 @@ const isProject = (value: unknown) =>
   isEntityArray(value.versions) &&
   isEntityArray(value.activity) &&
   (value.archiveIdentity === undefined || typeof value.archiveIdentity === "string") &&
+  (value.isExample === undefined || typeof value.isExample === "boolean") &&
   (value.importPlaceholder === undefined || typeof value.importPlaceholder === "boolean") &&
   (value.timelineConfigured === undefined || typeof value.timelineConfigured === "boolean") &&
   (value.timelineRows === undefined || isEntityArray(value.timelineRows)) &&
+  (value.workflowIds === undefined || isProjectWorkflowIds(value.workflowIds)) &&
+  (value.workflows === undefined || isProjectWorkflows(value.workflows)) &&
   (value.budget === undefined || isProjectBudget(value.budget)) &&
   isShareSettings(value.shareSettings);
 
@@ -275,6 +303,7 @@ const createPersistedDatabaseSnapshot = (): PersistedMockDatabase => ({
   people: mockDatabase.people,
   tools: mockDatabase.tools,
   costLibrary: mockDatabase.costLibrary,
+  workflows: mockDatabase.workflows,
   shareLinks: mockDatabase.shareLinks
 });
 
@@ -298,6 +327,8 @@ const validatePersistedDatabase = (value: unknown): PersistedMockDatabase => {
     value.tools.every(isTool) &&
     Array.isArray(value.costLibrary) &&
     value.costLibrary.every(isCostLibraryItem) &&
+    Array.isArray(value.workflows) &&
+    isWorkflowLibrary(value.workflows) &&
     Array.isArray(value.shareLinks) &&
     value.shareLinks.every(isShareLink);
 
@@ -305,7 +336,17 @@ const validatePersistedDatabase = (value: unknown): PersistedMockDatabase => {
     throw new Error("Invalid database backup");
   }
 
-  return value as PersistedMockDatabase;
+  const database = value as PersistedMockDatabase;
+  const workflowIds = new Set(database.workflows.map((workflow) => workflow.id));
+  if (
+    database.projects.some((project) =>
+      normalizeProjectWorkflowIds(project.workflowIds).some((workflowId) => !workflowIds.has(workflowId))
+    )
+  ) {
+    throw new Error("Invalid database workflow references");
+  }
+
+  return database;
 };
 
 export function validateMockDatabaseBackup(value: unknown): MockDatabaseBackup {
@@ -337,7 +378,7 @@ export function validateMockDatabaseBackup(value: unknown): MockDatabaseBackup {
     schema: mockDatabaseBackupSchema,
     version: mockDatabaseBackupVersion,
     exportedAt: value.exportedAt,
-    database: validatePersistedDatabase(value.database),
+    database: normalizePersistedDatabase(value.database, { allowLegacyProjectShape: true }),
     preferences: preferences as MockDatabaseBackup["preferences"]
   };
 }
@@ -395,7 +436,8 @@ const normalizePersistedVersions = (project: Project, projectIndex: number): Pro
 const normalizePersistedProject = (
   project: Project,
   projectIndex: number,
-  tools: ReadonlyArray<Tool>
+  tools: ReadonlyArray<Tool>,
+  seedProject?: Project
 ): Project => {
   const phases = Array.isArray(project.phases) ? project.phases : [];
   const projectTools = Array.isArray(project.tools) ? project.tools : [];
@@ -406,12 +448,96 @@ const normalizePersistedProject = (
 
   return {
     ...project,
+    isExample: project.isExample ?? Boolean(seedProject && seedProject.name === project.name),
     archivedAt: project.archivedAt ?? null,
     budget: normalizeProjectBudgetForPhases(project.budget, phases, [...toolsById.values()]),
+    workflowIds: normalizeProjectWorkflowIds(project.workflowIds),
+    ...(project.workflows === undefined
+      ? {}
+      : { workflows: normalizeProjectWorkflows(project.workflows) }),
     payments: Array.isArray(project.payments)
       ? project.payments
       : createProjectPayments(project.id, projectIndex),
     versions: normalizePersistedVersions(project, projectIndex)
+  };
+};
+
+const hashWorkflowMigrationKey = (value: string) => {
+  let hash = 2_166_136_261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16_777_619);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+};
+
+const migrateEmbeddedProjectWorkflows = (
+  globalWorkflows: ReadonlyArray<ProjectWorkflow>,
+  projects: ReadonlyArray<Project>
+) => {
+  const workflows: ProjectWorkflow[] = structuredClone([...globalWorkflows]);
+  const workflowsById = new Map(workflows.map((workflow) => [workflow.id, workflow]));
+  const signatureToId = new Map(
+    workflows.map((workflow) => [JSON.stringify(workflow), workflow.id])
+  );
+
+  const normalizedProjects = projects.map((project) => {
+    const linkedIds = normalizeProjectWorkflowIds(project.workflowIds);
+    const embeddedWorkflows = normalizeProjectWorkflows(project.workflows);
+    const linkMigratedWorkflow = (sourceId: string, destinationId: string) => {
+      const sourceIndex = linkedIds.indexOf(sourceId);
+      if (sourceIndex >= 0) {
+        if (linkedIds.includes(destinationId) && sourceId !== destinationId) {
+          linkedIds.splice(sourceIndex, 1);
+        } else {
+          linkedIds[sourceIndex] = destinationId;
+        }
+      } else if (!linkedIds.includes(destinationId)) {
+        linkedIds.push(destinationId);
+      }
+    };
+
+    for (const embeddedWorkflow of embeddedWorkflows) {
+      const signature = JSON.stringify(embeddedWorkflow);
+      const knownEquivalentId = signatureToId.get(signature);
+      if (knownEquivalentId) {
+        linkMigratedWorkflow(embeddedWorkflow.id, knownEquivalentId);
+        continue;
+      }
+
+      let workflowId = embeddedWorkflow.id;
+      if (workflowsById.has(workflowId)) {
+        const suffix = `:migrated:${hashWorkflowMigrationKey(`${project.id}:${signature}`)}`;
+        workflowId = `${workflowId.slice(0, 160 - suffix.length)}${suffix}`;
+        let collisionIndex = 2;
+        while (workflowsById.has(workflowId)) {
+          const collisionSuffix = `:${collisionIndex}`;
+          workflowId = `${workflowId.slice(0, 160 - collisionSuffix.length)}${collisionSuffix}`;
+          collisionIndex += 1;
+        }
+      }
+
+      const migratedWorkflow = normalizeProjectWorkflow({
+        ...embeddedWorkflow,
+        id: workflowId
+      });
+      workflows.push(migratedWorkflow);
+      workflowsById.set(workflowId, migratedWorkflow);
+      signatureToId.set(signature, workflowId);
+      linkMigratedWorkflow(embeddedWorkflow.id, workflowId);
+    }
+
+    const projectWithoutEmbeddedWorkflows = { ...project };
+    delete projectWithoutEmbeddedWorkflows.workflows;
+    return {
+      ...projectWithoutEmbeddedWorkflows,
+      workflowIds: normalizeProjectWorkflowIds(linkedIds)
+    } satisfies Project;
+  });
+
+  return {
+    projects: normalizedProjects,
+    workflows: normalizeWorkflowLibrary(workflows)
   };
 };
 
@@ -421,10 +547,37 @@ const resetMockDatabase = () => {
 
 const normalizeWorkspaceId = (workspaceId: string) => workspaceId.trim();
 
+export const retainBundledExampleProjects = (
+  database: PersistedMockDatabase
+): PersistedMockDatabase => {
+  const removedExampleProjectIds = new Set(
+    database.projects
+      .filter(
+        (project) => project.isExample === true && !bundledExampleProjectIds.has(project.id)
+      )
+      .map((project) => project.id)
+  );
+
+  if (removedExampleProjectIds.size === 0) {
+    return database;
+  }
+
+  return {
+    ...database,
+    projects: database.projects.filter(
+      (project) => !removedExampleProjectIds.has(project.id)
+    ),
+    shareLinks: database.shareLinks.filter(
+      (shareLink) => !removedExampleProjectIds.has(shareLink.projectId)
+    )
+  };
+};
+
 const normalizePersistedDatabase = (
   value: unknown,
   options: { allowLegacyProjectShape?: boolean } = {}
 ): PersistedMockDatabase => {
+  void options;
   if (!isRecord(value)) {
     throw new Error("Invalid persisted database");
   }
@@ -444,32 +597,40 @@ const normalizePersistedDatabase = (
     throw new Error("Invalid persisted database collections");
   }
 
-  const persisted = value as unknown as PersistedMockDatabase;
+  const persisted = retainBundledExampleProjects({
+    ...(value as unknown as Omit<PersistedMockDatabase, "workflows">),
+    workflows: normalizeWorkflowLibrary(value.workflows)
+  });
   const seedDatabase = createMockDatabase();
   const seededGroupsById = new Map(seedDatabase.groups.map((group) => [group.id, group]));
+  const seededProjectsById = new Map(seedDatabase.projects.map((project) => [project.id, project]));
   const seededToolsById = new Map(seedDatabase.tools.map((tool) => [tool.id, tool]));
   const normalizedTools = persisted.tools.map((tool) => ({
     ...tool,
     subscription: tool.subscription ?? seededToolsById.get(tool.id)?.subscription
   }));
+  const normalizedProjects = persisted.projects.map((project, index) =>
+    normalizePersistedProject(project, index, normalizedTools, seededProjectsById.get(project.id))
+  );
+  const migratedWorkflows = migrateEmbeddedProjectWorkflows(
+    persisted.workflows,
+    normalizedProjects
+  );
   const hydratedDatabase: PersistedMockDatabase = {
     users: persisted.users,
     companies: persisted.companies,
     groups: persisted.groups.map((group) =>
       normalizePersistedGroup(group, seededGroupsById.get(group.id))
     ),
-    projects: persisted.projects.map((project, index) =>
-      normalizePersistedProject(project, index, normalizedTools)
-    ),
+    projects: migratedWorkflows.projects,
     people: persisted.people,
     tools: normalizedTools,
     costLibrary: persisted.costLibrary,
+    workflows: migratedWorkflows.workflows,
     shareLinks: persisted.shareLinks
   };
 
-  if (!options.allowLegacyProjectShape) {
-    validatePersistedDatabase(value);
-  }
+  synchronizeCostTemplateLinks(hydratedDatabase);
 
   return structuredClone(validatePersistedDatabase(hydratedDatabase));
 };
@@ -510,24 +671,48 @@ const removeVerifiedLegacyPlaintextCopies = (workspaceId: string) => {
 const persistEncryptedDatabaseSnapshot = async (
   database: PersistedMockDatabase,
   workspaceId: string,
-  masterKey: WorkspaceMasterKey
+  masterKey: WorkspaceMasterKey,
+  options: {
+    bumpMutationEpochAfterPersist?: boolean;
+    expectedMutationEpoch?: number;
+    validateActive?: () => void;
+  } = {}
 ) => {
-  const normalizedDatabase = normalizePersistedDatabase(database);
-  const [workspaceRecord, publicShareRecords] = await Promise.all([
-    encryptWorkspaceRecord({
-      workspaceId,
-      payload: normalizedDatabase,
-      masterKey
-    }),
-    buildEncryptedPublicShareRecords(normalizedDatabase, workspaceId)
-  ]);
+  const expectedMutationEpoch =
+    options.expectedMutationEpoch ?? getWorkspaceMutationEpoch(workspaceId);
 
-  await replaceEncryptedWorkspaceBundle({
-    workspaceRecord,
-    publicShareRecords
+  return withWorkspaceMutationLock(workspaceId, async () => {
+    options.validateActive?.();
+    if (getWorkspaceMutationEpoch(workspaceId) !== expectedMutationEpoch) {
+      throw new Error("The workspace changed before its encrypted save completed");
+    }
+
+    const normalizedDatabase = normalizePersistedDatabase(database);
+    const [workspaceRecord, publicShareRecords] = await Promise.all([
+      encryptWorkspaceRecord({
+        workspaceId,
+        payload: normalizedDatabase,
+        masterKey
+      }),
+      buildEncryptedPublicShareRecords(normalizedDatabase, workspaceId)
+    ]);
+
+    options.validateActive?.();
+    if (getWorkspaceMutationEpoch(workspaceId) !== expectedMutationEpoch) {
+      throw new Error("The workspace changed before its encrypted save completed");
+    }
+
+    await replaceEncryptedWorkspaceBundle({
+      workspaceRecord,
+      publicShareRecords
+    });
+    if (options.bumpMutationEpochAfterPersist) {
+      bumpWorkspaceMutationEpoch(workspaceId);
+    }
+    noteWorkspaceLocalSave(workspaceId);
+
+    return normalizedDatabase;
   });
-
-  return normalizedDatabase;
 };
 
 const claimLegacyMockDatabase = (workspaceId: string) => {
@@ -678,29 +863,32 @@ export async function restoreMockDatabaseWorkspaceStorage(
     }
   };
 
-  const currentValues = {
-    displayCurrency: window.localStorage.getItem(displayCurrencyStorageKey),
-    language: window.localStorage.getItem(languageStorageKey),
-    legacyClaimMarker: window.localStorage.getItem(legacyClaimMarkerStorageKey),
-    legacyRaw: window.localStorage.getItem(legacyStorageKey),
-    workspaceRaw: window.localStorage.getItem(workspaceStorageKey(snapshot.workspaceId))
-  };
+  await withWorkspaceMutationLock(snapshot.workspaceId, async () => {
+    const currentValues = {
+      displayCurrency: window.localStorage.getItem(displayCurrencyStorageKey),
+      language: window.localStorage.getItem(languageStorageKey),
+      legacyClaimMarker: window.localStorage.getItem(legacyClaimMarkerStorageKey),
+      legacyRaw: window.localStorage.getItem(legacyStorageKey),
+      workspaceRaw: window.localStorage.getItem(workspaceStorageKey(snapshot.workspaceId))
+    };
 
-  try {
-    restoreValue(workspaceStorageKey(snapshot.workspaceId), snapshot.workspaceRaw);
-    restoreValue(legacyClaimMarkerStorageKey, snapshot.legacyClaimMarker);
-    restoreValue(legacyStorageKey, snapshot.legacyRaw);
-    restoreValue(languageStorageKey, snapshot.language);
-    restoreValue(displayCurrencyStorageKey, snapshot.displayCurrency);
-    await restoreEncryptedWorkspaceBundle(snapshot.encryptedBundle);
-  } catch (error) {
-    restoreValue(workspaceStorageKey(snapshot.workspaceId), currentValues.workspaceRaw);
-    restoreValue(legacyClaimMarkerStorageKey, currentValues.legacyClaimMarker);
-    restoreValue(legacyStorageKey, currentValues.legacyRaw);
-    restoreValue(languageStorageKey, currentValues.language);
-    restoreValue(displayCurrencyStorageKey, currentValues.displayCurrency);
-    throw error;
-  }
+    try {
+      restoreValue(workspaceStorageKey(snapshot.workspaceId), snapshot.workspaceRaw);
+      restoreValue(legacyClaimMarkerStorageKey, snapshot.legacyClaimMarker);
+      restoreValue(legacyStorageKey, snapshot.legacyRaw);
+      restoreValue(languageStorageKey, snapshot.language);
+      restoreValue(displayCurrencyStorageKey, snapshot.displayCurrency);
+      await restoreEncryptedWorkspaceBundle(snapshot.encryptedBundle);
+      bumpWorkspaceMutationEpoch(snapshot.workspaceId);
+    } catch (error) {
+      restoreValue(workspaceStorageKey(snapshot.workspaceId), currentValues.workspaceRaw);
+      restoreValue(legacyClaimMarkerStorageKey, currentValues.legacyClaimMarker);
+      restoreValue(legacyStorageKey, currentValues.legacyRaw);
+      restoreValue(languageStorageKey, currentValues.language);
+      restoreValue(displayCurrencyStorageKey, currentValues.displayCurrency);
+      throw error;
+    }
+  });
 }
 
 export async function finalizeLegacyMockDatabaseClaim(workspaceId: string) {
@@ -889,26 +1077,38 @@ export async function hydrateMockDatabase() {
   }
 }
 
-export async function persistMockDatabase() {
+export async function persistMockDatabase(
+  options: { bumpMutationEpochAfterPersist?: boolean } = {}
+) {
   await hydrateMockDatabase();
 
   const database = normalizePersistedDatabase(createPersistedDatabaseSnapshot());
   const identity = getRequiredActiveWorkspace();
   const failureEpoch = persistenceFailureEpoch;
+  const expectedMutationEpoch = getWorkspaceMutationEpoch(identity.workspaceId);
   const operation = persistenceQueue.then(async () => {
     try {
-      if (
-        identity.generation !== activeWorkspaceGeneration ||
-        failureEpoch !== persistenceFailureEpoch
-      ) {
-        throw new Error("The workspace changed before its encrypted save completed");
-      }
+      const validateActive = () => {
+        if (
+          identity.generation !== activeWorkspaceGeneration ||
+          failureEpoch !== persistenceFailureEpoch
+        ) {
+          throw new Error("The workspace changed before its encrypted save completed");
+        }
+      };
+
+      validateActive();
 
       try {
         const persistedDatabase = await persistEncryptedDatabaseSnapshot(
           database,
           identity.workspaceId,
-          identity.masterKey
+          identity.masterKey,
+          {
+            bumpMutationEpochAfterPersist: options.bumpMutationEpochAfterPersist,
+            expectedMutationEpoch,
+            validateActive
+          }
         );
 
         if (identity.generation === activeWorkspaceGeneration) {
@@ -916,7 +1116,10 @@ export async function persistMockDatabase() {
           removeVerifiedLegacyPlaintextCopies(identity.workspaceId);
         }
       } catch (error) {
-        if (identity.generation === activeWorkspaceGeneration) {
+        if (
+          identity.generation === activeWorkspaceGeneration &&
+          getWorkspaceMutationEpoch(identity.workspaceId) === expectedMutationEpoch
+        ) {
           persistenceFailureEpoch += 1;
           if (lastPersistedDatabase) {
             applyDatabaseSnapshot(lastPersistedDatabase);
@@ -1001,7 +1204,7 @@ export async function restoreMockDatabaseBackup(value: unknown) {
 
   try {
     applyDatabaseSnapshot(restoredDatabase);
-    await persistMockDatabase();
+    await persistMockDatabase({ bumpMutationEpochAfterPersist: true });
     encryptedWorkspacePersisted = true;
 
     if (backup.preferences?.language) {
@@ -1014,7 +1217,10 @@ export async function restoreMockDatabaseBackup(value: unknown) {
   } catch (error) {
     if (encryptedWorkspacePersisted) {
       try {
-        await restoreEncryptedWorkspaceBundle(previousBundle);
+        await withWorkspaceMutationLock(identity.workspaceId, async () => {
+          await restoreEncryptedWorkspaceBundle(previousBundle);
+          bumpWorkspaceMutationEpoch(identity.workspaceId);
+        });
         restoreStoredValue(languageStorageKey, previousLanguage);
         restoreStoredValue(displayCurrencyStorageKey, previousDisplayCurrency);
         applyDatabaseSnapshot(previousDatabase);

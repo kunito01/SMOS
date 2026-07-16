@@ -2,6 +2,7 @@ import type {
   Phase,
   Project,
   ProjectBudget,
+  ProjectBudgetPersonnelLine,
   ProjectBudgetSoftwareCostLine,
   ProjectPhaseBudget,
   Tool
@@ -170,10 +171,62 @@ export const countInclusiveNaturalDays = (startDate: string, endDate: string) =>
   return Math.floor((end - start) / millisecondsPerDay) + 1;
 };
 
+type BudgetUsageLine = Pick<
+  ProjectBudgetPersonnelLine | ProjectBudgetSoftwareCostLine,
+  "startDate" | "endDate" | "allocationPercent"
+>;
+
+const getSafeAllocationFraction = (value: number) =>
+  Number.isFinite(value) ? Math.min(100, Math.max(0, value)) / 100 : 0;
+
+/** Returns zero for incomplete/out-of-phase draft ranges instead of interrupting editing. */
+export const getProjectBudgetUsageDays = (
+  line: BudgetUsageLine,
+  phase: Pick<Phase, "startDate" | "endDate">
+) => {
+  try {
+    if (
+      line.startDate < phase.startDate ||
+      line.endDate > phase.endDate ||
+      line.endDate < line.startDate
+    ) {
+      return 0;
+    }
+
+    return countInclusiveNaturalDays(line.startDate, line.endDate);
+  } catch {
+    return 0;
+  }
+};
+
+export const calculatePersonnelLineNativeAmount = (
+  line: ProjectBudgetPersonnelLine,
+  phase: Pick<Phase, "startDate" | "endDate">
+) => {
+  const effectiveDays = line.days !== undefined
+    ? line.days
+    : getProjectBudgetUsageDays(line, phase) * getSafeAllocationFraction(line.allocationPercent);
+
+  return line.headcount * line.hourlyRate * PROJECT_BUDGET_HOURS_PER_DAY * effectiveDays;
+};
+
+export const calculateSoftwareLineNativeAmount = (
+  line: ProjectBudgetSoftwareCostLine,
+  phase: Pick<Phase, "startDate" | "endDate">
+) => {
+  if (line.periods !== undefined) {
+    const monthlyAmount = line.billingCycle === "yearly" ? line.amount / 12 : line.amount;
+    return monthlyAmount * line.periods;
+  }
+
+  const usageDays = getProjectBudgetUsageDays(line, phase);
+  const dailyAmount = line.billingCycle === "yearly" ? line.amount / 365 : line.amount / 30;
+  return dailyAmount * usageDays * getSafeAllocationFraction(line.allocationPercent);
+};
+
 const createSoftwareCostSnapshot = (
-  phaseId: string,
-  tool: Tool,
-  periods: number
+  phase: Pick<Phase, "id" | "startDate" | "endDate">,
+  tool: Tool
 ): ProjectBudgetSoftwareCostLine => {
   const subscription = tool.subscription;
 
@@ -182,13 +235,15 @@ const createSoftwareCostSnapshot = (
   }
 
   return {
-    id: `${phaseId}:software:${tool.id}`,
+    id: `${phase.id}:software:${tool.id}`,
     toolId: tool.id,
     name: tool.name,
     amount: subscription?.amount ?? 0,
     currency: subscription?.currency ?? "CNY",
     billingCycle: subscription?.billingCycle ?? "monthly",
-    periods
+    startDate: phase.startDate,
+    endDate: phase.endDate,
+    allocationPercent: 100
   };
 };
 
@@ -201,7 +256,7 @@ export const createProjectBudgetSoftwareCostSnapshots = ({
 
   return [...new Set(phase.toolIds ?? [])].flatMap((toolId) => {
     const tool = toolsById.get(toolId);
-    return tool ? [createSoftwareCostSnapshot(phase.id, tool, 0)] : [];
+    return tool ? [createSoftwareCostSnapshot(phase, tool)] : [];
   });
 };
 
@@ -228,7 +283,7 @@ export const syncProjectBudgetSoftwareCostSnapshots = ({
       return [];
     }
     const tool = toolsById.get(toolId);
-    return tool ? [createSoftwareCostSnapshot(phase.id, tool, 0)] : [];
+    return tool ? [createSoftwareCostSnapshot(phase, tool)] : [];
   });
 
   preserved.forEach((line) => {
@@ -252,7 +307,9 @@ export const createEmptyProjectBudget = (
         headcount: 0,
         hourlyRate: 0,
         currency,
-        days: 0
+        startDate: phase.startDate,
+        endDate: phase.endDate,
+        allocationPercent: 100
       }
     ],
     travel: {
@@ -352,8 +409,13 @@ export const calculateProjectPhaseBudget = ({
 
   (budget?.personnel ?? []).forEach((line) => {
     assertNonNegativeInteger(line.headcount, `Personnel ${line.id} headcount`);
-    assertNonNegativeInteger(line.days, `Personnel ${line.id} days`);
-    const quantity = line.headcount * line.days * PROJECT_BUDGET_HOURS_PER_DAY;
+    if (line.days !== undefined) {
+      assertNonNegativeInteger(line.days, `Personnel ${line.id} legacy days`);
+    }
+    const usageDays = line.days !== undefined
+      ? line.days
+      : getProjectBudgetUsageDays(line, phase) * getSafeAllocationFraction(line.allocationPercent);
+    const quantity = line.headcount * usageDays * PROJECT_BUDGET_HOURS_PER_DAY;
 
     items.push({
       id: `personnel:${line.id}`,
@@ -436,26 +498,29 @@ export const calculateProjectPhaseBudget = ({
   softwareCosts.forEach((line) => {
     const softwareLabel = line.toolId ?? line.id;
     assertNonNegativeNumber(line.amount, `Tool ${softwareLabel} snapshot amount`);
-    assertNonNegativeInteger(line.periods, `Tool ${softwareLabel} billing periods`);
-
-    if (line.amount === 0 || line.periods === 0) {
-      return;
+    if (line.periods !== undefined) {
+      assertNonNegativeInteger(line.periods, `Tool ${softwareLabel} legacy billing periods`);
     }
 
-    const monthlyAmount = line.billingCycle === "yearly" ? line.amount / 12 : line.amount;
+    const nativeAmount = calculateSoftwareLineNativeAmount(line, phase);
+    if (line.amount === 0 || nativeAmount === 0) {
+      return;
+    }
+    const usageDays = line.periods !== undefined
+      ? line.periods
+      : getProjectBudgetUsageDays(line, phase) * getSafeAllocationFraction(line.allocationPercent);
+    const unitAmount = line.periods !== undefined
+      ? (line.billingCycle === "yearly" ? line.amount / 12 : line.amount)
+      : (line.billingCycle === "yearly" ? line.amount / 365 : line.amount / 30);
 
     items.push({
       id: `software:${line.id}`,
       category: "software",
       label: line.name,
-      amount: multiplyMoney(
-        `Tool ${softwareLabel} phase subscription amount`,
-        monthlyAmount,
-        line.periods
-      ),
+      amount: nativeAmount,
       currency: line.currency,
-      quantity: line.periods,
-      unitAmount: monthlyAmount,
+      quantity: usageDays,
+      unitAmount,
       toolId: line.toolId,
       billingCycle: line.billingCycle
     });

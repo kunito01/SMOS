@@ -48,6 +48,7 @@ import { formatLocalizedDate } from "@/lib/i18n/formatters";
 import type { CostItem, CostLibraryItem, Person, PersonProjectParticipation, ProjectStatus, Tool } from "@/lib/types";
 import { projectPath } from "@/lib/utils/app-routes";
 import { formatNumber, type MoneyCurrency } from "@/lib/utils/money";
+import { getNextActiveSubscriptionPaymentDate } from "@/lib/utils/subscription-reminders";
 
 type LibrariesData = {
   people: Person[];
@@ -68,10 +69,12 @@ type PersonForm = Pick<Person, "name" | "role" | "type"> & {
 };
 
 type ToolForm = Pick<Tool, "name" | "category"> & {
+  costTemplateId: string;
   subscriptionAmount: string;
   subscriptionCurrency: CostItem["currency"];
   subscriptionBillingCycle: NonNullable<Tool["subscription"]>["billingCycle"];
   subscriptionExpiresAt: string;
+  subscriptionNextPaymentAt: string;
   subscriptionAccountEmail: string;
 };
 
@@ -118,10 +121,12 @@ const defaultPerson: PersonForm = {
 const defaultTool: ToolForm = {
   name: "",
   category: "ai",
+  costTemplateId: "",
   subscriptionAmount: "",
   subscriptionCurrency: "CNY",
   subscriptionBillingCycle: "monthly",
   subscriptionExpiresAt: "2026-12-31",
+  subscriptionNextPaymentAt: "",
   subscriptionAccountEmail: ""
 };
 
@@ -130,7 +135,7 @@ const defaultCost: Omit<CostLibraryItem, "id"> = {
   category: "software",
   amount: 0,
   currency: "CNY",
-  billingType: "one-time",
+  billingType: "monthly",
   isActual: false
 };
 
@@ -150,6 +155,8 @@ export function LibrariesPage() {
   const [editingToolId, setEditingToolId] = useState<string | null>(null);
   const [editingToolForm, setEditingToolForm] = useState(defaultTool);
   const [costForm, setCostForm] = useState(defaultCost);
+  const [editingCostTemplateId, setEditingCostTemplateId] = useState<string | null>(null);
+  const [editingCostForm, setEditingCostForm] = useState(defaultCost);
   const [pendingDelete, setPendingDelete] = useState<PendingLibraryDelete | null>(null);
   const [expandedPersonProjectsId, setExpandedPersonProjectsId] = useState<string | null>(null);
 
@@ -183,6 +190,22 @@ export function LibrariesPage() {
     () => new Map((data?.costTemplates ?? []).map((template) => [template.id, template])),
     [data?.costTemplates]
   );
+  const compatiblePersonTemplates = useMemo(
+    () =>
+      (data?.costTemplates ?? []).filter(
+        (template) => template.category === "people" && template.billingType === "daily"
+      ),
+    [data?.costTemplates]
+  );
+  const compatibleToolTemplates = useMemo(
+    () =>
+      (data?.costTemplates ?? []).filter(
+        (template) =>
+          template.category === "software" &&
+          (template.billingType === "monthly" || template.billingType === "yearly")
+      ),
+    [data?.costTemplates]
+  );
   const linkedPeopleByTemplate = useMemo(() => {
     const counts = new Map<string, number>();
 
@@ -194,13 +217,26 @@ export function LibrariesPage() {
 
     return counts;
   }, [data?.people]);
+  const linkedToolsByTemplate = useMemo(() => {
+    const counts = new Map<string, number>();
+
+    (data?.tools ?? []).forEach((tool) => {
+      if (tool.costTemplateId) {
+        counts.set(tool.costTemplateId, (counts.get(tool.costTemplateId) ?? 0) + 1);
+      }
+    });
+
+    return counts;
+  }, [data?.tools]);
   const personProjectsById = useMemo(
     () => new Map((data?.personProjects ?? []).map((summary) => [summary.personId, summary])),
     [data?.personProjects]
   );
 
+  const formatCurrencyAmount = (currency: CostItem["currency"], amount: number) =>
+    `${currency}\u00a0${formatNumber(amount)}`;
   const formatMoney = (currency?: CostItem["currency"], amount?: number) =>
-    amount && currency ? `${currency} ${formatNumber(amount)}` : t("noDailyCost");
+    amount && currency ? formatCurrencyAmount(currency, amount) : t("noDailyCost");
   const formatTotal = (value: number, currency: MoneyCurrency = displayCurrency) =>
     formatAmount(value, currency);
 
@@ -229,10 +265,12 @@ export function LibrariesPage() {
   const toolToForm = (tool: Tool): ToolForm => ({
     name: tool.name,
     category: tool.category,
+    costTemplateId: tool.costTemplateId ?? "",
     subscriptionAmount: tool.subscription?.amount ? String(tool.subscription.amount) : "",
     subscriptionCurrency: tool.subscription?.currency ?? "CNY",
     subscriptionBillingCycle: tool.subscription?.billingCycle ?? "monthly",
     subscriptionExpiresAt: tool.subscription?.expiresAt ?? "2026-12-31",
+    subscriptionNextPaymentAt: tool.subscription?.nextPaymentAt ?? "",
     subscriptionAccountEmail: tool.subscription?.accountEmail ?? ""
   });
 
@@ -242,6 +280,7 @@ export function LibrariesPage() {
     return {
       name: form.name.trim(),
       category: form.category,
+      costTemplateId: form.costTemplateId || undefined,
       subscription:
         amount > 0
           ? {
@@ -249,6 +288,7 @@ export function LibrariesPage() {
               currency: form.subscriptionCurrency,
               billingCycle: form.subscriptionBillingCycle,
               expiresAt: form.subscriptionExpiresAt,
+              nextPaymentAt: form.subscriptionNextPaymentAt || undefined,
               accountEmail: form.subscriptionAccountEmail.trim()
             }
           : undefined
@@ -257,6 +297,59 @@ export function LibrariesPage() {
 
   const getToolMonthlyCost = (tool: Tool) => {
     return getToolMonthlySubscriptionCost(tool, displayCurrency, exchangeRateSnapshot);
+  };
+
+  const applyPersonTemplate = (
+    setForm: React.Dispatch<React.SetStateAction<PersonForm>>,
+    costTemplateId: string
+  ) => {
+    setForm((current) => {
+      if (!costTemplateId) {
+        return { ...current, costTemplateId: "" };
+      }
+
+      const template = costTemplateById.get(costTemplateId);
+      if (!template || template.category !== "people" || template.billingType !== "daily") {
+        return current;
+      }
+
+      return {
+        ...current,
+        costTemplateId,
+        role: template.name,
+        dailyCost: String(template.amount),
+        dailyCostCurrency: template.currency
+      };
+    });
+  };
+
+  const applyToolTemplate = (
+    setForm: React.Dispatch<React.SetStateAction<ToolForm>>,
+    costTemplateId: string
+  ) => {
+    setForm((current) => {
+      if (!costTemplateId) {
+        return { ...current, costTemplateId: "" };
+      }
+
+      const template = costTemplateById.get(costTemplateId);
+      if (
+        !template ||
+        template.category !== "software" ||
+        (template.billingType !== "monthly" && template.billingType !== "yearly")
+      ) {
+        return current;
+      }
+
+      return {
+        ...current,
+        costTemplateId,
+        name: template.name,
+        subscriptionAmount: String(template.amount),
+        subscriptionCurrency: template.currency,
+        subscriptionBillingCycle: template.billingType
+      };
+    });
   };
 
   const submitPerson = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -287,6 +380,30 @@ export function LibrariesPage() {
     }
     await librariesApi.addCostTemplate(costForm);
     setCostForm(defaultCost);
+    await load();
+  };
+
+  const startEditingCostTemplate = (template: CostLibraryItem) => {
+    setEditingCostTemplateId(template.id);
+    setEditingCostForm({
+      name: template.name,
+      category: template.category,
+      amount: template.amount,
+      currency: template.currency,
+      billingType: template.billingType,
+      isActual: template.isActual
+    });
+  };
+
+  const updateCostTemplate = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!editingCostTemplateId || !editingCostForm.name.trim() || editingCostForm.amount <= 0) {
+      return;
+    }
+
+    await librariesApi.updateCostTemplate(editingCostTemplateId, editingCostForm);
+    setEditingCostTemplateId(null);
+    setEditingCostForm(defaultCost);
     await load();
   };
 
@@ -339,6 +456,10 @@ export function LibrariesPage() {
 
   const removeCostTemplate = async (costTemplateId: string) => {
     await librariesApi.deleteCostTemplate(costTemplateId);
+    if (editingCostTemplateId === costTemplateId) {
+      setEditingCostTemplateId(null);
+      setEditingCostForm(defaultCost);
+    }
     await load();
   };
 
@@ -438,11 +559,31 @@ export function LibrariesPage() {
                     placeholder={t("personName")}
                     className="h-11 rounded-full border-0 bg-white px-4 text-sm font-bold outline-none ring-1 ring-black/[0.06]"
                   />
+                  <div className="grid gap-2">
+                    <p className="inline-flex items-center gap-2 px-1 text-xs font-black text-ink/62">
+                      <Link2 size={14} />
+                      {t("linkPersonTemplate")}
+                    </p>
+                    <Select
+                      value={personForm.costTemplateId}
+                      onChange={(event) => applyPersonTemplate(setPersonForm, event.target.value)}
+                      aria-label={t("linkPersonTemplate")}
+                      className="h-11 rounded-full border-0 bg-white px-4 text-sm font-bold outline-none ring-1 ring-black/[0.06]"
+                    >
+                      <option value="">{t("noCostTemplate")}</option>
+                      {compatiblePersonTemplates.map((template) => (
+                        <option key={template.id} value={template.id}>
+                          {template.name} · {formatCurrencyAmount(template.currency, template.amount)} · {t("billingTypeDaily")}
+                        </option>
+                      ))}
+                    </Select>
+                  </div>
                   <input
                     value={personForm.role}
                     onChange={(event) => setPersonForm((current) => ({ ...current, role: event.target.value }))}
                     placeholder={t("role")}
-                    className="h-11 rounded-full border-0 bg-white px-4 text-sm font-bold outline-none ring-1 ring-black/[0.06]"
+                    disabled={Boolean(personForm.costTemplateId)}
+                    className="h-11 rounded-full border-0 bg-white px-4 text-sm font-bold outline-none ring-1 ring-black/[0.06] disabled:cursor-not-allowed disabled:bg-white/55 disabled:text-ink/55"
                   />
                   <Select
                     value={personForm.type}
@@ -462,7 +603,8 @@ export function LibrariesPage() {
                       value={personForm.dailyCost}
                       onChange={(event) => setPersonForm((current) => ({ ...current, dailyCost: event.target.value }))}
                       placeholder={t("dailyCost")}
-                      className="h-11 min-w-0 rounded-full border-0 bg-white px-4 text-sm font-bold outline-none ring-1 ring-black/[0.06]"
+                      disabled={Boolean(personForm.costTemplateId)}
+                      className="h-11 min-w-0 rounded-full border-0 bg-white px-4 text-sm font-bold outline-none ring-1 ring-black/[0.06] disabled:cursor-not-allowed disabled:bg-white/55 disabled:text-ink/55"
                     />
                     <Select
                       value={personForm.dailyCostCurrency}
@@ -472,25 +614,20 @@ export function LibrariesPage() {
                           dailyCostCurrency: event.target.value as NonNullable<Person["dailyCostCurrency"]>
                         }))
                       }
-                      className="h-11 rounded-full border-0 bg-white px-4 text-sm font-bold outline-none ring-1 ring-black/[0.06]"
+                      disabled={Boolean(personForm.costTemplateId)}
+                      className="h-11 rounded-full border-0 bg-white px-4 text-sm font-bold outline-none ring-1 ring-black/[0.06] disabled:cursor-not-allowed disabled:bg-white/55 disabled:text-ink/55"
                     >
                       {currencyOptions.map((currency) => (
                         <option key={currency} value={currency}>{currency}</option>
                       ))}
                     </Select>
                   </div>
-                  <Select
-                    value={personForm.costTemplateId}
-                    onChange={(event) => setPersonForm((current) => ({ ...current, costTemplateId: event.target.value }))}
-                    className="h-11 rounded-full border-0 bg-white px-4 text-sm font-bold outline-none ring-1 ring-black/[0.06]"
-                  >
-                    <option value="">{t("noCostTemplate")}</option>
-                    {data.costTemplates.map((template) => (
-                      <option key={template.id} value={template.id}>
-                        {template.name} · {template.currency} {template.amount}
-                      </option>
-                    ))}
-                  </Select>
+                  {personForm.costTemplateId ? (
+                    <p className="inline-flex items-start gap-2 rounded-2xl bg-white/55 px-3 py-2 text-xs font-black leading-5 text-ink/62">
+                      <Link2 size={14} className="mt-0.5 shrink-0" />
+                      {t("templateManagedFields")}
+                    </p>
+                  ) : null}
                   <Button type="submit" size="md">
                     <UserPlus size={18} />
                     {t("addPerson")}
@@ -528,7 +665,8 @@ export function LibrariesPage() {
                               setEditingPersonForm((current) => ({ ...current, role: event.target.value }))
                             }
                             placeholder={t("role")}
-                            className="h-11 rounded-full border-0 bg-cloud/75 px-4 text-sm font-bold outline-none ring-1 ring-black/[0.06]"
+                            disabled={Boolean(editingPersonForm.costTemplateId)}
+                            className="h-11 rounded-full border-0 bg-cloud/75 px-4 text-sm font-bold outline-none ring-1 ring-black/[0.06] disabled:cursor-not-allowed disabled:bg-cloud/45 disabled:text-ink/55"
                           />
                         </div>
                         <Select
@@ -551,7 +689,8 @@ export function LibrariesPage() {
                               setEditingPersonForm((current) => ({ ...current, dailyCost: event.target.value }))
                             }
                             placeholder={t("dailyCost")}
-                            className="h-11 min-w-0 rounded-full border-0 bg-cloud/75 px-4 text-sm font-bold outline-none ring-1 ring-black/[0.06]"
+                            disabled={Boolean(editingPersonForm.costTemplateId)}
+                            className="h-11 min-w-0 rounded-full border-0 bg-cloud/75 px-4 text-sm font-bold outline-none ring-1 ring-black/[0.06] disabled:cursor-not-allowed disabled:bg-cloud/45 disabled:text-ink/55"
                           />
                           <Select
                             value={editingPersonForm.dailyCostCurrency}
@@ -561,7 +700,8 @@ export function LibrariesPage() {
                                 dailyCostCurrency: event.target.value as NonNullable<Person["dailyCostCurrency"]>
                               }))
                             }
-                            className="h-11 rounded-full border-0 bg-cloud/75 px-4 text-sm font-bold outline-none ring-1 ring-black/[0.06]"
+                            disabled={Boolean(editingPersonForm.costTemplateId)}
+                            className="h-11 rounded-full border-0 bg-cloud/75 px-4 text-sm font-bold outline-none ring-1 ring-black/[0.06] disabled:cursor-not-allowed disabled:bg-cloud/45 disabled:text-ink/55"
                           >
                             {currencyOptions.map((currency) => (
                               <option key={currency} value={currency}>{currency}</option>
@@ -570,18 +710,23 @@ export function LibrariesPage() {
                         </div>
                         <Select
                           value={editingPersonForm.costTemplateId}
-                          onChange={(event) =>
-                            setEditingPersonForm((current) => ({ ...current, costTemplateId: event.target.value }))
-                          }
+                          onChange={(event) => applyPersonTemplate(setEditingPersonForm, event.target.value)}
+                          aria-label={t("linkPersonTemplate")}
                           className="h-11 rounded-full border-0 bg-cloud/75 px-4 text-sm font-bold outline-none ring-1 ring-black/[0.06]"
                         >
                           <option value="">{t("noCostTemplate")}</option>
-                          {data.costTemplates.map((template) => (
+                          {compatiblePersonTemplates.map((template) => (
                             <option key={template.id} value={template.id}>
-                              {template.name} · {template.currency} {template.amount}
+                              {template.name} · {formatCurrencyAmount(template.currency, template.amount)}
                             </option>
                           ))}
                         </Select>
+                        {editingPersonForm.costTemplateId ? (
+                          <p className="inline-flex items-start gap-2 rounded-2xl bg-limepop/20 px-3 py-2 text-xs font-black leading-5 text-ink/62">
+                            <Link2 size={14} className="mt-0.5 shrink-0" />
+                            {t("templateManagedFields")}
+                          </p>
+                        ) : null}
                         <div className="flex flex-wrap gap-2">
                           <Button type="submit" size="sm" className="min-w-28">
                             <Save size={16} />
@@ -687,8 +832,8 @@ export function LibrariesPage() {
                               <span className="block text-xs font-black uppercase text-ink/58">
                                 {t("personProjectParticipation")}
                               </span>
-                              <span className="mt-1 block text-xs font-bold text-ink/42">
-                                {projectRows.length} {t("projectsCount")}
+                              <span className="mt-1 block whitespace-nowrap text-xs font-bold text-ink/42 tabular-nums">
+                                {`${projectRows.length}\u00a0${t("projectsCount")}`}
                               </span>
                             </span>
                             <span className="grid size-9 shrink-0 place-items-center rounded-full bg-cloud text-muted">
@@ -713,7 +858,8 @@ export function LibrariesPage() {
                                             translateDomainLabel(project.projectName, projectNameKeys, t),
                                             project.projectId,
                                             "project",
-                                            t
+                                            t,
+                                            project.isExample
                                           )}
                                         </h4>
                                         <p className="mt-1 truncate text-xs font-bold text-muted">
@@ -779,11 +925,25 @@ export function LibrariesPage() {
                   eyebrowClassName="text-white"
                 />
                 <form onSubmit={submitTool} className="mt-5 grid gap-3 rounded-studio bg-white/10 p-4">
+                  <Select
+                    value={toolForm.costTemplateId}
+                    onChange={(event) => applyToolTemplate(setToolForm, event.target.value)}
+                    aria-label={t("linkSoftwareTemplate")}
+                    className="h-11 rounded-full border-0 bg-white/90 px-4 text-sm font-bold text-ink outline-none"
+                  >
+                    <option value="">{t("noCostTemplate")}</option>
+                    {compatibleToolTemplates.map((template) => (
+                      <option key={template.id} value={template.id}>
+                        {template.name} · {formatCurrencyAmount(template.currency, template.amount)} · {t(billingTypeKeys[template.billingType])}
+                      </option>
+                    ))}
+                  </Select>
                   <input
                     value={toolForm.name}
                     onChange={(event) => setToolForm((current) => ({ ...current, name: event.target.value }))}
                     placeholder={t("softwareName")}
-                    className="h-11 rounded-full border-0 bg-white/90 px-4 text-sm font-bold text-ink outline-none"
+                    disabled={Boolean(toolForm.costTemplateId)}
+                    className="h-11 rounded-full border-0 bg-white/90 px-4 text-sm font-bold text-ink outline-none disabled:cursor-not-allowed disabled:bg-white/55 disabled:text-ink/55"
                   />
                   <Select
                     value={toolForm.category}
@@ -805,7 +965,8 @@ export function LibrariesPage() {
                         setToolForm((current) => ({ ...current, subscriptionAmount: event.target.value }))
                       }
                       placeholder={t("subscriptionFee")}
-                      className="h-11 rounded-full border-0 bg-white/90 px-4 text-sm font-bold text-ink outline-none"
+                      disabled={Boolean(toolForm.costTemplateId)}
+                      className="h-11 rounded-full border-0 bg-white/90 px-4 text-sm font-bold text-ink outline-none disabled:cursor-not-allowed disabled:bg-white/55 disabled:text-ink/55"
                     />
                     <Select
                       value={toolForm.subscriptionCurrency}
@@ -815,7 +976,8 @@ export function LibrariesPage() {
                           subscriptionCurrency: event.target.value as CostItem["currency"]
                         }))
                       }
-                      className="h-11 rounded-full border-0 bg-white/90 px-4 text-sm font-bold text-ink outline-none"
+                      disabled={Boolean(toolForm.costTemplateId)}
+                      className="h-11 rounded-full border-0 bg-white/90 px-4 text-sm font-bold text-ink outline-none disabled:cursor-not-allowed disabled:bg-white/55 disabled:text-ink/55"
                     >
                       {currencyOptions.map((currency) => (
                         <option key={currency} value={currency}>{currency}</option>
@@ -829,19 +991,36 @@ export function LibrariesPage() {
                           subscriptionBillingCycle: event.target.value as NonNullable<Tool["subscription"]>["billingCycle"]
                         }))
                       }
-                      className="h-11 rounded-full border-0 bg-white/90 px-4 text-sm font-bold text-ink outline-none"
+                      disabled={Boolean(toolForm.costTemplateId)}
+                      className="h-11 rounded-full border-0 bg-white/90 px-4 text-sm font-bold text-ink outline-none disabled:cursor-not-allowed disabled:bg-white/55 disabled:text-ink/55"
                     >
                       <option value="monthly">{t("billingTypeMonthly")}</option>
                       <option value="yearly">{t("billingTypeYearly")}</option>
                     </Select>
-                    <input
-                      type="date"
-                      value={toolForm.subscriptionExpiresAt}
-                      onChange={(event) =>
-                        setToolForm((current) => ({ ...current, subscriptionExpiresAt: event.target.value }))
-                      }
-                      className="h-11 rounded-full border-0 bg-white/90 px-4 text-sm font-bold text-ink outline-none"
-                    />
+                    <label className="grid min-w-0 gap-1.5 text-xs font-black text-white/70">
+                      <span className="break-words [overflow-wrap:anywhere]">{t("subscriptionExpiresAt")}</span>
+                      <input
+                        type="date"
+                        value={toolForm.subscriptionExpiresAt}
+                        onChange={(event) =>
+                          setToolForm((current) => ({ ...current, subscriptionExpiresAt: event.target.value }))
+                        }
+                        className="h-11 min-w-0 rounded-full border-0 bg-white/90 px-4 text-sm font-bold text-ink outline-none"
+                      />
+                    </label>
+                    <label className="grid min-w-0 gap-1.5 text-xs font-black text-white/70">
+                      <span className="break-words [overflow-wrap:anywhere]">{t("subscriptionPaymentAnchorAt")}</span>
+                      <input
+                        type="date"
+                        value={toolForm.subscriptionNextPaymentAt}
+                        onChange={(event) =>
+                          setToolForm((current) => ({ ...current, subscriptionNextPaymentAt: event.target.value }))
+                        }
+                        required={Number(toolForm.subscriptionAmount) > 0}
+                        max={toolForm.subscriptionExpiresAt || undefined}
+                        className="h-11 min-w-0 rounded-full border-0 bg-white/90 px-4 text-sm font-bold text-ink outline-none"
+                      />
+                    </label>
                   </div>
                   <input
                     type="email"
@@ -852,6 +1031,12 @@ export function LibrariesPage() {
                     placeholder={t("subscriptionAccountEmail")}
                     className="h-11 rounded-full border-0 bg-white/90 px-4 text-sm font-bold text-ink outline-none"
                   />
+                  {toolForm.costTemplateId ? (
+                    <p className="inline-flex items-start gap-2 rounded-2xl bg-white/10 px-3 py-2 text-xs font-black leading-5 text-white/70">
+                      <Link2 size={14} className="mt-0.5 shrink-0" />
+                      {t("templateManagedFields")}
+                    </p>
+                  ) : null}
                   <Button type="submit" variant="secondary" size="md">
                     <Wrench size={18} />
                     {t("addSoftware")}
@@ -871,6 +1056,12 @@ export function LibrariesPage() {
                 <div className="mt-5 grid gap-3">
                   {data.tools.map((tool) => {
                     const monthlyCost = getToolMonthlyCost(tool);
+                    const nextPaymentDate = tool.subscription
+                      ? getNextActiveSubscriptionPaymentDate(tool.subscription)
+                      : null;
+                    const linkedTemplate = tool.costTemplateId
+                      ? costTemplateById.get(tool.costTemplateId)
+                      : undefined;
 
                     return editingToolId === tool.id ? (
                       <form
@@ -878,6 +1069,19 @@ export function LibrariesPage() {
                         onSubmit={updateTool}
                         className="grid gap-3 rounded-studio bg-white p-4 text-ink shadow-soft ring-2 ring-limepop/70"
                       >
+                        <Select
+                          value={editingToolForm.costTemplateId}
+                          onChange={(event) => applyToolTemplate(setEditingToolForm, event.target.value)}
+                          aria-label={t("linkSoftwareTemplate")}
+                          className="h-11 rounded-full border-0 bg-cloud/75 px-4 text-sm font-bold outline-none ring-1 ring-black/[0.06]"
+                        >
+                          <option value="">{t("noCostTemplate")}</option>
+                          {compatibleToolTemplates.map((template) => (
+                            <option key={template.id} value={template.id}>
+                              {template.name} · {formatCurrencyAmount(template.currency, template.amount)} · {t(billingTypeKeys[template.billingType])}
+                            </option>
+                          ))}
+                        </Select>
                         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
                           <input
                             value={editingToolForm.name}
@@ -885,7 +1089,8 @@ export function LibrariesPage() {
                               setEditingToolForm((current) => ({ ...current, name: event.target.value }))
                             }
                             placeholder={t("softwareName")}
-                            className="h-11 rounded-full border-0 bg-cloud/75 px-4 text-sm font-bold outline-none ring-1 ring-black/[0.06]"
+                            disabled={Boolean(editingToolForm.costTemplateId)}
+                            className="h-11 rounded-full border-0 bg-cloud/75 px-4 text-sm font-bold outline-none ring-1 ring-black/[0.06] disabled:cursor-not-allowed disabled:bg-cloud/45 disabled:text-ink/55"
                           />
                           <Select
                             value={editingToolForm.category}
@@ -909,7 +1114,8 @@ export function LibrariesPage() {
                               setEditingToolForm((current) => ({ ...current, subscriptionAmount: event.target.value }))
                             }
                             placeholder={t("subscriptionFee")}
-                            className="h-11 rounded-full border-0 bg-cloud/75 px-4 text-sm font-bold outline-none ring-1 ring-black/[0.06]"
+                            disabled={Boolean(editingToolForm.costTemplateId)}
+                            className="h-11 rounded-full border-0 bg-cloud/75 px-4 text-sm font-bold outline-none ring-1 ring-black/[0.06] disabled:cursor-not-allowed disabled:bg-cloud/45 disabled:text-ink/55"
                           />
                           <Select
                             value={editingToolForm.subscriptionCurrency}
@@ -919,7 +1125,8 @@ export function LibrariesPage() {
                                 subscriptionCurrency: event.target.value as CostItem["currency"]
                               }))
                             }
-                            className="h-11 rounded-full border-0 bg-cloud/75 px-4 text-sm font-bold outline-none ring-1 ring-black/[0.06]"
+                            disabled={Boolean(editingToolForm.costTemplateId)}
+                            className="h-11 rounded-full border-0 bg-cloud/75 px-4 text-sm font-bold outline-none ring-1 ring-black/[0.06] disabled:cursor-not-allowed disabled:bg-cloud/45 disabled:text-ink/55"
                           >
                             {currencyOptions.map((currency) => (
                               <option key={currency} value={currency}>{currency}</option>
@@ -933,19 +1140,36 @@ export function LibrariesPage() {
                                 subscriptionBillingCycle: event.target.value as NonNullable<Tool["subscription"]>["billingCycle"]
                               }))
                             }
-                            className="h-11 rounded-full border-0 bg-cloud/75 px-4 text-sm font-bold outline-none ring-1 ring-black/[0.06]"
+                            disabled={Boolean(editingToolForm.costTemplateId)}
+                            className="h-11 rounded-full border-0 bg-cloud/75 px-4 text-sm font-bold outline-none ring-1 ring-black/[0.06] disabled:cursor-not-allowed disabled:bg-cloud/45 disabled:text-ink/55"
                           >
                             <option value="monthly">{t("billingTypeMonthly")}</option>
                             <option value="yearly">{t("billingTypeYearly")}</option>
                           </Select>
-                          <input
-                            type="date"
-                            value={editingToolForm.subscriptionExpiresAt}
-                            onChange={(event) =>
-                              setEditingToolForm((current) => ({ ...current, subscriptionExpiresAt: event.target.value }))
-                            }
-                            className="h-11 rounded-full border-0 bg-cloud/75 px-4 text-sm font-bold outline-none ring-1 ring-black/[0.06]"
-                          />
+                          <label className="grid min-w-0 gap-1.5 text-xs font-black text-ink/58">
+                            <span className="break-words [overflow-wrap:anywhere]">{t("subscriptionExpiresAt")}</span>
+                            <input
+                              type="date"
+                              value={editingToolForm.subscriptionExpiresAt}
+                              onChange={(event) =>
+                                setEditingToolForm((current) => ({ ...current, subscriptionExpiresAt: event.target.value }))
+                              }
+                              className="h-11 min-w-0 rounded-full border-0 bg-cloud/75 px-4 text-sm font-bold outline-none ring-1 ring-black/[0.06]"
+                            />
+                          </label>
+                          <label className="grid min-w-0 gap-1.5 text-xs font-black text-ink/58">
+                            <span className="break-words [overflow-wrap:anywhere]">{t("subscriptionPaymentAnchorAt")}</span>
+                            <input
+                              type="date"
+                              value={editingToolForm.subscriptionNextPaymentAt}
+                              onChange={(event) =>
+                                setEditingToolForm((current) => ({ ...current, subscriptionNextPaymentAt: event.target.value }))
+                              }
+                              required={Number(editingToolForm.subscriptionAmount) > 0}
+                              max={editingToolForm.subscriptionExpiresAt || undefined}
+                              className="h-11 min-w-0 rounded-full border-0 bg-cloud/75 px-4 text-sm font-bold outline-none ring-1 ring-black/[0.06]"
+                            />
+                          </label>
                         </div>
                         <input
                           type="email"
@@ -959,6 +1183,12 @@ export function LibrariesPage() {
                           placeholder={t("subscriptionAccountEmail")}
                           className="h-11 rounded-full border-0 bg-cloud/75 px-4 text-sm font-bold outline-none ring-1 ring-black/[0.06]"
                         />
+                        {editingToolForm.costTemplateId ? (
+                          <p className="inline-flex items-start gap-2 rounded-2xl bg-limepop/20 px-3 py-2 text-xs font-black leading-5 text-ink/62">
+                            <Link2 size={14} className="mt-0.5 shrink-0" />
+                            {t("templateManagedFields")}
+                          </p>
+                        ) : null}
                         <div className="flex flex-wrap gap-2">
                           <Button type="submit" size="sm" className="min-w-28">
                             <Save size={16} />
@@ -989,11 +1219,19 @@ export function LibrariesPage() {
                               </Pill>
                             </div>
                             <div className="mt-4 grid gap-2 text-xs font-black text-white/70">
+                              {linkedTemplate ? (
+                                <span className="inline-flex min-w-0 items-center gap-2 text-limepop">
+                                  <Link2 size={14} className="shrink-0" />
+                                  <span className="truncate">
+                                    {t("linkedTemplate")}: {linkedTemplate.name}
+                                  </span>
+                                </span>
+                              ) : null}
                               {tool.subscription ? (
                                 <>
                                   <span className="inline-flex items-center gap-2">
                                     <CreditCard size={14} />
-                                    {tool.subscription.currency} {formatNumber(tool.subscription.amount)} ·{" "}
+                                    {formatCurrencyAmount(tool.subscription.currency, tool.subscription.amount)} ·{" "}
                                     {tool.subscription.billingCycle === "monthly"
                                       ? t("billingTypeMonthly")
                                       : t("billingTypeYearly")}
@@ -1006,6 +1244,18 @@ export function LibrariesPage() {
                                     <CalendarClock size={14} />
                                     {t("subscriptionExpiresAt")}: {formatLocalizedDate(tool.subscription.expiresAt, language)}
                                   </span>
+                                  {nextPaymentDate ? (
+                                    <span className="inline-flex min-w-0 items-center gap-2">
+                                      <Repeat size={14} className="shrink-0" />
+                                      <span className="break-words [overflow-wrap:anywhere]">
+                                        {t("subscriptionNextPaymentAt")}: {formatLocalizedDate(nextPaymentDate, language)}
+                                      </span>
+                                    </span>
+                                  ) : !tool.subscription.nextPaymentAt ? (
+                                    <span className="break-words text-coral [overflow-wrap:anywhere]">
+                                      {t("subscriptionPaymentSetupRequired")}
+                                    </span>
+                                  ) : null}
                                   {tool.subscription.accountEmail ? (
                                     <span className="inline-flex min-w-0 items-center gap-2">
                                       <Mail size={14} className="shrink-0" />
@@ -1051,7 +1301,8 @@ export function LibrariesPage() {
                 <SectionHeader
                   eyebrow={t("templateReusable")}
                   title={t("costTemplateLibrary")}
-                  eyebrowClassName="text-white"
+                  eyebrowClassName="break-words text-white [overflow-wrap:anywhere]"
+                  titleClassName="break-words [overflow-wrap:anywhere]"
                 />
                 <form onSubmit={submitCost} className="mt-5 grid gap-3 rounded-studio bg-white/55 p-4">
                   <input
@@ -1063,10 +1314,22 @@ export function LibrariesPage() {
                   <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
                     <Select
                       value={costForm.category}
-                      onChange={(event) =>
-                        setCostForm((current) => ({ ...current, category: event.target.value as CostItem["category"] }))
-                      }
-                      className="h-11 rounded-full border-0 bg-white px-4 text-sm font-bold outline-none ring-1 ring-black/[0.06]"
+                      onChange={(event) => {
+                        const category = event.target.value as CostItem["category"];
+                        setCostForm((current) => ({
+                          ...current,
+                          category,
+                          billingType:
+                            category === "people"
+                              ? "daily"
+                              : category === "software"
+                                ? "monthly"
+                                : current.category === "people" || current.category === "software"
+                                  ? "one-time"
+                                  : current.billingType
+                        }));
+                      }}
+                      className="h-11 min-w-0 max-w-full rounded-full border-0 bg-white px-4 text-sm font-bold outline-none ring-1 ring-black/[0.06]"
                     >
                       {(["software", "people", "outsourcing", "asset", "server", "other"] as CostItem["category"][]).map((category) => (
                         <option key={category} value={category}>{t(costCategoryKeys[category])}</option>
@@ -1080,14 +1343,14 @@ export function LibrariesPage() {
                         setCostForm((current) => ({ ...current, amount: Number(event.target.value) }))
                       }
                       placeholder={t("amount")}
-                      className="h-11 rounded-full border-0 bg-white px-4 text-sm font-bold outline-none ring-1 ring-black/[0.06]"
+                      className="h-11 min-w-0 max-w-full rounded-full border-0 bg-white px-4 text-sm font-bold outline-none ring-1 ring-black/[0.06]"
                     />
                     <Select
                       value={costForm.currency}
                       onChange={(event) =>
                         setCostForm((current) => ({ ...current, currency: event.target.value as CostItem["currency"] }))
                       }
-                      className="h-11 rounded-full border-0 bg-white px-4 text-sm font-bold outline-none ring-1 ring-black/[0.06]"
+                      className="h-11 min-w-0 max-w-full rounded-full border-0 bg-white px-4 text-sm font-bold outline-none ring-1 ring-black/[0.06]"
                     >
                       {(["CNY", "USD", "JPY", "EUR"] as CostItem["currency"][]).map((currency) => (
                         <option key={currency} value={currency}>{currency}</option>
@@ -1098,7 +1361,7 @@ export function LibrariesPage() {
                       onChange={(event) =>
                         setCostForm((current) => ({ ...current, billingType: event.target.value as CostItem["billingType"] }))
                       }
-                      className="h-11 rounded-full border-0 bg-white px-4 text-sm font-bold outline-none ring-1 ring-black/[0.06]"
+                      className="h-11 min-w-0 max-w-full rounded-full border-0 bg-white px-4 text-sm font-bold outline-none ring-1 ring-black/[0.06]"
                     >
                       {(["one-time", "monthly", "yearly", "hourly", "daily"] as CostItem["billingType"][]).map((billingType) => (
                         <option key={billingType} value={billingType}>{t(billingTypeKeys[billingType])}</option>
@@ -1112,36 +1375,161 @@ export function LibrariesPage() {
                 </form>
 
                 <div className="mt-5 grid gap-3">
-                  {data.costTemplates.map((cost) => (
-                    <div key={cost.id} className="rounded-studio bg-white/65 p-4">
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <h3 className="font-black">{cost.name}</h3>
-                          <p className="mt-1 text-sm font-bold text-muted">
-                            {t(costCategoryKeys[cost.category])} · {t(billingTypeKeys[cost.billingType])}
+                  {data.costTemplates.map((cost) => {
+                    const linkedPeopleCount = linkedPeopleByTemplate.get(cost.id) ?? 0;
+                    const linkedToolsCount = linkedToolsByTemplate.get(cost.id) ?? 0;
+                    const hasLinkedItems = linkedPeopleCount + linkedToolsCount > 0;
+                    const allowedBillingTypes: CostItem["billingType"][] = linkedPeopleCount
+                      ? ["daily"]
+                      : linkedToolsCount
+                        ? ["monthly", "yearly"]
+                        : ["one-time", "monthly", "yearly", "hourly", "daily"];
+
+                    return editingCostTemplateId === cost.id ? (
+                      <form
+                        key={cost.id}
+                        onSubmit={updateCostTemplate}
+                        className="grid min-w-0 gap-3 overflow-hidden rounded-studio bg-white p-4 shadow-soft ring-2 ring-ink/15"
+                      >
+                        <div className="flex min-w-0 flex-wrap items-start justify-between gap-x-3 gap-y-1">
+                          <p className="min-w-0 break-words text-sm font-black [overflow-wrap:anywhere]">
+                            {t("editCostTemplate")}
                           </p>
-                          <p className="mt-2 text-xs font-black text-ink/58">
-                            {t("linkedPeople")}: {linkedPeopleByTemplate.get(cost.id) ?? 0}
+                          <p className="max-w-full break-words text-xs font-black text-ink/52 [overflow-wrap:anywhere]">
+                            {t("linkedPeople")}: {linkedPeopleCount} · {t("softwareLibrary")}: {linkedToolsCount}
                           </p>
                         </div>
-                        <div className="flex shrink-0 items-center gap-2">
-                          <p className="text-right text-lg font-black">
-                            {cost.currency} {cost.amount}
-                          </p>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setPendingDelete({ type: "costTemplate", id: cost.id, label: cost.name })
+                        <input
+                          value={editingCostForm.name}
+                          onChange={(event) =>
+                            setEditingCostForm((current) => ({ ...current, name: event.target.value }))
+                          }
+                          placeholder={t("costTemplateName")}
+                          className="h-11 min-w-0 rounded-full border-0 bg-cloud/75 px-4 text-sm font-bold outline-none ring-1 ring-black/[0.06]"
+                        />
+                        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+                          <Select
+                            value={editingCostForm.category}
+                            onChange={(event) =>
+                              setEditingCostForm((current) => ({
+                                ...current,
+                                category: event.target.value as CostItem["category"]
+                              }))
                             }
-                            aria-label={`${t("delete")} ${cost.name}`}
-                            className="grid size-10 place-items-center rounded-full bg-white text-muted shadow-soft ring-1 ring-black/[0.04] transition hover:bg-coral hover:text-white"
+                            disabled={hasLinkedItems}
+                            className="h-11 min-w-0 max-w-full rounded-full border-0 bg-cloud/75 px-4 text-sm font-bold outline-none ring-1 ring-black/[0.06] disabled:cursor-not-allowed disabled:bg-cloud/45 disabled:text-ink/55"
                           >
-                            <Trash2 size={17} />
-                          </button>
+                            {(["software", "people", "outsourcing", "asset", "server", "other"] as CostItem["category"][]).map((category) => (
+                              <option key={category} value={category}>{t(costCategoryKeys[category])}</option>
+                            ))}
+                          </Select>
+                          <input
+                            type="number"
+                            min="0"
+                            value={editingCostForm.amount || ""}
+                            onChange={(event) =>
+                              setEditingCostForm((current) => ({
+                                ...current,
+                                amount: Number(event.target.value)
+                              }))
+                            }
+                            placeholder={t("amount")}
+                            className="h-11 min-w-0 rounded-full border-0 bg-cloud/75 px-4 text-sm font-bold outline-none ring-1 ring-black/[0.06]"
+                          />
+                          <Select
+                            value={editingCostForm.currency}
+                            onChange={(event) =>
+                              setEditingCostForm((current) => ({
+                                ...current,
+                                currency: event.target.value as CostItem["currency"]
+                              }))
+                            }
+                            className="h-11 min-w-0 max-w-full rounded-full border-0 bg-cloud/75 px-4 text-sm font-bold outline-none ring-1 ring-black/[0.06]"
+                          >
+                            {currencyOptions.map((currency) => (
+                              <option key={currency} value={currency}>{currency}</option>
+                            ))}
+                          </Select>
+                          <Select
+                            value={editingCostForm.billingType}
+                            onChange={(event) =>
+                              setEditingCostForm((current) => ({
+                                ...current,
+                                billingType: event.target.value as CostItem["billingType"]
+                              }))
+                            }
+                            disabled={linkedPeopleCount > 0}
+                            className="h-11 min-w-0 max-w-full rounded-full border-0 bg-cloud/75 px-4 text-sm font-bold outline-none ring-1 ring-black/[0.06] disabled:cursor-not-allowed disabled:bg-cloud/45 disabled:text-ink/55"
+                          >
+                            {allowedBillingTypes.map((billingType) => (
+                              <option key={billingType} value={billingType}>{t(billingTypeKeys[billingType])}</option>
+                            ))}
+                          </Select>
+                        </div>
+                        {hasLinkedItems ? (
+                          <p className="inline-flex items-start gap-2 rounded-2xl bg-limepop/20 px-3 py-2 text-xs font-black leading-5 text-ink/62">
+                            <Link2 size={14} className="mt-0.5 shrink-0" />
+                            {t("templateManagedFields")}
+                          </p>
+                        ) : null}
+                        <div className="flex flex-wrap gap-2">
+                          <Button type="submit" size="sm" className="min-w-28">
+                            <Save size={16} />
+                            {t("updateCostTemplate")}
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              setEditingCostTemplateId(null);
+                              setEditingCostForm(defaultCost);
+                            }}
+                          >
+                            <X size={16} />
+                            {t("cancel")}
+                          </Button>
+                        </div>
+                      </form>
+                    ) : (
+                      <div key={cost.id} className="min-w-0 overflow-hidden rounded-studio bg-white/65 p-4">
+                        <div className="grid min-w-0 gap-3">
+                          <div className="min-w-0">
+                            <h3 className="break-words font-black [overflow-wrap:anywhere]">{cost.name}</h3>
+                            <p className="mt-1 break-words text-sm font-bold text-muted [overflow-wrap:anywhere]">
+                              {t(costCategoryKeys[cost.category])} · {t(billingTypeKeys[cost.billingType])}
+                            </p>
+                            <p className="mt-2 break-words text-xs font-black text-ink/58 [overflow-wrap:anywhere]">
+                              {t("linkedPeople")}: {linkedPeopleCount} · {t("softwareLibrary")}: {linkedToolsCount}
+                            </p>
+                          </div>
+                          <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
+                            <p className="max-w-full whitespace-nowrap text-right text-[clamp(0.78rem,4vw,1.125rem)] font-black tabular-nums">
+                              {formatCurrencyAmount(cost.currency, cost.amount)}
+                            </p>
+                            <button
+                              type="button"
+                              onClick={() => startEditingCostTemplate(cost)}
+                              aria-label={`${t("editCostTemplate")} ${cost.name}`}
+                              className="grid size-10 place-items-center rounded-full bg-white text-muted shadow-soft ring-1 ring-black/[0.04] transition hover:bg-limepop hover:text-ink"
+                            >
+                              <Pencil size={17} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setPendingDelete({ type: "costTemplate", id: cost.id, label: cost.name })
+                              }
+                              aria-label={`${t("delete")} ${cost.name}`}
+                              className="grid size-10 place-items-center rounded-full bg-white text-muted shadow-soft ring-1 ring-black/[0.04] transition hover:bg-coral hover:text-white"
+                            >
+                              <Trash2 size={17} />
+                            </button>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </Card>
             </section>

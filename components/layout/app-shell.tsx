@@ -15,19 +15,32 @@ import {
   LogOut,
   PackagePlus,
   Undo2,
+  Workflow,
   X
 } from "lucide-react";
 import { BrandLockup } from "@/components/brand/brand-lockup";
 import { LanguageToggle } from "@/components/i18n/language-toggle";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { useAuth, useI18n } from "@/components/providers/app-providers";
+import { ActionConfirmDialog } from "@/components/ui/action-confirm-dialog";
 import { Button } from "@/components/ui/button";
 import { ModalPortal } from "@/components/ui/modal-portal";
-import { projectsApi } from "@/lib/api";
-import { formatDemoEntityName, projectNameKeys, taskTitleKeys, translateDomainLabel } from "@/lib/i18n/domain-labels";
+import { librariesApi, projectsApi } from "@/lib/api";
+import {
+  billingTypeKeys,
+  formatDemoEntityName,
+  projectNameKeys,
+  taskTitleKeys,
+  translateDomainLabel
+} from "@/lib/i18n/domain-labels";
 import { formatLocalizedDate } from "@/lib/i18n/formatters";
+import { languageLocales } from "@/lib/i18n/translations";
 import { projectPath } from "@/lib/utils/app-routes";
 import { cn } from "@/lib/utils/cn";
+import {
+  listSubscriptionPaymentReminders,
+  type SubscriptionPaymentReminder
+} from "@/lib/utils/subscription-reminders";
 
 const navItems = [
   { labelKey: "navDashboard", href: "/dashboard", icon: LayoutDashboard },
@@ -35,6 +48,7 @@ const navItems = [
   { labelKey: "navProjects", href: "/projects", icon: FolderKanban },
   { labelKey: "navCosts", href: "/costs", icon: CircleDollarSign },
   { labelKey: "navLibraries", href: "/libraries", icon: PackagePlus },
+  { labelKey: "navWorkflow", href: "/workflow", icon: Workflow },
   { labelKey: "navArchive", href: "/archive", icon: Archive }
 ] as const;
 
@@ -45,7 +59,7 @@ const formatNavigationGreeting = (template: string, name: string) =>
   template.replace("{name}", () => name);
 
 type AppShellProps = {
-  beforeNavigate?: () => boolean;
+  beforeNavigate?: (proceed: () => void) => boolean;
   children: React.ReactNode;
 };
 
@@ -53,21 +67,32 @@ type DueTodayItem = {
   completed: boolean;
   dueDate: string;
   projectId: string;
+  projectIsExample?: boolean;
   projectName: string;
   reminderId: string;
   taskId: string;
   taskTitle: string;
 };
 
+type SubscriptionReminderItem = SubscriptionPaymentReminder & {
+  reminderId: string;
+};
+
 const dismissedDueTodayStorageKey = (workspaceId: string) =>
   `studio-map-os.workspace.${workspaceId}.dismissed-due-today-items`;
+
+const dismissedSubscriptionPaymentStorageKey = (workspaceId: string) =>
+  `studio-map-os.workspace.${workspaceId}.dismissed-subscription-payment-items`;
 
 const createDueTodayReminderId = (projectId: string, taskId: string, dueDate: string) =>
   `${projectId}:${taskId}:${dueDate}`;
 
-const readDismissedDueTodayItems = (workspaceId: string) => {
+const createSubscriptionPaymentReminderId = (toolId: string, dueDate: string) =>
+  `subscription:${toolId}:${dueDate}`;
+
+const readDismissedItems = (storageKey: string) => {
   try {
-    const stored = window.localStorage.getItem(dismissedDueTodayStorageKey(workspaceId));
+    const stored = window.localStorage.getItem(storageKey);
     const parsed = stored ? (JSON.parse(stored) as unknown) : [];
 
     return new Set(Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : []);
@@ -75,6 +100,12 @@ const readDismissedDueTodayItems = (workspaceId: string) => {
     return new Set<string>();
   }
 };
+
+const readDismissedDueTodayItems = (workspaceId: string) =>
+  readDismissedItems(dismissedDueTodayStorageKey(workspaceId));
+
+const readDismissedSubscriptionPaymentItems = (workspaceId: string) =>
+  readDismissedItems(dismissedSubscriptionPaymentStorageKey(workspaceId));
 
 const toDateKey = (date: Date) => {
   const year = date.getFullYear();
@@ -100,28 +131,49 @@ export function AppShell({ beforeNavigate, children }: AppShellProps) {
   });
   const [showMobileDock, setShowMobileDock] = useState(false);
   const [dueTodayItems, setDueTodayItems] = useState<DueTodayItem[]>([]);
+  const [subscriptionReminderItems, setSubscriptionReminderItems] = useState<SubscriptionReminderItem[]>([]);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
+  const [isSigningOut, setIsSigningOut] = useState(false);
   const workspaceId = user?.workspaceId;
   const registeredName = user?.name.trim();
   const navigationGreeting = registeredName
     ? formatNavigationGreeting(t("navGreeting"), registeredName)
     : null;
 
-  const canNavigate = () => beforeNavigate?.() ?? true;
+  const canNavigate = (proceed: () => void) => beforeNavigate?.(proceed) ?? true;
 
-  const handleLinkNavigate = (event: { preventDefault: () => void }) => {
-    if (!canNavigate()) {
+  const handleLinkNavigate = (
+    event: { preventDefault: () => void },
+    href: string
+  ) => {
+    if (!canNavigate(() => router.push(href))) {
       event.preventDefault();
     }
   };
 
-  const handleSignOut = async () => {
-    if (!canNavigate() || !window.confirm(t("logoutConfirmMessage"))) {
+  const handleSignOut = () => {
+    const openLogoutConfirmation = () => setLogoutConfirmOpen(true);
+
+    if (canNavigate(openLogoutConfirmation)) {
+      openLogoutConfirmation();
+    }
+  };
+
+  const confirmSignOut = async () => {
+    if (isSigningOut) {
       return;
     }
 
-    await signOut();
-    router.replace("/login");
+    setIsSigningOut(true);
+
+    try {
+      await signOut();
+      setLogoutConfirmOpen(false);
+      router.replace("/login");
+    } finally {
+      setIsSigningOut(false);
+    }
   };
 
   const handleDueTodayDismiss = (item: DueTodayItem) => {
@@ -136,6 +188,22 @@ export function AppShell({ beforeNavigate, children }: AppShellProps) {
       JSON.stringify([...dismissed])
     );
     setDueTodayItems((current) => current.filter((currentItem) => currentItem.reminderId !== item.reminderId));
+  };
+
+  const handleSubscriptionReminderDismiss = (item: SubscriptionReminderItem) => {
+    if (!workspaceId) {
+      return;
+    }
+
+    const dismissed = readDismissedSubscriptionPaymentItems(workspaceId);
+    dismissed.add(item.reminderId);
+    window.localStorage.setItem(
+      dismissedSubscriptionPaymentStorageKey(workspaceId),
+      JSON.stringify([...dismissed])
+    );
+    setSubscriptionReminderItems((current) =>
+      current.filter((currentItem) => currentItem.reminderId !== item.reminderId)
+    );
   };
 
   const stopMobileNavDrag = () => {
@@ -268,52 +336,69 @@ export function AppShell({ beforeNavigate, children }: AppShellProps) {
 
     if (!workspaceId) {
       setDueTodayItems([]);
+      setSubscriptionReminderItems([]);
       return () => {
         isMounted = false;
       };
     }
     const activeWorkspaceId = workspaceId;
 
-    async function loadDueTodayItems() {
+    async function loadNotificationItems() {
       try {
-        const todayKey = toDateKey(new Date());
-        const dismissedItems = readDismissedDueTodayItems(activeWorkspaceId);
-        const projects = await projectsApi.listProjects();
+        const today = new Date();
+        const todayKey = toDateKey(today);
+        const [projectsResult, toolsResult] = await Promise.allSettled([
+          projectsApi.listProjects(),
+          librariesApi.listTools()
+        ]);
+        const projects = projectsResult.status === "fulfilled" ? projectsResult.value : [];
+        const tools = toolsResult.status === "fulfilled" ? toolsResult.value : [];
         const nextItems = projects.flatMap((project) =>
           project.phases.flatMap((phase) =>
             phase.deliverables.flatMap((deliverable) =>
               deliverable.tasks
-                .filter((task) => task.dueDate === todayKey)
+                .filter((task) => task.dueDate === todayKey && !task.completed)
                 .map((task) => ({
                   completed: task.completed,
                   dueDate: task.dueDate ?? todayKey,
                   projectId: project.id,
+                  projectIsExample: project.isExample,
                   projectName: project.name,
                   reminderId: createDueTodayReminderId(project.id, task.id, task.dueDate ?? todayKey),
                   taskId: task.id,
                   taskTitle: task.title
                 }))
-                .filter((item) => !dismissedItems.has(item.reminderId))
             )
           )
         );
+        const nextSubscriptionItems = listSubscriptionPaymentReminders(tools, today, 3)
+          .map((item) => ({
+            ...item,
+            reminderId: createSubscriptionPaymentReminderId(item.toolId, item.dueDate)
+          }));
 
         if (isMounted) {
-          setDueTodayItems(nextItems);
+          const latestDismissedDueTodayItems = readDismissedDueTodayItems(activeWorkspaceId);
+          const latestDismissedSubscriptionItems = readDismissedSubscriptionPaymentItems(activeWorkspaceId);
+          setDueTodayItems(nextItems.filter((item) => !latestDismissedDueTodayItems.has(item.reminderId)));
+          setSubscriptionReminderItems(
+            nextSubscriptionItems.filter((item) => !latestDismissedSubscriptionItems.has(item.reminderId))
+          );
         }
       } catch {
         if (isMounted) {
           setDueTodayItems([]);
+          setSubscriptionReminderItems([]);
         }
       }
     }
 
-    loadDueTodayItems();
+    loadNotificationItems();
 
     return () => {
       isMounted = false;
     };
-  }, [workspaceId]);
+  }, [notificationsOpen, workspaceId]);
 
   return (
     <div className="relative isolate min-h-screen overflow-x-hidden p-3 sm:p-5 xl:p-6">
@@ -336,7 +421,7 @@ export function AppShell({ beforeNavigate, children }: AppShellProps) {
                     key={item.labelKey}
                     href={item.href}
                     prefetch={false}
-                    onNavigate={handleLinkNavigate}
+                    onNavigate={(event) => handleLinkNavigate(event, item.href)}
                     aria-label={t(item.labelKey)}
                     className={cn(
                       "grid size-[3.25rem] place-items-center rounded-full transition duration-200",
@@ -355,32 +440,27 @@ export function AppShell({ beforeNavigate, children }: AppShellProps) {
         </aside>
 
         <main className="relative z-0 flex min-w-0 flex-1 flex-col overflow-hidden rounded-studio-xl bg-white/[0.34] shadow-soft ring-1 ring-white/[0.34] backdrop-blur-xl">
-          <header className="flex items-start justify-between gap-3 px-4 py-4 max-[482px]:gap-2 max-[370px]:gap-1.5 sm:px-6 xl:px-8">
-            <div className="min-w-0 flex-1">
-              <Link href="/dashboard" prefetch={false} onNavigate={handleLinkNavigate} className="block w-fit max-w-full">
-                <BrandLockup subtitle={t("loginEyebrow")} size="shell" />
-              </Link>
-              {navigationGreeting ? (
-                <p
-                  className="mt-1.5 break-words text-xs font-black leading-tight text-[rgb(28,35,40)] sm:text-sm"
-                  title={navigationGreeting}
-                >
-                  {navigationGreeting}
-                </p>
-              ) : null}
-            </div>
+          <header className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-3 px-4 py-4 max-[482px]:gap-x-2 max-[370px]:gap-x-1.5 sm:px-6 xl:px-8">
+            <Link
+              href="/dashboard"
+              prefetch={false}
+              onNavigate={(event) => handleLinkNavigate(event, "/dashboard")}
+              className="col-start-1 row-start-1 block w-fit max-w-full self-start"
+            >
+              <BrandLockup subtitle={t("loginEyebrow")} size="shell" />
+            </Link>
 
-            <div className="ml-auto flex shrink-0 items-center gap-2 self-start max-[482px]:gap-1 max-[370px]:gap-[3px]">
-              <LanguageToggle compact variant="dropdown" />
+            <div className="col-start-2 row-start-1 ml-auto flex shrink-0 items-start gap-2 self-start max-[482px]:gap-1 max-[370px]:gap-[3px]">
+              <LanguageToggle compact variant="dropdown" className="self-start" />
               <Button
                 variant="ghost"
                 size="icon"
                 aria-label={t("notifications")}
-                className={cn("relative", responsiveHeaderControlClass)}
+                className={cn("relative self-start", responsiveHeaderControlClass)}
                 onClick={() => setNotificationsOpen(true)}
               >
                 <Bell size={20} />
-                {dueTodayItems.length ? (
+                {dueTodayItems.length + subscriptionReminderItems.length ? (
                   <span className="absolute right-2.5 top-2.5 size-2.5 rounded-full bg-coral ring-2 ring-white max-[482px]:right-2 max-[482px]:top-2 max-[482px]:size-2 max-[370px]:right-1.5 max-[370px]:top-1.5" />
                 ) : null}
               </Button>
@@ -388,16 +468,30 @@ export function AppShell({ beforeNavigate, children }: AppShellProps) {
                 variant="primary"
                 size="icon"
                 aria-label={t("goBack")}
-                className={responsiveHeaderControlClass}
+                className={cn("self-start hover:!translate-y-0", responsiveHeaderControlClass)}
                 onClick={() => {
-                  if (canNavigate()) {
-                    router.back();
+                  const goBack = () => router.back();
+
+                  if (canNavigate(goBack)) {
+                    goBack();
                   }
                 }}
               >
                 <Undo2 size={24} strokeWidth={1.9} />
               </Button>
             </div>
+
+            {navigationGreeting ? (
+              <p
+                className="col-start-1 row-start-2 mt-1.5 min-w-0 break-words text-xs font-black leading-tight text-[rgb(28,35,40)] sm:text-sm"
+                title={navigationGreeting}
+              >
+                {navigationGreeting}
+              </p>
+            ) : null}
+            <p className="col-start-2 row-start-2 mt-3 w-12 justify-self-end whitespace-nowrap text-center text-[8.4px] font-bold leading-none text-[rgb(28,35,40)] max-[482px]:w-10 max-[400px]:w-9 max-[370px]:w-[30px] max-[370px]:text-[7px] sm:text-[9.8px]">
+              V 1.2
+            </p>
           </header>
 
           <div
@@ -419,7 +513,7 @@ export function AppShell({ beforeNavigate, children }: AppShellProps) {
                   key={item.labelKey}
                   href={item.href}
                   prefetch={false}
-                  onNavigate={handleLinkNavigate}
+                  onNavigate={(event) => handleLinkNavigate(event, item.href)}
                   className={cn(
                     "inline-flex h-11 shrink-0 items-center gap-2 rounded-full px-4 text-sm font-bold",
                     active ? "bg-[#ffc700] text-ink" : "bg-white text-muted"
@@ -452,27 +546,29 @@ export function AppShell({ beforeNavigate, children }: AppShellProps) {
         )}
       >
         <nav className="mx-auto flex w-fit max-w-[calc(100vw-1.5rem)] items-center gap-1.5 rounded-[2rem] bg-white/[0.56] p-2 shadow-[0_24px_70px_rgba(25,55,60,0.24)] ring-1 ring-white/[0.62] backdrop-blur-2xl max-[400px]:gap-1 max-[400px]:rounded-[1.5rem] max-[400px]:p-1 max-[360px]:rounded-[22px] max-[340px]:gap-0.5 max-[340px]:p-0.5">
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
+          <div className="studio-scroll flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto overscroll-x-contain scroll-smooth touch-pan-x [-webkit-overflow-scrolling:touch] max-[400px]:gap-1 max-[340px]:gap-0.5">
+            {navItems.map((item) => {
+              const Icon = item.icon;
+              const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
 
-            return (
-              <Link
-                key={item.labelKey}
-                href={item.href}
-                prefetch={false}
-                onNavigate={handleLinkNavigate}
-                aria-label={t(item.labelKey)}
-                tabIndex={showMobileDock ? undefined : -1}
-                className={cn(
-                  "grid size-11 shrink-0 place-items-center rounded-2xl transition duration-200 active:scale-95 max-[400px]:size-10 max-[400px]:rounded-[14px] max-[360px]:size-8 max-[360px]:rounded-[10px]",
-                  active ? "scale-105 bg-[#ffc700] text-ink shadow-soft" : "bg-white/[0.34] text-ink/70 hover:bg-white/70 hover:text-ink"
-                )}
-              >
-                <Icon className="max-[400px]:size-[18px] max-[360px]:size-3.5" size={20} strokeWidth={2.25} />
-              </Link>
-            );
-          })}
+              return (
+                <Link
+                  key={item.labelKey}
+                  href={item.href}
+                  prefetch={false}
+                  onNavigate={(event) => handleLinkNavigate(event, item.href)}
+                  aria-label={t(item.labelKey)}
+                  tabIndex={showMobileDock ? undefined : -1}
+                  className={cn(
+                    "grid size-11 shrink-0 place-items-center rounded-2xl transition duration-200 active:scale-95 max-[400px]:size-10 max-[400px]:rounded-[14px] max-[360px]:size-8 max-[360px]:rounded-[10px]",
+                    active ? "scale-105 bg-[#ffc700] text-ink shadow-soft" : "bg-white/[0.34] text-ink/70 hover:bg-white/70 hover:text-ink"
+                  )}
+                >
+                  <Icon className="max-[400px]:size-[18px] max-[360px]:size-3.5" size={20} strokeWidth={2.25} />
+                </Link>
+              );
+            })}
+          </div>
           <span
             className="mx-1 h-8 w-px shrink-0 bg-ink/10 max-[400px]:mx-0.5 max-[400px]:h-7 max-[360px]:h-6 max-[340px]:mx-0 max-[340px]:h-5"
             aria-hidden="true"
@@ -491,12 +587,12 @@ export function AppShell({ beforeNavigate, children }: AppShellProps) {
       {notificationsOpen ? (
         <ModalPortal>
           <div className="fixed inset-0 z-[120] grid place-items-center bg-ink/32 px-4 py-6 backdrop-blur-sm">
-            <div className="w-full max-w-lg rounded-studio-lg bg-[#2c2626] p-5 text-white shadow-[0_28px_80px_rgba(28,35,40,0.24)] ring-1 ring-white/[0.08]">
+            <div className="max-h-[calc(100dvh-3rem)] w-full max-w-lg overflow-y-auto overflow-x-hidden rounded-studio-lg bg-[#2c2626] p-5 text-white shadow-[0_28px_80px_rgba(28,35,40,0.24)] ring-1 ring-white/[0.08]">
               <div className="flex items-start justify-between gap-4">
-                <div>
-                  <p className="text-sm font-black uppercase text-white/45">{t("notifications")}</p>
-                  <h2 className="mt-1 text-2xl font-black">{t("dueTodayTitle")}</h2>
-                  <p className="mt-2 text-sm font-bold leading-6 text-white/62">{t("dueTodayModalBody")}</p>
+                <div className="min-w-0">
+                  <p className="break-words text-sm font-black uppercase text-white/45 [overflow-wrap:anywhere]">Studio Map OS</p>
+                  <h2 className="mt-1 break-words text-2xl font-black [overflow-wrap:anywhere]">{t("notifications")}</h2>
+                  <p className="mt-2 break-words text-sm font-bold leading-6 text-white/62 [overflow-wrap:anywhere]">{t("notificationsModalBody")}</p>
                 </div>
                 <button
                   type="button"
@@ -508,72 +604,176 @@ export function AppShell({ beforeNavigate, children }: AppShellProps) {
                 </button>
               </div>
 
-              <div className="mt-5 grid gap-3">
+              <div className="mt-5 grid gap-5">
                 {dueTodayItems.length ? (
-                  dueTodayItems.map((item) => {
-                    const projectName = formatDemoEntityName(
-                      translateDomainLabel(item.projectName, projectNameKeys, t),
-                      item.projectId,
-                      "project",
-                      t
-                    );
-                    const taskTitle = translateDomainLabel(item.taskTitle, taskTitleKeys, t) || t("untitledTask");
-                    const openProject = () => {
-                      if (!canNavigate()) {
-                        return;
-                      }
+                  <section className="min-w-0">
+                    <h3 className="mb-2 break-words text-xs font-black uppercase tracking-[0.12em] text-white/58 [overflow-wrap:anywhere]">
+                      {t("dueTodayTitle")}
+                    </h3>
+                    <div className="grid gap-3">
+                      {dueTodayItems.map((item) => {
+                        const projectName = formatDemoEntityName(
+                          translateDomainLabel(item.projectName, projectNameKeys, t),
+                          item.projectId,
+                          "project",
+                          t,
+                          item.projectIsExample
+                        );
+                        const taskTitle = translateDomainLabel(item.taskTitle, taskTitleKeys, t) || t("untitledTask");
+                        const openProject = () => {
+                          const continueToProject = () => {
+                            setNotificationsOpen(false);
+                            router.push(projectPath(item.projectId));
+                          };
 
-                      setNotificationsOpen(false);
-                      router.push(projectPath(item.projectId));
-                    };
-
-                    return (
-                      <div
-                        key={item.reminderId}
-                        role="link"
-                        tabIndex={0}
-                        onClick={openProject}
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter" || event.key === " ") {
-                            event.preventDefault();
-                            openProject();
+                          if (canNavigate(continueToProject)) {
+                            continueToProject();
                           }
-                        }}
-                        className="relative cursor-pointer rounded-studio bg-[#e9e5df] py-4 pl-14 pr-4 text-ink transition hover:-translate-y-0.5 hover:bg-[#f2eee8]"
-                      >
-                        <button
-                          type="button"
-                          aria-label={`${t("markDone")} ${taskTitle}`}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            handleDueTodayDismiss(item);
-                          }}
-                          className="absolute left-3 top-3 grid size-8 place-items-center rounded-full bg-white text-ink shadow-soft ring-1 ring-ink/10 transition hover:bg-[#ffc700]"
-                        >
-                          <CheckCircle2 size={18} strokeWidth={2.2} />
-                        </button>
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <h3 className="truncate text-lg font-black">{projectName}</h3>
-                            <p className="mt-1 text-sm font-bold text-white">{taskTitle}</p>
+                        };
+
+                        return (
+                          <div
+                            key={item.reminderId}
+                            role="link"
+                            tabIndex={0}
+                            onClick={openProject}
+                            onKeyDown={(event) => {
+                              if (
+                                event.target === event.currentTarget &&
+                                (event.key === "Enter" || event.key === " ")
+                              ) {
+                                event.preventDefault();
+                                openProject();
+                              }
+                            }}
+                            className="relative min-w-0 cursor-pointer overflow-hidden rounded-studio bg-[#e9e5df] py-4 pl-14 pr-4 text-ink transition hover:-translate-y-0.5 hover:bg-[#f2eee8]"
+                          >
+                            <button
+                              type="button"
+                              aria-label={`${t("markDone")} ${taskTitle}`}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                handleDueTodayDismiss(item);
+                              }}
+                              className="absolute left-3 top-3 grid size-8 place-items-center rounded-full bg-white text-ink shadow-soft ring-1 ring-ink/10 transition hover:bg-[#ffc700]"
+                            >
+                              <CheckCircle2 size={18} strokeWidth={2.2} />
+                            </button>
+                            <div className="flex min-w-0 flex-col items-start gap-3 sm:flex-row sm:justify-between">
+                              <div className="min-w-0">
+                                <h4 className="break-words text-lg font-black [overflow-wrap:anywhere]">{projectName}</h4>
+                                <p className="mt-1 break-words text-sm font-bold text-ink/72 [overflow-wrap:anywhere]">{taskTitle}</p>
+                              </div>
+                              <span className="max-w-full shrink-0 break-words rounded-full bg-[#ffc700] px-3 py-1 text-xs font-black text-ink [overflow-wrap:anywhere]">
+                                {formatLocalizedDate(item.dueDate, language)}
+                              </span>
+                            </div>
                           </div>
-                          <span className="shrink-0 rounded-full bg-[#ffc700] px-3 py-1 text-xs font-black text-ink">
-                            {formatLocalizedDate(item.dueDate, language)}
-                          </span>
-                        </div>
-                      </div>
-                    );
-                  })
-                ) : (
-                  <p className="rounded-studio bg-[#e9e5df] p-4 text-sm font-bold text-ink">
-                    {t("dueTodayEmpty")}
+                        );
+                      })}
+                    </div>
+                  </section>
+                ) : null}
+
+                {subscriptionReminderItems.length ? (
+                  <section className="min-w-0">
+                    <h3 className="mb-2 break-words text-xs font-black uppercase tracking-[0.12em] text-white/58 [overflow-wrap:anywhere]">
+                      {t("subscriptionPaymentReminderTitle")}
+                    </h3>
+                    <div className="grid gap-3">
+                      {subscriptionReminderItems.map((item) => {
+                        const openLibraries = () => {
+                          const continueToLibraries = () => {
+                            setNotificationsOpen(false);
+                            router.push("/libraries");
+                          };
+
+                          if (canNavigate(continueToLibraries)) {
+                            continueToLibraries();
+                          }
+                        };
+                        const amount = new Intl.NumberFormat(languageLocales[language], {
+                          maximumFractionDigits: 2
+                        }).format(item.amount);
+
+                        return (
+                          <div
+                            key={item.reminderId}
+                            role="link"
+                            tabIndex={0}
+                            onClick={openLibraries}
+                            onKeyDown={(event) => {
+                              if (
+                                event.target === event.currentTarget &&
+                                (event.key === "Enter" || event.key === " ")
+                              ) {
+                                event.preventDefault();
+                                openLibraries();
+                              }
+                            }}
+                            className="relative min-w-0 cursor-pointer overflow-hidden rounded-studio bg-[#e9e5df] py-4 pl-14 pr-4 text-ink transition hover:-translate-y-0.5 hover:bg-[#f2eee8]"
+                          >
+                            <button
+                              type="button"
+                              aria-label={`${t("markDone")} ${item.toolName}`}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                handleSubscriptionReminderDismiss(item);
+                              }}
+                              className="absolute left-3 top-3 grid size-8 place-items-center rounded-full bg-white text-ink shadow-soft ring-1 ring-ink/10 transition hover:bg-[#ffc700]"
+                            >
+                              <CheckCircle2 size={18} strokeWidth={2.2} />
+                            </button>
+                            <div className="flex min-w-0 flex-col items-start gap-3">
+                              <div className="min-w-0">
+                                <h4 className="break-words text-sm font-light leading-5 [overflow-wrap:anywhere]">{item.toolName}</h4>
+                                <p className="mt-1 break-words text-xs font-light leading-5 text-ink/72 [overflow-wrap:anywhere]">
+                                  {item.currency} {amount} · {t(billingTypeKeys[item.billingCycle])}
+                                </p>
+                                {item.accountEmail ? (
+                                  <p className="mt-1 break-words text-[0.68rem] font-light leading-4 text-ink/52 [overflow-wrap:anywhere]">
+                                    {item.accountEmail}
+                                  </p>
+                                ) : null}
+                              </div>
+                              <div className="max-w-full shrink-0">
+                                <span className="inline-block max-w-full break-words rounded-full bg-[#ffc700] px-3 py-1 text-xs font-bold text-ink [overflow-wrap:anywhere]">
+                                  {t("subscriptionPaymentDueLabel")}: {formatLocalizedDate(item.dueDate, language)}
+                                </span>
+                                <p className="mt-2 break-words text-xs font-light leading-5 text-coral [overflow-wrap:anywhere]">
+                                  {t("subscriptionPaymentRecharge")}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </section>
+                ) : null}
+
+                {!dueTodayItems.length && !subscriptionReminderItems.length ? (
+                  <p className="break-words rounded-studio bg-[#e9e5df] p-4 text-sm font-bold text-ink [overflow-wrap:anywhere]">
+                    {t("notificationsEmpty")}
                   </p>
-                )}
+                ) : null}
               </div>
             </div>
           </div>
         </ModalPortal>
       ) : null}
+      <ActionConfirmDialog
+        open={logoutConfirmOpen}
+        busy={isSigningOut}
+        title={t("logoutConfirmTitle")}
+        description={t("logoutConfirmMessage")}
+        cancelLabel={t("cancel")}
+        confirmLabel={t("confirmLogout")}
+        onCancel={() => setLogoutConfirmOpen(false)}
+        onConfirm={() => {
+          void confirmSignOut();
+        }}
+      />
     </div>
   );
 }

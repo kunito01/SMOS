@@ -2,15 +2,31 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { CostDisplayCurrencyProvider } from "@/components/costs/use-cost-display-currency";
+import { CloudKitAuthProvider } from "@/components/providers/cloudkit-auth-provider";
 import { JellyInteractions } from "@/components/providers/jelly-interactions";
 import { authApi } from "@/lib/api";
-import type { LocalAuthUser, RegisterPayload, RegisterResult } from "@/lib/api/auth";
+import type {
+  AppleAccountLoginResolution,
+  AppleAccountRecoveryPayload,
+  AppleAccountSetupPayload,
+  LocalAuthUser,
+  RegisterPayload,
+  RegisterResult
+} from "@/lib/api/auth";
+import type { CloudKitUserIdentity } from "@/lib/storage/cloudkit/cloudkit-client";
+import { keepNumericWordPairsTogether } from "@/lib/i18n/non-breaking";
 import { Language, TranslationKey, languageLocales, languages, translations } from "@/lib/i18n/translations";
 
 type AuthContextValue = {
   user: LocalAuthUser | null;
   isReady: boolean;
   signIn: (email: string, password: string) => Promise<void>;
+  inspectAppleAccount: (identity: CloudKitUserIdentity) => Promise<AppleAccountLoginResolution>;
+  provisionAppleAccount: (payload: AppleAccountSetupPayload) => Promise<RegisterResult>;
+  recoverAppleAccount: (payload: AppleAccountRecoveryPayload) => Promise<{ token: string; user: LocalAuthUser }>;
+  unlockAppleAccountOffline: () => Promise<{ user: LocalAuthUser } | null>;
+  commitAppleAccountUser: (user: LocalAuthUser) => void;
+  signInDevelopmentTestAccount: () => Promise<void>;
   signUp: (payload: RegisterPayload) => Promise<RegisterResult>;
   signOut: () => Promise<void>;
 };
@@ -72,12 +88,36 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
     window.localStorage.setItem(languageStorageKey, nextLanguage);
   }, []);
 
+  const handleCloudKitSignedOut = useCallback(async () => {
+    if (await authApi.logoutAppleSession()) {
+      setUser(null);
+    }
+  }, []);
+
   const authValue = useMemo<AuthContextValue>(
     () => ({
       user,
       isReady,
       signIn: async (email: string, password: string) => {
         const { user: nextUser } = await authApi.login({ email, password });
+
+        setUser(nextUser);
+      },
+      inspectAppleAccount: async (identity: CloudKitUserIdentity) => {
+        return authApi.inspectAppleAccount(identity);
+      },
+      provisionAppleAccount: async (payload: AppleAccountSetupPayload) => {
+        return authApi.provisionAppleAccount(payload);
+      },
+      recoverAppleAccount: async (payload: AppleAccountRecoveryPayload) => {
+        return authApi.recoverAppleAccount(payload);
+      },
+      unlockAppleAccountOffline: async () => {
+        return authApi.unlockAppleAccountOffline();
+      },
+      commitAppleAccountUser: (nextUser: LocalAuthUser) => setUser(nextUser),
+      signInDevelopmentTestAccount: async () => {
+        const { user: nextUser } = await authApi.loginDevelopmentTestAccount();
 
         setUser(nextUser);
       },
@@ -109,19 +149,21 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
         const nextLanguage = languages[(currentIndex + 1) % languages.length];
         setLanguage(nextLanguage);
       },
-      t: (key: TranslationKey) => translations[language][key]
+      t: (key: TranslationKey) => keepNumericWordPairsTogether(translations[language][key])
     }),
     [language, setLanguage]
   );
 
   return (
     <LanguageContext.Provider value={languageValue}>
-      <AuthContext.Provider value={authValue}>
-        <CostDisplayCurrencyProvider>
-          <JellyInteractions />
-          {children}
-        </CostDisplayCurrencyProvider>
-      </AuthContext.Provider>
+      <CloudKitAuthProvider onSignedOut={handleCloudKitSignedOut}>
+        <AuthContext.Provider value={authValue}>
+          <CostDisplayCurrencyProvider>
+            <JellyInteractions />
+            {children}
+          </CostDisplayCurrencyProvider>
+        </AuthContext.Provider>
+      </CloudKitAuthProvider>
     </LanguageContext.Provider>
   );
 }

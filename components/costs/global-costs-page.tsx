@@ -200,7 +200,8 @@ export function GlobalCostsPage() {
                                   translateDomainLabel(project.name, projectNameKeys, t),
                                   project.id,
                                   "project",
-                                  t
+                                  t,
+                                  project.isExample
                                 )}
                               </h3>
                             </div>

@@ -1,7 +1,8 @@
 "use client";
 
 import { Fragment, useEffect, useMemo, useState } from "react";
-import { Check, Plus, Save, Trash2, X } from "lucide-react";
+import Link from "next/link";
+import { ArrowUpRight, Plus, Save, Trash2, X } from "lucide-react";
 import { projectsApi } from "@/lib/api";
 import type { UpdateProjectTimelineInput } from "@/lib/api/projects";
 import type { Project, Task, TimelineCustomRow } from "@/lib/types";
@@ -9,6 +10,7 @@ import type { TranslationKey } from "@/lib/i18n/translations";
 import { DeleteConfirmDialog } from "@/components/ui/delete-confirm-dialog";
 import { ModalPortal } from "@/components/ui/modal-portal";
 import { Select } from "@/components/ui/select";
+import { projectCostsPath } from "@/lib/utils/app-routes";
 import { cn } from "@/lib/utils/cn";
 
 type TimelineSettingsModalProps = {
@@ -64,37 +66,68 @@ const createTaskDraft = (phase: Pick<PhaseDraft, "id" | "endDate" | "personIds">
   priority: "medium"
 });
 
+const getPhaseBudget = (project: Project, phaseId: string) =>
+  project.budget?.phases.find((phaseBudget) => phaseBudget.phaseId === phaseId);
+
+const getPhaseCostPersonIds = (project: Project, phaseId: string) => [
+  ...new Set(
+    (getPhaseBudget(project, phaseId)?.personnel ?? []).flatMap((line) =>
+      line.personId ? [line.personId] : []
+    )
+  )
+];
+
+const getPhaseCostToolIds = (project: Project, phaseId: string) => [
+  ...new Set(
+    (getPhaseBudget(project, phaseId)?.softwareCosts ?? []).flatMap((line) =>
+      line.toolId ? [line.toolId] : []
+    )
+  )
+];
+
+const getPhaseCostPeople = (project: Project, phaseId: string) => {
+  const peopleById = new Map(project.people.map((person) => [person.id, person]));
+
+  return (getPhaseBudget(project, phaseId)?.personnel ?? []).flatMap((line) => {
+    const label = (line.personId ? peopleById.get(line.personId)?.name : undefined) ?? line.roleLevel.trim();
+
+    return label ? [{ id: `budget-personnel:${line.id}`, label }] : [];
+  });
+};
+
+const getPhaseCostTools = (project: Project, phaseId: string) => {
+  const toolsById = new Map(project.tools.map((tool) => [tool.id, tool]));
+
+  return (getPhaseBudget(project, phaseId)?.softwareCosts ?? []).flatMap((line) => {
+    const label = (line.toolId ? toolsById.get(line.toolId)?.name : undefined) ?? line.name.trim();
+
+    return label ? [{ id: `budget-software:${line.id}`, label }] : [];
+  });
+};
+
 const projectToDrafts = (project: Project): { phases: PhaseDraft[]; rows: RowDraft[]; title: string } => ({
   title: project.timelineTitle && project.timelineTitle !== "Timeline board" ? project.timelineTitle : "",
-  phases: project.phases.map((phase, index) => {
-    const personIds = phase.personIds?.length
-      ? phase.personIds
-      : phase.assigneeId
-        ? [phase.assigneeId]
-        : project.people.slice(0, 1).map((person) => person.id);
-
-    return {
-      id: phase.id,
-      name: phase.name,
-      description: phase.description,
-      startDate: phase.startDate,
-      endDate: phase.endDate,
-      color: phase.color ?? phaseColors[index % phaseColors.length],
-      personIds,
-      toolIds: phase.toolIds?.length ? phase.toolIds : project.tools.slice(0, 2).map((tool) => tool.id),
-      notes: phase.notes ?? "",
-      tasks: phase.deliverables.flatMap((deliverable) =>
-        deliverable.tasks.map((task) => ({
-          id: task.id,
-          title: task.title,
-          completed: task.completed,
-          assigneeId: task.assigneeId,
-          dueDate: task.dueDate ?? phase.endDate,
-          priority: task.priority
-        }))
-      )
-    };
-  }),
+  phases: project.phases.map((phase, index) => ({
+    id: phase.id,
+    name: phase.name,
+    description: phase.description,
+    startDate: phase.startDate,
+    endDate: phase.endDate,
+    color: phase.color ?? phaseColors[index % phaseColors.length],
+    personIds: getPhaseCostPersonIds(project, phase.id),
+    toolIds: getPhaseCostToolIds(project, phase.id),
+    notes: phase.notes ?? "",
+    tasks: phase.deliverables.flatMap((deliverable) =>
+      deliverable.tasks.map((task) => ({
+        id: task.id,
+        title: task.title,
+        completed: task.completed,
+        assigneeId: task.assigneeId,
+        dueDate: task.dueDate ?? phase.endDate,
+        priority: task.priority
+      }))
+    )
+  })),
   rows: (project.timelineRows ?? []).map((row) => ({
     id: row.id,
     label: row.label,
@@ -145,22 +178,6 @@ export function ProjectTimelineSettingsModal({
     );
   };
 
-  const togglePhasePerson = (phase: PhaseDraft, personId: string) => {
-    const nextIds = phase.personIds.includes(personId)
-      ? phase.personIds.filter((id) => id !== personId)
-      : [...phase.personIds, personId];
-
-    updatePhase(phase.id, { personIds: nextIds });
-  };
-
-  const togglePhaseTool = (phase: PhaseDraft, toolId: string) => {
-    const nextIds = phase.toolIds.includes(toolId)
-      ? phase.toolIds.filter((id) => id !== toolId)
-      : [...phase.toolIds, toolId];
-
-    updatePhase(phase.id, { toolIds: nextIds });
-  };
-
   const updateTask = (phaseId: string, taskId: string | undefined, patch: Partial<TaskDraft>) => {
     setPhases((current) =>
       current.map((phase) =>
@@ -184,8 +201,8 @@ export function ProjectTimelineSettingsModal({
       startDate: previous?.endDate ?? project.startDate,
       endDate: previous?.endDate ?? project.endDate,
       color: phaseColors[phases.length % phaseColors.length],
-      personIds: project.people.slice(0, 1).map((person) => person.id),
-      toolIds: project.tools.slice(0, 1).map((tool) => tool.id),
+      personIds: [],
+      toolIds: [],
       notes: "",
       tasks: []
     };
@@ -435,41 +452,59 @@ export function ProjectTimelineSettingsModal({
                 <div className="mt-4 grid gap-4 lg:grid-cols-2">
                   <div className="rounded-studio bg-cloud/40 p-3">
                     <p className={fieldLabelClass}>{t("stagePeople")}</p>
+                    <p className="mt-2 text-xs font-semibold leading-5 text-muted">
+                      {t("stageCostReadonlyHint")}
+                    </p>
                     <div className="mt-3 flex flex-wrap gap-2">
-                      {project.people.map((person) => (
-                        <button
-                          key={person.id}
-                          type="button"
-                          onClick={() => togglePhasePerson(phase, person.id)}
-                          className={cn(
-                            "inline-flex h-10 items-center gap-2 rounded-full px-3 text-sm font-black transition",
-                            phase.personIds.includes(person.id) ? "bg-ink text-white" : "bg-white text-muted"
-                          )}
-                        >
-                          {phase.personIds.includes(person.id) ? <Check size={15} /> : null}
-                          {person.name}
-                        </button>
-                      ))}
+                      {getPhaseCostPeople(project, phase.id).length ? (
+                        getPhaseCostPeople(project, phase.id).map((person) => (
+                          <span
+                            key={person.id}
+                            className="inline-flex min-h-10 items-center rounded-full bg-ink px-3 text-sm font-black text-white"
+                          >
+                            {person.label}
+                          </span>
+                        ))
+                      ) : (
+                        <span className="text-sm font-semibold text-muted">{t("stageCostNoPeople")}</span>
+                      )}
                     </div>
+                    <Link
+                      href={projectCostsPath(project.id)}
+                      prefetch={false}
+                      className="mt-3 inline-flex min-h-10 items-center gap-2 rounded-full bg-white px-3 text-sm font-black text-ink shadow-soft"
+                    >
+                      {t("goToBackgroundCost")}
+                      <ArrowUpRight size={16} />
+                    </Link>
                   </div>
                   <div className="rounded-studio bg-cloud/40 p-3">
                     <p className={fieldLabelClass}>{t("stageTools")}</p>
+                    <p className="mt-2 text-xs font-semibold leading-5 text-muted">
+                      {t("stageCostReadonlyHint")}
+                    </p>
                     <div className="mt-3 flex flex-wrap gap-2">
-                      {project.tools.map((tool) => (
-                        <button
-                          key={tool.id}
-                          type="button"
-                          onClick={() => togglePhaseTool(phase, tool.id)}
-                          className={cn(
-                            "inline-flex h-10 items-center gap-2 rounded-full px-3 text-sm font-black transition",
-                            phase.toolIds.includes(tool.id) ? "bg-limepop text-ink" : "bg-white text-muted"
-                          )}
-                        >
-                          {phase.toolIds.includes(tool.id) ? <Check size={15} /> : null}
-                          {tool.name}
-                        </button>
-                      ))}
+                      {getPhaseCostTools(project, phase.id).length ? (
+                        getPhaseCostTools(project, phase.id).map((tool) => (
+                          <span
+                            key={tool.id}
+                            className="inline-flex min-h-10 items-center rounded-full bg-limepop px-3 text-sm font-black text-ink"
+                          >
+                            {tool.label}
+                          </span>
+                        ))
+                      ) : (
+                        <span className="text-sm font-semibold text-muted">{t("stageCostNoTools")}</span>
+                      )}
                     </div>
+                    <Link
+                      href={projectCostsPath(project.id)}
+                      prefetch={false}
+                      className="mt-3 inline-flex min-h-10 items-center gap-2 rounded-full bg-white px-3 text-sm font-black text-ink shadow-soft"
+                    >
+                      {t("goToBackgroundCost")}
+                      <ArrowUpRight size={16} />
+                    </Link>
                   </div>
                 </div>
 

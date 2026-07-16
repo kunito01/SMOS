@@ -176,7 +176,8 @@ export function PublicSharePage({ token }: { token: string }) {
                   translateDomainLabel(data.project.name, projectNameKeys, t),
                   data.project.id,
                   "project",
-                  t
+                  t,
+                  data.project.isExample
                 )}
                 meta={t("publicReadOnly")}
                 heightClassName="min-h-[32rem]"

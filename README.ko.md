@@ -24,6 +24,7 @@
   <a href="https://github.com/kunito01/SMOS/stargazers"><img src="https://img.shields.io/github/stars/kunito01/SMOS?style=flat-square&color=03b5aa" alt="GitHub 스타" /></a>
   <a href="https://github.com/kunito01/SMOS/forks"><img src="https://img.shields.io/github/forks/kunito01/SMOS?style=flat-square&color=ffca0a" alt="GitHub 포크" /></a>
   <a href="https://github.com/kunito01/SMOS/issues"><img src="https://img.shields.io/github/issues/kunito01/SMOS?style=flat-square&color=f7567c" alt="GitHub 이슈" /></a>
+  <img src="https://img.shields.io/badge/version-V_1.2-f7567c?style=flat-square" alt="Version V 1.2" />
   <img src="https://img.shields.io/badge/Next.js-15-1c2328?style=flat-square&logo=nextdotjs&logoColor=white" alt="Next.js 15" />
   <img src="https://img.shields.io/badge/React-19-03b5aa?style=flat-square&logo=react&logoColor=white" alt="React 19" />
   <img src="https://img.shields.io/badge/TypeScript-5-3178c6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript 5" />
@@ -38,7 +39,18 @@
 
 Studio Map OS는 브랜드, 프로젝트 그룹, 프로젝트, 인력, 소프트웨어, 비용, 타임라인, 릴리스 체크포인트, 아카이브를 하나의 시각적 작업 공간으로 연결합니다. 창작 과정을 일반적인 할 일 목록에 억지로 맞추지 않으면서, 독립 크리에이터가 여러 프로젝트를 동시에 운영할 수 있도록 돕습니다.
 
-현재 버전은 설치 가능한 로컬 우선 PWA입니다. 업무 데이터는 기기에 보관되며 Web Crypto로 암호화한 뒤 IndexedDB에 영구 저장됩니다. Web App Manifest, Service Worker, 오프라인 대체 화면, 애플리케이션 아이콘, 독립 실행형 패키징 워크플로가 통합되어 있습니다. 계정, 복구 키, 백업도 브라우저에서 처리됩니다. 원격 업무 백엔드와 서버 인증은 아직 연결되어 있지 않습니다.
+현재 버전은 설치 가능한 로컬 우선 PWA입니다. 업무 데이터는 기기에 보관되며 Web Crypto로 암호화한 뒤 IndexedDB에 영구 저장됩니다. Web App Manifest, Service Worker, 오프라인 대체 화면, 애플리케이션 아이콘, 독립 실행형 패키징 워크플로가 통합되어 있습니다. 로컬 계정, 복구 키 및 백업은 브라우저에서 처리됩니다. Apple / iCloud 로그인은 사용자의 비공개 CloudKit 데이터베이스를 통해 암호화된 작업공간 데이터를 선택적으로 동기화하며, 별도의 원격 업무 백엔드나 앱이 관리하는 서버 인증은 포함하지 않습니다.
+
+## V 1.2 주요 업데이트
+
+- **서로 독립된 두 계정 경로** — 완전한 로컬 IndexedDB 계정을 계속 사용하거나 Apple / iCloud로 별도 로그인할 수 있으며, 두 경로는 서로 의존하지 않습니다.
+- **암호화 CloudKit 동기화** — 기기의 암호화 사본을 유지하면서 사용자의 비공개 CloudKit 데이터베이스에 암호문만 동기화합니다. 계정 바인딩, 변경 잠금, change tag 검증 및 명시적인 로컬/클라우드 충돌 해결을 제공합니다.
+- **더 안전한 기기 복구** — 한 번만 표시되는 16자리 복구 키, 기기에 결합된 내보내기 불가 Web Crypto 키, 기기/작업공간/프로젝트 암호화 백업 및 보호된 기기 간 복구 흐름을 사용합니다.
+- **시각적 워크플로 빌더** — 연결 노드, 색상, 첨부 파일, 확대/축소, 프로젝트 연결, 자동 저장 및 독립 HTML 공유가 가능한 재사용 워크플로 보드를 만들 수 있습니다.
+- **향상된 프로젝트 전달** — 워크플로를 프로젝트에 연결하고 데모/정식 릴리스 지점, 결제, 타임라인을 관리하며 공유 가능한 HTML 프로젝트 보고서를 내보낼 수 있습니다.
+- **연결형 비용 라이브러리** — 인력/소프트웨어 비용 템플릿을 재사용·동기화하고 배정 비율이 반영된 단계 예산을 계산하며 소프트웨어 구독 결제 알림을 받습니다.
+- **안전한 편집과 이동** — 저장되지 않은 변경 보호, 전용 확인 창, 개선된 보관함/저장소 제어와 명확한 저장·삭제·로그아웃·복구 상태를 제공합니다.
+- **PWA 및 다국어 UI** — GitHub Pages/PWA 배포, 반응형 탐색과 모달, 긴 문장 표시를 개선하고 11개 인터페이스 언어의 문구를 동기화했습니다.
 
 ## 스크린샷
 
@@ -151,7 +163,7 @@ npm run package:pwa
 | 경로 | 용도 |
 | --- | --- |
 | `/register` | 로컬 계정과 작업 공간을 만들거나 암호화된 백업으로 기존 작업 공간에 참여 |
-| `/login` | 로컬 계정의 잠금을 해제하거나 기기 전체 백업을 복원 |
+| `/login` | 로컬 계정 잠금 해제, Apple / iCloud 로그인 또는 기기 전체 백업 복원 |
 | `/offline` | Service Worker 탐색이 실패했을 때 표시되는 문서 대체 화면 |
 | `/dashboard` | 스튜디오 개요, 범위, 지표, 프로젝트 맵 |
 | `/companies` | 브랜드 및 프로젝트 그룹 관리 |
@@ -162,7 +174,8 @@ npm run package:pwa
 | `/project-share/?projectId=...` | 읽기 전용 공유 필드 설정 |
 | `/costs` | 스튜디오 전체 비용 합계 및 표시 통화 설정 |
 | `/libraries` | 인력, 소프트웨어 구독, 비용 템플릿 라이브러리 |
-| `/archive` | 보관된 프로젝트와 기기 및 작업 공간 백업 복구 |
+| `/workflow` | 재사용 가능한 시각적 워크플로 보드, 첨부 파일, 프로젝트 연결 및 HTML 공유 |
+| `/archive` | 보관된 프로젝트, 암호화 백업 및 로컬/CloudKit 저장소 제어 |
 | `/share/?token=...` | 로컬 읽기 전용 프로젝트 스냅샷 |
 
 ## 데이터 및 보안 모델

@@ -32,6 +32,8 @@ export type Tool = {
   name: string;
   category: "ai" | "design" | "dev" | "game" | "video" | "other";
   icon?: string;
+  /** When present, the compatible software template is the live source of truth. */
+  costTemplateId?: string;
   subscription?: ToolSubscription;
 };
 
@@ -40,6 +42,8 @@ export type ToolSubscription = {
   currency: CostItem["currency"];
   billingCycle: "monthly" | "yearly";
   expiresAt: string;
+  /** First or next recurring payment date used as the reminder anchor. */
+  nextPaymentAt?: string;
   accountEmail: string;
 };
 
@@ -52,6 +56,7 @@ export type Person = {
   type: "internal" | "external" | "vendor" | "ai-tool";
   dailyCost?: number;
   dailyCostCurrency?: CostItem["currency"];
+  /** When present, the compatible daily people template is the live source of truth. */
   costTemplateId?: string;
 };
 
@@ -99,7 +104,11 @@ export type ProjectBudgetPersonnelLine = {
   headcount: number;
   hourlyRate: number;
   currency: MoneyCurrency;
-  days: number;
+  startDate: string;
+  endDate: string;
+  allocationPercent: number;
+  /** @deprecated Preserved only when an older total cannot be represented by a 0-100% allocation. */
+  days?: number;
 };
 
 export type ProjectBudgetTravel = {
@@ -132,7 +141,11 @@ export type ProjectBudgetSoftwareCostLine = {
   amount: number;
   currency: MoneyCurrency;
   billingCycle: "monthly" | "yearly";
-  periods: number;
+  startDate: string;
+  endDate: string;
+  allocationPercent: number;
+  /** @deprecated Preserved only when an older total cannot be represented by a 0-100% allocation. */
+  periods?: number;
 };
 
 export type ProjectPhaseBudget = {
@@ -158,6 +171,57 @@ export type TimelineCustomRow = {
   id: string;
   label: string;
   values: Record<string, string>;
+};
+
+export type ProjectWorkflowAttachment = {
+  id: string;
+  fileName: string;
+  kind: "json" | "markdown";
+  mimeType: "application/json" | "text/markdown";
+  size: number;
+  content: string;
+  uploadedAt: string;
+};
+
+export type ProjectWorkflowNode = {
+  id: string;
+  shape: "rounded-rectangle" | "circle";
+  fillColor: string;
+  position: {
+    x: number;
+    y: number;
+  };
+  size: {
+    width: number;
+    height: number;
+  };
+  text: string;
+  attachment?: ProjectWorkflowAttachment;
+};
+
+export type ProjectWorkflowEdge = {
+  id: string;
+  source: string;
+  target: string;
+  sourceHandle?: string;
+  targetHandle?: string;
+};
+
+export type ProjectWorkflowViewport = {
+  x: number;
+  y: number;
+  zoom: number;
+};
+
+export type ProjectWorkflow = {
+  id: string;
+  name: string;
+  version: 1;
+  nodes: ProjectWorkflowNode[];
+  edges: ProjectWorkflowEdge[];
+  viewport: ProjectWorkflowViewport;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type CostItem = {
@@ -253,6 +317,8 @@ export type ProjectStatus = "planning" | "active" | "paused" | "terminated" | "c
 
 export type Project = {
   id: string;
+  /** Explicit marker for bundled examples; project IDs alone never imply demo content. */
+  isExample?: boolean;
   /** Stable opaque identity used only to verify standalone project archives. */
   archiveIdentity?: string;
   /** True only while a newly-created local project is safe to replace with an archive. */
@@ -271,6 +337,10 @@ export type Project = {
   /** False only for newly-created projects until the timeline is explicitly saved. */
   timelineConfigured?: boolean;
   timelineRows?: TimelineCustomRow[];
+  /** IDs of global workflow templates linked to this project. */
+  workflowIds?: string[];
+  /** @deprecated Legacy embedded workflows are migrated into the global library on load/import. */
+  workflows?: ProjectWorkflow[];
   currentPhaseId: string;
   progress: number;
   status: ProjectStatus;
@@ -315,6 +385,7 @@ export type PersonProjectParticipation = {
   projects: Array<{
     projectId: string;
     projectName: string;
+    isExample?: boolean;
     companyId: string;
     companyName: string;
     groupId: string;
@@ -378,5 +449,7 @@ export type MockDatabase = {
   people: Person[];
   tools: Tool[];
   costLibrary: CostLibraryItem[];
+  /** Global workflow originals. Projects only keep IDs that point here. */
+  workflows: ProjectWorkflow[];
   shareLinks: ShareLink[];
 };

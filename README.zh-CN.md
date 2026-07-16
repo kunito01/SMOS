@@ -24,6 +24,7 @@
   <a href="https://github.com/kunito01/SMOS/stargazers"><img src="https://img.shields.io/github/stars/kunito01/SMOS?style=flat-square&color=03b5aa" alt="GitHub Stars" /></a>
   <a href="https://github.com/kunito01/SMOS/forks"><img src="https://img.shields.io/github/forks/kunito01/SMOS?style=flat-square&color=ffca0a" alt="GitHub Forks" /></a>
   <a href="https://github.com/kunito01/SMOS/issues"><img src="https://img.shields.io/github/issues/kunito01/SMOS?style=flat-square&color=f7567c" alt="GitHub Issues" /></a>
+  <img src="https://img.shields.io/badge/version-V_1.2-f7567c?style=flat-square" alt="Version V 1.2" />
   <img src="https://img.shields.io/badge/Next.js-15-1c2328?style=flat-square&logo=nextdotjs&logoColor=white" alt="Next.js 15" />
   <img src="https://img.shields.io/badge/React-19-03b5aa?style=flat-square&logo=react&logoColor=white" alt="React 19" />
   <img src="https://img.shields.io/badge/TypeScript-5-3178c6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript 5" />
@@ -38,7 +39,18 @@
 
 Studio Map OS 将品牌、项目组、项目、人员、软件工具、成本、时间表、发布节点和归档统一到一个可视化工作区中，帮助独立创作者管理多个并行项目，而不必把创作过程压缩成普通的任务清单。
 
-当前版本是一个可安装的本地优先 PWA：业务数据保存在本机，经 Web Crypto 加密后写入 IndexedDB；Manifest、Service Worker、离线回退页、应用图标和独立打包流程均已接入。账户、恢复密钥与备份流程也在浏览器端完成，但项目尚未接入远程业务后端或服务器认证。
+当前版本是一个可安装的本地优先 PWA：业务数据保存在本机，经 Web Crypto 加密后写入 IndexedDB；Manifest、Service Worker、离线回退页、应用图标和独立打包流程均已接入。本地账户、恢复密钥与备份流程均在浏览器端完成；Apple / iCloud 登录可选地通过用户的 CloudKit 私有数据库同步加密工作区数据，但项目不包含自建远程业务后端或由应用管理的服务器认证。
+
+## V 1.2 更新重点
+
+- **两条独立账户路径**：继续使用完全本地的 IndexedDB 账户，或单独使用 Apple / iCloud 登录；两条路径互不依赖。
+- **加密 CloudKit 同步**：保留设备端加密副本，同时将密文同步到用户的 CloudKit 私有数据库，并提供账户绑定、写入锁、change tag 校验以及明确的本机/云端冲突选择。
+- **更安全的设备恢复**：使用一次性显示的 16 位恢复密钥、设备绑定且不可导出的 Web Crypto 密钥、整机/工作区/项目加密备份和受保护的跨设备恢复流程。
+- **可视化工作流编辑器**：创建可复用工作流画板，支持节点连线、颜色、附件、缩放、项目关联、自动保存和独立 HTML 分享。
+- **更完整的项目交付**：把工作流关联到项目，管理 Demo 与正式发布节点、收款和时间表，并导出可分享的 HTML 项目报告。
+- **关联式成本资源库**：复用并同步人员/软件成本模板，计算包含分配比例的阶段预算，并接收软件订阅临近付款提醒。
+- **更安全的编辑与导航**：未保存改动保护、独立操作确认、改进的档案馆/储存控制，以及更明确的保存、删除、退出和恢复状态。
+- **PWA 与国际化界面**：完善 GitHub Pages/PWA 发布、响应式导航和弹窗、长文本处理，并同步十一种界面语言的文案。
 
 ## 产品截图
 
@@ -151,7 +163,7 @@ npm run package:pwa
 | 路由 | 用途 |
 | --- | --- |
 | `/register` | 创建本地账户和工作区，或通过加密备份加入已有工作区 |
-| `/login` | 解锁本地账户、恢复整站设备备份 |
+| `/login` | 解锁本地账户、使用 Apple / iCloud 登录或恢复整站设备备份 |
 | `/offline` | Service Worker 在文档导航失败时显示的离线回退页 |
 | `/dashboard` | 工作室总览、范围筛选、指标和项目地图 |
 | `/companies` | 品牌与项目组管理 |
@@ -162,7 +174,8 @@ npm run package:pwa
 | `/project-share/?projectId=...` | 只读分享字段设置 |
 | `/costs` | 工作室级成本汇总与显示货币设置 |
 | `/libraries` | 人员、软件订阅与成本模板资源库 |
-| `/archive` | 已归档项目、整站和工作区备份恢复 |
+| `/workflow` | 可复用可视化工作流画板、附件、项目关联和 HTML 分享 |
+| `/archive` | 已归档项目、加密备份以及本机/CloudKit 储存控制 |
 | `/share/?token=...` | 本地只读项目快照 |
 
 ## 数据与安全模型

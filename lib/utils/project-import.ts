@@ -1,4 +1,10 @@
-import type { Project } from "@/lib/types";
+import type { Project, ProjectWorkflow } from "@/lib/types";
+import {
+  isProjectWorkflowIds,
+  isProjectWorkflows,
+  normalizeProjectWorkflowIds,
+  normalizeProjectWorkflows
+} from "@/lib/utils/project-workflow";
 
 export const legacyProjectSaveSchema = "studio-map-os.project-save.v1" as const;
 export const projectSaveSchema = "studio-map-os.project-save.v2" as const;
@@ -10,6 +16,8 @@ export type ValidatedProjectSave = {
   format: "v1" | "v2";
   project: Project;
   projectIdentity?: string;
+  /** Snapshots of the global workflow originals linked when the project was saved. */
+  linkedWorkflows: ProjectWorkflow[];
   savedAt: string;
 };
 
@@ -22,6 +30,7 @@ type ProjectSaveV2 = {
   savedAt: string;
   projectIdentity: string;
   project: Project;
+  linkedWorkflows?: ProjectWorkflow[];
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -123,6 +132,8 @@ const isProject = (value: unknown): value is Project =>
   isEntityArray(value.versions) &&
   isEntityArray(value.activity) &&
   isTimelineRows(value.timelineRows) &&
+  (value.workflowIds === undefined || isProjectWorkflowIds(value.workflowIds)) &&
+  (value.workflows === undefined || isProjectWorkflows(value.workflows)) &&
   isBudget(value.budget) &&
   isShareSettings(value.shareSettings) &&
   (value.archiveIdentity === undefined || typeof value.archiveIdentity === "string") &&
@@ -134,16 +145,57 @@ export const isValidProjectArchiveIdentity = (value: unknown): value is string =
 export const normalizeProjectImportName = (value: string) =>
   value.normalize("NFC").trim().replace(/\s+/g, " ");
 
-export const createProjectSave = (project: Project): ProjectSaveV2 => {
+const normalizeArchivedProjectAndWorkflows = (
+  project: Project,
+  linkedWorkflowsValue: unknown
+) => {
+  const linkedWorkflows = normalizeProjectWorkflows(
+    linkedWorkflowsValue === undefined ? project.workflows : linkedWorkflowsValue
+  );
+  const workflowIds = normalizeProjectWorkflowIds(project.workflowIds);
+  const resolvedWorkflowIds = workflowIds.length > 0
+    ? workflowIds
+    : linkedWorkflows.map((workflow) => workflow.id);
+  const projectWithoutEmbeddedWorkflows = { ...project };
+  delete projectWithoutEmbeddedWorkflows.workflows;
+
+  return {
+    linkedWorkflows,
+    project: {
+      ...projectWithoutEmbeddedWorkflows,
+      workflowIds: resolvedWorkflowIds
+    } satisfies Project
+  };
+};
+
+export const createProjectSave = (
+  project: Project,
+  linkedWorkflows?: ReadonlyArray<ProjectWorkflow>
+): ProjectSaveV2 => {
   if (!isValidProjectArchiveIdentity(project.archiveIdentity)) {
     throw new Error("A stable project archive identity is required before export");
+  }
+
+  const normalized = normalizeArchivedProjectAndWorkflows(
+    project,
+    linkedWorkflows === undefined ? undefined : [...linkedWorkflows]
+  );
+  const embeddedWorkflowIds = new Set(
+    normalized.linkedWorkflows.map((workflow) => workflow.id)
+  );
+  const missingWorkflowId = normalizeProjectWorkflowIds(
+    normalized.project.workflowIds
+  ).find((workflowId) => !embeddedWorkflowIds.has(workflowId));
+  if (missingWorkflowId) {
+    throw new Error(`Linked workflow definition is missing: ${missingWorkflowId}`);
   }
 
   return {
     schema: projectSaveSchema,
     savedAt: new Date().toISOString(),
     projectIdentity: project.archiveIdentity,
-    project
+    project: normalized.project,
+    linkedWorkflows: normalized.linkedWorkflows
   };
 };
 
@@ -166,19 +218,31 @@ export const validateProjectSave = (value: unknown): ValidatedProjectSave => {
       throw new Error("Invalid project save file");
     }
 
+    const normalized = normalizeArchivedProjectAndWorkflows(
+      structuredClone(value.project),
+      value.linkedWorkflows
+    );
+
     return {
       format: "v2",
       savedAt,
       projectIdentity: value.projectIdentity,
-      project: structuredClone(value.project)
+      project: normalized.project,
+      linkedWorkflows: normalized.linkedWorkflows
     };
   }
 
   if (value.schema === legacyProjectSaveSchema && isProject(value.project)) {
+    const normalized = normalizeArchivedProjectAndWorkflows(
+      structuredClone(value.project),
+      undefined
+    );
+
     return {
       format: "v1",
       savedAt,
-      project: structuredClone(value.project)
+      project: normalized.project,
+      linkedWorkflows: normalized.linkedWorkflows
     };
   }
 

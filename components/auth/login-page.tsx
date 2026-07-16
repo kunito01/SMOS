@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowRight, CheckCircle2, LockKeyhole, Upload } from "lucide-react";
+import { AppleCloudKitLoginPanel } from "@/components/auth/apple-cloudkit-login-panel";
 import { PixelHeroScene } from "@/components/auth/pixel-hero-scene";
 import { PasswordField } from "@/components/auth/password-field";
 import { WorkspaceKeyDialog } from "@/components/auth/workspace-key-dialog";
@@ -25,7 +26,7 @@ const restoreFailedLoginNoticeStorageKey = "studio-map-os.full-site-restore-fail
 
 export function LoginPage() {
   const router = useRouter();
-  const { isReady, signIn, user } = useAuth();
+  const { isReady, signIn, signInDevelopmentTestAccount, user } = useAuth();
   const { t } = useI18n();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -72,6 +73,24 @@ export function LoginPage() {
             ? t("loginRestoreRequired")
             : t("authLoginFailed")
         : t("authLoginFailed"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleDevelopmentTestAccount = async () => {
+    setBusy(true);
+    setError("");
+
+    try {
+      await signInDevelopmentTestAccount();
+      router.replace("/dashboard");
+    } catch (cause) {
+      setError(
+        cause instanceof LocalAuthError && cause.code === "DEVICE_NOT_EMPTY"
+          ? t("loginDevelopmentTestAccountNeedsEmptyDevice")
+          : t("loginDevelopmentTestAccountFailed")
+      );
     } finally {
       setBusy(false);
     }
@@ -220,6 +239,32 @@ export function LoginPage() {
               >
                 {t("loginSecondary")}
               </Button>
+            </form>
+
+            <AppleCloudKitLoginPanel />
+
+            <div className="mt-5 space-y-4">
+              {process.env.NODE_ENV === "development" ? (
+                <>
+                  <div className="h-px bg-ink/10" aria-hidden="true" />
+                  <div className="rounded-studio-lg border border-dashed border-ink/18 bg-white/44 py-3">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="lg"
+                      className="w-full bg-[#ff0099] font-black text-white hover:bg-[#df0086] hover:text-white"
+                      disabled={busy || restoreBusy}
+                      onClick={() => void handleDevelopmentTestAccount()}
+                    >
+                      {busy ? t("loading") : t("loginDevelopmentTestAccount")}
+                      <ArrowRight size={19} />
+                    </Button>
+                    <p className="px-5 pt-2 text-xs font-bold leading-5 text-ink/56">
+                      {t("loginDevelopmentTestAccountHint")}
+                    </p>
+                  </div>
+                </>
+              ) : null}
               <div className="flex items-center gap-3 py-1" aria-hidden="true">
                 <span className="h-px flex-1 bg-ink/10" />
                 <span className="size-1.5 rounded-full bg-ink/18" />
@@ -259,7 +304,7 @@ export function LoginPage() {
                   {t("loginRestoreDeviceBackupSuccess")}
                 </p>
               ) : null}
-            </form>
+            </div>
           </Card>
 
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-1">

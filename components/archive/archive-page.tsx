@@ -8,6 +8,7 @@ import { ImageCard } from "@/components/cards/image-card";
 import { PixelCanyonScene } from "@/components/dashboard/pixel-canyon-scene";
 import { AppShell } from "@/components/layout/app-shell";
 import { useAuth, useI18n } from "@/components/providers/app-providers";
+import { ArchiveStorageSyncCard } from "@/components/storage/archive-storage-sync-card";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { DeleteConfirmDialog } from "@/components/ui/delete-confirm-dialog";
@@ -457,7 +458,8 @@ export function ArchivePage() {
                                       translateDomainLabel(project.name, projectNameKeys, t),
                                       project.id,
                                       "project",
-                                      t
+                                      t,
+                                      project.isExample
                                     )}
                                     meta={group ? getProjectGroupDisplayName(group, language, t) : ""}
                                     className="min-h-72 transition duration-200 hover:-translate-y-1"
@@ -506,6 +508,12 @@ export function ArchivePage() {
             )}
           </>
         )}
+
+        {data && user ? (
+          <section className="mt-6">
+            <ArchiveStorageSyncCard workspaceId={user.workspaceId} />
+          </section>
+        ) : null}
 
         {data ? (
           <section className="mt-6">
@@ -608,6 +616,7 @@ export function ArchivePage() {
       <DeleteConfirmDialog
         open={Boolean(pendingBackup)}
         busy={backupBusy === "restore"}
+        acknowledgementLabel={t("dangerousActionAcknowledgement")}
         title={t("siteBackupRestoreConfirmTitle")}
         description={t("siteBackupRestoreConfirmBody")}
         warning={t("siteBackupRestoreWarning")}

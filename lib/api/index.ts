@@ -5,3 +5,4 @@ export * as groupsApi from "./groups";
 export * as librariesApi from "./libraries";
 export * as projectsApi from "./projects";
 export * as shareApi from "./share";
+export * as workflowsApi from "./workflows";

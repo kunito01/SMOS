@@ -24,6 +24,7 @@
   <a href="https://github.com/kunito01/SMOS/stargazers"><img src="https://img.shields.io/github/stars/kunito01/SMOS?style=flat-square&color=03b5aa" alt="GitHub スター" /></a>
   <a href="https://github.com/kunito01/SMOS/forks"><img src="https://img.shields.io/github/forks/kunito01/SMOS?style=flat-square&color=ffca0a" alt="GitHub フォーク" /></a>
   <a href="https://github.com/kunito01/SMOS/issues"><img src="https://img.shields.io/github/issues/kunito01/SMOS?style=flat-square&color=f7567c" alt="GitHub Issue" /></a>
+  <img src="https://img.shields.io/badge/version-V_1.2-f7567c?style=flat-square" alt="Version V 1.2" />
   <img src="https://img.shields.io/badge/Next.js-15-1c2328?style=flat-square&logo=nextdotjs&logoColor=white" alt="Next.js 15" />
   <img src="https://img.shields.io/badge/React-19-03b5aa?style=flat-square&logo=react&logoColor=white" alt="React 19" />
   <img src="https://img.shields.io/badge/TypeScript-5-3178c6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript 5" />
@@ -38,7 +39,18 @@
 
 Studio Map OS は、ブランド、プロジェクトグループ、プロジェクト、人員、ソフトウェア、コスト、タイムライン、リリースチェックポイント、アーカイブを、1 つのビジュアルワークスペースに統合します。クリエイティブなプロセスを汎用的なタスクリストに押し込めることなく、インディペンデントクリエイターが複数のプロジェクトを並行して運営できるよう支援します。
 
-現在のバージョンは、インストール可能なローカルファースト PWA です。業務データはデバイス内に保持され、Web Crypto で暗号化されたうえで IndexedDB に永続化されます。Web App Manifest、Service Worker、オフラインフォールバック、アプリケーションアイコン、スタンドアロンのパッケージングワークフローを統合済みです。アカウント、リカバリーキー、バックアップもブラウザ内で処理されます。リモートの業務バックエンドおよびサーバー認証は、現時点では接続されていません。
+現在のバージョンは、インストール可能なローカルファースト PWA です。業務データはデバイス内に保持され、Web Crypto で暗号化されたうえで IndexedDB に永続化されます。Web App Manifest、Service Worker、オフラインフォールバック、アプリケーションアイコン、スタンドアロンのパッケージングワークフローを統合済みです。ローカルアカウント、リカバリーキー、バックアップはブラウザ内で処理されます。Apple / iCloud サインインでは、ユーザーの CloudKit プライベートデータベースを通じて暗号化ワークスペースデータを任意に同期できますが、独自のリモート業務バックエンドやアプリ管理のサーバー認証は含まれません。
+
+## V 1.2 の主な更新
+
+- **独立した 2 つのアカウント経路** — 完全にローカルな IndexedDB アカウントを継続利用するか、Apple / iCloud で別途サインインできます。どちらも相互に依存しません。
+- **暗号化 CloudKit 同期** — デバイス上の暗号化コピーを保持しながら、ユーザーの CloudKit プライベートデータベースへ暗号文のみを同期します。アカウント紐付け、更新ロック、change tag 検証、ローカル/クラウド競合の明示的な解決を備えています。
+- **より安全なデバイス復旧** — 一度だけ表示される 16 桁の復旧キー、デバイスに紐付いたエクスポート不可の Web Crypto キー、デバイス/ワークスペース/プロジェクトの暗号化バックアップ、保護された端末移行を利用できます。
+- **ビジュアルワークフロービルダー** — 接続ノード、色、添付ファイル、ズーム、プロジェクト連携、自動保存、単体 HTML 共有を備えた再利用可能なワークフローボードを作成できます。
+- **プロジェクト納品機能の強化** — ワークフローをプロジェクトへ紐付け、Demo と正式リリース、支払い、タイムラインを管理し、共有可能な HTML プロジェクトレポートを書き出せます。
+- **連動するコストライブラリ** — 人員/ソフトウェアのコストテンプレートを再利用・同期し、配分率を含むフェーズ予算を計算し、ソフトウェア購読の支払予定を通知します。
+- **安全な編集とナビゲーション** — 未保存変更の保護、専用確認ダイアログ、改善されたアーカイブ/保存先管理、明確な保存・削除・ログアウト・復旧状態を追加しました。
+- **PWA と国際化 UI** — GitHub Pages/PWA 配布、レスポンシブナビゲーションとモーダル、長文表示を改善し、11 の UI 言語の文言を同期しました。
 
 ## スクリーンショット
 
@@ -151,7 +163,7 @@ npm run package:pwa
 | ルート | 用途 |
 | --- | --- |
 | `/register` | ローカルアカウントとワークスペースを作成するか、暗号化バックアップを使って既存のワークスペースに参加 |
-| `/login` | ローカルアカウントのロック解除、またはデバイス全体のバックアップを復元 |
+| `/login` | ローカルアカウントのロック解除、Apple / iCloud サインイン、またはデバイス全体のバックアップ復元 |
 | `/offline` | Service Worker のナビゲーションに失敗した場合のドキュメントフォールバック |
 | `/dashboard` | スタジオ概要、スコープ、指標、プロジェクトマップ |
 | `/companies` | ブランドとプロジェクトグループの管理 |
@@ -162,7 +174,8 @@ npm run package:pwa
 | `/project-share/?projectId=...` | 読み取り専用共有フィールドの設定 |
 | `/costs` | スタジオ全体のコスト合計と表示通貨の設定 |
 | `/libraries` | 人員、ソフトウェアサブスクリプション、コストテンプレートのライブラリ |
-| `/archive` | アーカイブ済みプロジェクト、およびデバイスとワークスペースのバックアップ復旧 |
+| `/workflow` | 再利用可能なビジュアルワークフローボード、添付ファイル、プロジェクト連携、HTML 共有 |
+| `/archive` | アーカイブ済みプロジェクト、暗号化バックアップ、ローカル/CloudKit 保存先の管理 |
 | `/share/?token=...` | ローカルの読み取り専用プロジェクトスナップショット |
 
 ## データとセキュリティのモデル

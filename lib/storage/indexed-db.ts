@@ -364,7 +364,7 @@ function parsePublicShareSnapshot<TPayload = unknown>(
   };
 }
 
-function parseWorkspaceBundleSnapshot<TPayload = unknown>(
+export function parseEncryptedWorkspaceBundleSnapshot<TPayload = unknown>(
   value: unknown
 ): EncryptedWorkspaceBundleSnapshot<TPayload> {
   if (
@@ -430,7 +430,7 @@ export function parseEncryptedDatabaseSnapshot<TPayload = unknown>(
   const seenWorkspaceIds = new Set<string>();
   const seenTokenDigests = new Set<string>();
   const bundles = value.bundles.map((item) => {
-    const bundle = parseWorkspaceBundleSnapshot<TPayload>(item);
+    const bundle = parseEncryptedWorkspaceBundleSnapshot<TPayload>(item);
 
     if (seenWorkspaceIds.has(bundle.workspaceId)) {
       return invalidSnapshot("The encrypted database snapshot contains a duplicate workspace.");
@@ -1438,7 +1438,7 @@ export async function replaceEncryptedDatabaseSnapshot<TPayload = unknown>(
 export async function restoreEncryptedWorkspaceBundle<TPayload = unknown>(
   snapshotInput: EncryptedWorkspaceBundleSnapshot<TPayload>
 ): Promise<void> {
-  const snapshot = parseWorkspaceBundleSnapshot<TPayload>(snapshotInput);
+  const snapshot = parseEncryptedWorkspaceBundleSnapshot<TPayload>(snapshotInput);
 
   await withDatabase((database) =>
     runTransaction(

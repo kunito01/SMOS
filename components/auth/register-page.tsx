@@ -421,6 +421,16 @@ export function RegisterPage() {
                 error={passwordConfirmationError}
               />
 
+              <div className="rounded-studio-lg bg-aqua/45 p-4 ring-1 ring-black/[0.06]">
+                <p className="text-sm font-black text-ink">{t("storageIndexedDbTitle")}</p>
+                <p className="mt-1 text-xs font-bold leading-5 text-ink/65">
+                  {t("storageIndexedDbBody")}
+                </p>
+                <p className="mt-3 rounded-studio bg-white/60 p-3 text-xs font-bold leading-5 text-ink/68">
+                  {t("storageIndexedDbWarning")}
+                </p>
+              </div>
+
               <div className="grid gap-2 rounded-studio-lg bg-cloud p-1 sm:grid-cols-3">
                 {([
                   ["create", t("workspaceKeyCreateMode")],

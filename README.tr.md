@@ -24,6 +24,7 @@
   <a href="https://github.com/kunito01/SMOS/stargazers"><img src="https://img.shields.io/github/stars/kunito01/SMOS?style=flat-square&color=03b5aa" alt="GitHub yıldızları" /></a>
   <a href="https://github.com/kunito01/SMOS/forks"><img src="https://img.shields.io/github/forks/kunito01/SMOS?style=flat-square&color=ffca0a" alt="GitHub çatalları" /></a>
   <a href="https://github.com/kunito01/SMOS/issues"><img src="https://img.shields.io/github/issues/kunito01/SMOS?style=flat-square&color=f7567c" alt="GitHub sorunları" /></a>
+  <img src="https://img.shields.io/badge/version-V_1.2-f7567c?style=flat-square" alt="Version V 1.2" />
   <img src="https://img.shields.io/badge/Next.js-15-1c2328?style=flat-square&logo=nextdotjs&logoColor=white" alt="Next.js 15" />
   <img src="https://img.shields.io/badge/React-19-03b5aa?style=flat-square&logo=react&logoColor=white" alt="React 19" />
   <img src="https://img.shields.io/badge/TypeScript-5-3178c6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript 5" />
@@ -38,7 +39,18 @@
 
 Studio Map OS; markaları, proje gruplarını, projeleri, kişileri, yazılımları, maliyetleri, zaman çizelgelerini, yayın kontrol noktalarını ve arşivleri tek bir görsel çalışma alanında birleştirir. Bağımsız üreticilerin, yaratıcı süreci sıradan bir görev listesine indirgemeden birden fazla paralel projeyi yönetmesine yardımcı olur.
 
-Mevcut sürüm, kurulabilir ve Local-First bir PWA'dır. İş verileri cihazda kalır, Web Crypto ile şifrelenir ve IndexedDB'de saklanır. Web App Manifest, Service Worker, çevrimdışı geri dönüş sayfası, uygulama simgeleri ve bağımsız paketleme iş akışı entegre edilmiştir. Hesaplar, kurtarma anahtarları ve yedekler de tarayıcıda yönetilir; iş verileri için uzak bir backend ve sunucu kimlik doğrulaması henüz bağlı değildir.
+Mevcut sürüm, kurulabilir ve Local-First bir PWA'dır. İş verileri cihazda kalır, Web Crypto ile şifrelenir ve IndexedDB'de saklanır. Web App Manifest, Service Worker, çevrimdışı geri dönüş sayfası, uygulama simgeleri ve bağımsız paketleme iş akışı entegre edilmiştir. Yerel hesaplar, kurtarma anahtarları ve yedekler tarayıcıda yönetilir. Apple / iCloud oturumu, şifreli çalışma alanı verilerini isteğe bağlı olarak kullanıcının özel CloudKit veritabanı üzerinden eşitleyebilir; özel bir uzak iş backend'i veya uygulama tarafından yönetilen sunucu kimlik doğrulaması projeye dâhil değildir.
+
+## V 1.2 yenilikleri
+
+- **Birbirinden bağımsız iki hesap yolu** — tamamen yerel IndexedDB hesaplarını kullanmaya devam edin veya Apple / iCloud ile ayrı olarak oturum açın; iki yol birbirine bağlı değildir.
+- **Şifreli CloudKit eşitlemesi** — cihazdaki şifreli kopyayı koruyup özel CloudKit veritabanıyla yalnızca şifreli metni eşitleyin; hesap bağlama, yazma kilitleri, change tag kontrolü ve açık yerel/bulut çakışma çözümü kullanın.
+- **Daha güvenli cihaz kurtarma** — yalnızca bir kez gösterilen 16 haneli kurtarma anahtarı, cihaza bağlı dışa aktarılamayan Web Crypto anahtarı ve şifreli cihaz, çalışma alanı ve proje yedeklerini kullanın.
+- **Görsel iş akışı oluşturucu** — bağlı düğümler, renkler, ekler, yakınlaştırma, proje bağlantıları, otomatik kaydetme ve bağımsız HTML paylaşımıyla yeniden kullanılabilir panolar oluşturun.
+- **Daha kapsamlı proje teslimi** — iş akışlarını projelere bağlayın; Demo ve resmî yayın noktalarını, ödemeleri ve zaman çizelgelerini yönetin; paylaşılabilir HTML proje raporları dışa aktarın.
+- **Bağlantılı maliyet kitaplıkları** — kişi ve yazılım maliyet şablonlarını yeniden kullanıp eşitleyin, dağılıma göre aşama bütçeleri hesaplayın ve yaklaşan abonelik ödemeleri için anımsatıcılar alın.
+- **Daha güvenli düzenleme ve gezinme** — kaydedilmemiş değişiklik koruması, özel işlem onayları, geliştirilmiş arşiv ve depolama denetimleri ile daha açık kaydetme, silme, çıkış ve kurtarma durumları.
+- **PWA ve uluslararası arayüz** — GitHub Pages/PWA dağıtımı, duyarlı gezinme ve pencereler, uzun metinler ve on bir arayüz dilinde eşitlenen içerik geliştirildi.
 
 ## Ekran Görüntüleri
 
@@ -151,7 +163,7 @@ Paket `output/pwa/studio-map-os-pwa/` konumuna yazılır. Bağımsız sunucuyu, 
 | Rota | Amaç |
 | --- | --- |
 | `/register` | Yerel hesap ve çalışma alanı oluşturun veya şifrelenmiş bir yedekle mevcut bir çalışma alanına katılın |
-| `/login` | Yerel hesabın kilidini açın veya tam cihaz yedeğini geri yükleyin |
+| `/login` | Yerel hesabın kilidini açın, Apple / iCloud kullanın veya tam cihaz yedeğini geri yükleyin |
 | `/offline` | Service Worker gezinmesi başarısız olduğunda kullanılan belge geri dönüş sayfası |
 | `/dashboard` | Stüdyo genel görünümü, kapsamlar, ölçümler ve proje haritaları |
 | `/companies` | Marka ve proje grubu yönetimi |
@@ -162,7 +174,8 @@ Paket `output/pwa/studio-map-os-pwa/` konumuna yazılır. Bağımsız sunucuyu, 
 | `/project-share/?projectId=...` | Salt okunur paylaşım alanı ayarları |
 | `/costs` | Stüdyo düzeyinde maliyet toplamları ve görüntüleme para birimi ayarları |
 | `/libraries` | Kişi, yazılım aboneliği ve maliyet şablonu kitaplıkları |
-| `/archive` | Arşivlenmiş projeler ile cihaz ve çalışma alanı yedeği kurtarma |
+| `/workflow` | Yeniden kullanılabilir görsel iş akışı panoları, ekler, proje bağlantıları ve HTML paylaşımı |
+| `/archive` | Arşivlenmiş projeler, şifreli yedekler ve yerel/CloudKit depolama denetimleri |
 | `/share/?token=...` | Yerel salt okunur proje anlık görüntüsü |
 
 ## Veri ve Güvenlik Modeli

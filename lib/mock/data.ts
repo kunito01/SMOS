@@ -278,28 +278,32 @@ const groupSeeds = [
   }
 ];
 
-const projectSeedAssignments = [
+const exampleProjectSeeds = [
   {
     companyId: "company-northstar",
     groupId: "group-1-1",
-    names: ["AI Web Game Prototype", "Three.js Engine Experiment", "Visual Asset Production"]
+    name: "AI Web Game Prototype",
+    projectIndex: 0,
+    shareToken: "studio-share-alpha"
+  },
+  {
+    companyId: "company-northstar",
+    groupId: "group-1-1",
+    name: "Three.js Engine Experiment",
+    projectIndex: 1
   },
   {
     companyId: "company-northstar",
     groupId: "group-1-2",
-    names: ["Short Video Pipeline", "Runway Trailer Sprint", "Motion Identity Pack"]
-  },
-  {
-    companyId: "company-color-works",
-    groupId: "group-2-1",
-    names: ["Brand Landing Page", "Portfolio Relaunch", "Interactive Product Site"]
-  },
-  {
-    companyId: "company-color-works",
-    groupId: "group-2-2",
-    names: ["Marketing Campaign", "Client Progress Room", "Event Concept Board"]
+    name: "Runway Trailer Sprint",
+    projectIndex: 4,
+    shareToken: "studio-share-beta"
   }
 ];
+
+export const bundledExampleProjectIds: ReadonlySet<string> = new Set(
+  exampleProjectSeeds.map(({ projectIndex }) => `project-${String(projectIndex + 1).padStart(2, "0")}`)
+);
 
 const materialSeeds: Array<Pick<Material, "name" | "type" | "status">> = [
   { name: "Hero reference wall", type: "image", status: "approved" },
@@ -563,6 +567,7 @@ export const createMockProject = (
 
   return {
     id: projectId,
+    isExample: false,
     companyId,
     groupId,
     name,
@@ -575,6 +580,7 @@ export const createMockProject = (
     endDate: "2026-10-15",
     timelineTitle: "Timeline board",
     timelineRows: [],
+    workflowIds: [],
     currentPhaseId: phases.find((phase) => phase.status === "active")?.id ?? phases[0].id,
     progress,
     status,
@@ -605,14 +611,16 @@ export const createMockDatabase = (): MockDatabase => {
     createdAt: `2026-06-0${(groupIndex % 2) + 3}T09:00:00.000Z`
   }));
 
-  const projects = projectSeedAssignments.flatMap((assignment, assignmentIndex) =>
-    assignment.names.map((projectName, projectOffset) => {
-      const projectIndex = assignmentIndex * 3 + projectOffset;
-      const shareToken = projectIndex === 0 ? "studio-share-alpha" : projectIndex === 4 ? "studio-share-beta" : undefined;
-
-      return createMockProject(assignment.companyId, assignment.groupId, projectName, projectIndex, shareToken);
-    })
-  );
+  const projects = exampleProjectSeeds.map((projectSeed) => ({
+    ...createMockProject(
+      projectSeed.companyId,
+      projectSeed.groupId,
+      projectSeed.name,
+      projectSeed.projectIndex,
+      projectSeed.shareToken
+    ),
+    isExample: true
+  }));
 
   const shareLinks: ShareLink[] = projects
     .filter((project) => project.shareSettings.isEnabled && project.shareSettings.token)
@@ -634,6 +642,7 @@ export const createMockDatabase = (): MockDatabase => {
     people: peoplePool,
     tools: toolPool,
     costLibrary: costLibrarySeed,
+    workflows: [],
     shareLinks
   });
 };
@@ -647,6 +656,7 @@ export const createEmptyMockDatabase = (): MockDatabase => ({
   people: [],
   tools: [],
   costLibrary: [],
+  workflows: [],
   shareLinks: []
 });
 

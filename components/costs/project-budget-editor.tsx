@@ -29,6 +29,8 @@ import type {
   Tool
 } from "@/lib/types";
 import {
+  calculatePersonnelLineNativeAmount,
+  calculateSoftwareLineNativeAmount,
   calculateStructuredBudget,
   PROJECT_BUDGET_HOURS_PER_DAY
 } from "@/lib/utils/project-budget";
@@ -162,7 +164,21 @@ export function ProjectBudgetEditor({
   ) => {
     updatePhase(phaseId, (phase) => ({
       ...phase,
-      personnel: phase.personnel.map((line) => (line.id === lineId ? { ...line, ...patch } : line))
+      personnel: phase.personnel.map((line) => {
+        if (line.id !== lineId) {
+          return line;
+        }
+
+        const next = { ...line, ...patch };
+        if (
+          "startDate" in patch ||
+          "endDate" in patch ||
+          "allocationPercent" in patch
+        ) {
+          delete next.days;
+        }
+        return next;
+      })
     }));
   };
 
@@ -198,15 +214,30 @@ export function ProjectBudgetEditor({
     updatePhase(phaseId, (phase) => ({
       ...phase,
       softwareCosts: phase.softwareCosts.map((line) =>
-        line.id === lineId ? { ...line, ...patch } : line
+        {
+          if (line.id !== lineId) {
+            return line;
+          }
+
+          const next = { ...line, ...patch };
+          if (
+            "startDate" in patch ||
+            "endDate" in patch ||
+            "allocationPercent" in patch
+          ) {
+            delete next.periods;
+          }
+          return next;
+        }
       )
     }));
   };
 
   const importPerson = (phaseId: string, personId: string) => {
     const person = people.find((item) => item.id === personId);
+    const usagePhase = phases.find((item) => item.id === phaseId);
 
-    if (!person) {
+    if (!person || !usagePhase) {
       return;
     }
 
@@ -226,7 +257,9 @@ export function ProjectBudgetEditor({
             headcount: 1,
             hourlyRate: (person.dailyCost ?? 0) / PROJECT_BUDGET_HOURS_PER_DAY,
             currency: person.dailyCostCurrency ?? displayCurrency,
-            days: 0
+            startDate: usagePhase.startDate,
+            endDate: usagePhase.endDate,
+            allocationPercent: 100
           }
         ]
       };
@@ -264,8 +297,9 @@ export function ProjectBudgetEditor({
 
   const importSoftware = (phaseId: string, toolId: string) => {
     const tool = tools.find((item) => item.id === toolId);
+    const usagePhase = phases.find((item) => item.id === phaseId);
 
-    if (!tool) {
+    if (!tool || !usagePhase) {
       return;
     }
 
@@ -285,7 +319,9 @@ export function ProjectBudgetEditor({
             amount: tool.subscription?.amount ?? 0,
             currency: tool.subscription?.currency ?? displayCurrency,
             billingCycle: tool.subscription?.billingCycle ?? "monthly",
-            periods: 0
+            startDate: usagePhase.startDate,
+            endDate: usagePhase.endDate,
+            allocationPercent: 100
           }
         ]
       };
@@ -382,7 +418,9 @@ export function ProjectBudgetEditor({
                               headcount: 0,
                               hourlyRate: 0,
                               currency: displayCurrency,
-                              days: 0
+                              startDate: phase.startDate,
+                              endDate: phase.endDate,
+                              allocationPercent: 100
                             }
                           ]
                         }))
@@ -396,23 +434,26 @@ export function ProjectBudgetEditor({
 
                 <div className="mt-3 grid gap-3">
                   {phaseBudget.personnel.map((line) => {
-                    const nativeAmount =
-                      line.headcount * line.hourlyRate * line.days * PROJECT_BUDGET_HOURS_PER_DAY;
+                    const nativeAmount = calculatePersonnelLineNativeAmount(line, phase);
 
                     return (
-                      <div key={line.id} className="grid gap-2 rounded-studio bg-cloud/70 p-3 lg:grid-cols-[minmax(9rem,1.3fr)_repeat(3,minmax(6rem,0.55fr))_minmax(7rem,0.6fr)_minmax(9rem,auto)]">
-                        <label className="grid gap-1">
+                      <div
+                        key={line.id}
+                        data-budget-personnel-row
+                        className="grid min-w-0 gap-3 rounded-studio bg-cloud/70 p-3 sm:grid-cols-2 xl:grid-cols-4"
+                      >
+                        <label className="grid min-w-0 gap-1">
                           <span className="text-xs font-black text-muted">{t("budgetRoleLevel")}</span>
                           <input
                             value={line.roleLevel}
                             onChange={(event) => updatePersonnel(phase.id, line.id, { roleLevel: event.target.value })}
-                            className="h-10 rounded-full border-0 bg-white px-3 text-sm font-bold outline-none ring-1 ring-black/[0.06] focus:ring-coral"
+                            className="h-10 min-w-0 w-full rounded-full border-0 bg-white px-3 text-sm font-bold outline-none ring-1 ring-black/[0.06] focus:ring-coral"
                           />
                           {line.personId ? (
                             <span className="text-[0.68rem] font-black text-muted">{t("importedFromPeopleLibrary")}</span>
                           ) : null}
                         </label>
-                        <label className="grid gap-1">
+                        <label className="grid min-w-0 gap-1">
                           <span className="text-xs font-black text-muted">{t("budgetHeadcount")}</span>
                           <input
                             type="number"
@@ -420,10 +461,10 @@ export function ProjectBudgetEditor({
                             step="1"
                             value={line.headcount || ""}
                             onChange={(event) => updatePersonnel(phase.id, line.id, { headcount: integerValue(event.target.value) })}
-                            className="h-10 rounded-full border-0 bg-white px-3 text-sm font-bold outline-none ring-1 ring-black/[0.06] focus:ring-coral"
+                            className="h-10 min-w-0 w-full rounded-full border-0 bg-white px-3 text-sm font-bold outline-none ring-1 ring-black/[0.06] focus:ring-coral"
                           />
                         </label>
-                        <label className="grid gap-1">
+                        <label className="grid min-w-0 gap-1">
                           <span className="text-xs font-black text-muted">{t("budgetHourlyRate")}</span>
                           <input
                             type="number"
@@ -431,32 +472,74 @@ export function ProjectBudgetEditor({
                             step="0.01"
                             value={line.hourlyRate || ""}
                             onChange={(event) => updatePersonnel(phase.id, line.id, { hourlyRate: numberValue(event.target.value) })}
-                            className="h-10 rounded-full border-0 bg-white px-3 text-sm font-bold outline-none ring-1 ring-black/[0.06] focus:ring-coral"
+                            className="h-10 min-w-0 w-full rounded-full border-0 bg-white px-3 text-sm font-bold outline-none ring-1 ring-black/[0.06] focus:ring-coral"
                           />
                         </label>
-                        <label className="grid gap-1">
-                          <span className="text-xs font-black text-muted">{t("budgetWorkDays")}</span>
-                          <input
-                            type="number"
-                            min="0"
-                            step="1"
-                            value={line.days || ""}
-                            onChange={(event) => updatePersonnel(phase.id, line.id, { days: integerValue(event.target.value) })}
-                            className="h-10 rounded-full border-0 bg-white px-3 text-sm font-bold outline-none ring-1 ring-black/[0.06] focus:ring-coral"
-                          />
-                        </label>
-                        <label className="grid gap-1">
+                        <label className="grid min-w-0 gap-1">
                           <span className="text-xs font-black text-muted">{t("currency")}</span>
                           <Select
                             value={line.currency}
                             onChange={(event) => updatePersonnel(phase.id, line.id, { currency: event.target.value as MoneyCurrency })}
-                            className="h-10 rounded-full border-0 bg-white px-3 text-sm font-bold outline-none ring-1 ring-black/[0.06]"
+                            className="h-10 min-w-0 w-full rounded-full border-0 bg-white px-3 text-sm font-bold outline-none ring-1 ring-black/[0.06]"
                           >
                             {supportedCurrencies.map((currency) => <option key={currency} value={currency}>{currency}</option>)}
                           </Select>
                           <span className="text-[0.68rem] font-black text-muted">{formatCurrency(nativeAmount, line.currency)}</span>
                         </label>
-                        <div className="flex flex-wrap items-center gap-2 lg:mt-5">
+                        <label className="grid min-w-0 gap-1">
+                          <span className="text-xs font-black text-muted">{t("budgetUsageStartDate")}</span>
+                          <input
+                            type="date"
+                            min={phase.startDate}
+                            max={phase.endDate}
+                            value={line.startDate}
+                            onChange={(event) => {
+                              const startDate = event.target.value;
+                              updatePersonnel(phase.id, line.id, {
+                                startDate,
+                                endDate: line.endDate < startDate ? startDate : line.endDate
+                              });
+                            }}
+                            className="h-10 min-w-0 w-full rounded-full border-0 bg-white px-3 text-sm font-bold outline-none ring-1 ring-black/[0.06] focus:ring-coral"
+                          />
+                        </label>
+                        <label className="grid min-w-0 gap-1">
+                          <span className="text-xs font-black text-muted">{t("budgetUsageEndDate")}</span>
+                          <input
+                            type="date"
+                            min={line.startDate || phase.startDate}
+                            max={phase.endDate}
+                            value={line.endDate}
+                            onChange={(event) => updatePersonnel(phase.id, line.id, { endDate: event.target.value })}
+                            className="h-10 min-w-0 w-full rounded-full border-0 bg-white px-3 text-sm font-bold outline-none ring-1 ring-black/[0.06] focus:ring-coral"
+                          />
+                        </label>
+                        <label className="grid min-w-0 gap-1">
+                          <span className="text-xs font-black text-muted">{t("budgetAllocationPercent")}</span>
+                          <span className="flex min-w-0 items-center gap-2">
+                            <input
+                              type="number"
+                              min="0"
+                              max="100"
+                              step="1"
+                              value={line.allocationPercent}
+                              onChange={(event) => updatePersonnel(phase.id, line.id, {
+                                allocationPercent: Math.min(100, numberValue(event.target.value))
+                              })}
+                              className="h-10 min-w-0 w-full rounded-full border-0 bg-white px-3 text-sm font-bold outline-none ring-1 ring-black/[0.06] focus:ring-coral"
+                            />
+                            <span className="font-black">%</span>
+                          </span>
+                        </label>
+                        <div className="min-w-0 rounded-studio bg-white/75 px-3 py-2 text-xs font-bold leading-5 text-muted">
+                          {t("budgetPersonnelFormula")}
+                        </div>
+                        {line.days !== undefined ? (
+                          <p className="min-w-0 text-xs font-black leading-5 text-coral sm:col-span-2 xl:col-span-4">
+                            {t("projectBudgetLegacyUsageReview")}
+                          </p>
+                        ) : null}
+                        <div className="flex min-w-0 flex-wrap items-center gap-2 sm:col-span-2 xl:col-span-4">
                           <Button
                             type="button"
                             size="sm"
@@ -814,7 +897,9 @@ export function ProjectBudgetEditor({
                             amount: 0,
                             currency: displayCurrency,
                             billingCycle: "monthly",
-                            periods: 0
+                            startDate: phase.startDate,
+                            endDate: phase.endDate,
+                            allocationPercent: 100
                           }
                         ]
                       }))}
@@ -828,16 +913,15 @@ export function ProjectBudgetEditor({
                 {phaseBudget.softwareCosts.length ? (
                   <div className="mt-3 grid gap-2">
                     {phaseBudget.softwareCosts.map((line) => {
-                      const monthlyAmount = line.billingCycle === "yearly" ? line.amount / 12 : line.amount;
-                      const nativeTotal = monthlyAmount * line.periods;
+                      const nativeTotal = calculateSoftwareLineNativeAmount(line, phase);
 
                       return (
                         <div
                           key={line.id}
                           data-budget-software-row
-                          className="grid min-w-0 items-start gap-3 rounded-studio bg-[#46677D] p-3 sm:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)_minmax(7.5rem,auto)] xl:grid-cols-[minmax(0,2.2fr)_minmax(0,1.35fr)_minmax(0,1fr)_minmax(0,0.9fr)_minmax(7.5rem,auto)]"
+                          className="grid min-w-0 items-start gap-3 rounded-studio bg-[#46677D] p-3 sm:grid-cols-2 xl:grid-cols-4"
                         >
-                          <label className="grid min-w-0 content-start gap-1 sm:col-start-1 sm:row-start-1 xl:col-auto xl:row-auto">
+                          <label className="grid min-w-0 content-start gap-1">
                             <span className="text-xs font-black text-white/60">{t("budgetSoftwareName")}</span>
                             <input
                               value={line.name}
@@ -848,7 +932,7 @@ export function ProjectBudgetEditor({
                               <span className="text-[0.68rem] font-black text-white/55">{t("importedFromSoftwareLibrary")}</span>
                             ) : null}
                           </label>
-                          <label className="grid min-w-0 content-start gap-1 sm:col-start-2 sm:row-start-1 xl:col-auto xl:row-auto">
+                          <label className="grid min-w-0 content-start gap-1">
                             <span className="text-xs font-black text-white/60">{t("subscriptionFee")}</span>
                             <span className="grid min-w-0 grid-cols-[minmax(6rem,1fr)_4.75rem] gap-2">
                               <input
@@ -872,7 +956,7 @@ export function ProjectBudgetEditor({
                             </span>
                             <span className="text-[0.68rem] font-black text-white/55">{formatCurrency(nativeTotal, line.currency)}</span>
                           </label>
-                          <label className="grid min-w-0 content-start gap-1 sm:col-start-1 sm:row-start-2 xl:col-auto xl:row-auto">
+                          <label className="grid min-w-0 content-start gap-1">
                             <span className="text-xs font-black text-white/60">{t("billing")}</span>
                             <Select
                               value={line.billingCycle}
@@ -883,20 +967,62 @@ export function ProjectBudgetEditor({
                               <option value="yearly">{t("billingTypeYearly")}</option>
                             </Select>
                           </label>
-                          <label className="grid min-w-0 content-start gap-1 sm:col-start-2 sm:row-start-2 xl:col-auto xl:row-auto">
-                            <span className="text-xs font-black text-white/60">{t("budgetSoftwarePeriods")}</span>
+                          <label className="grid min-w-0 content-start gap-1">
+                            <span className="text-xs font-black text-white/60">{t("budgetUsageStartDate")}</span>
                             <input
-                              type="number"
-                              min="1"
-                              step="1"
-                              value={line.periods || ""}
-                              onChange={(event) => updateSoftwareCost(phase.id, line.id, { periods: integerValue(event.target.value) })}
+                              type="date"
+                              min={phase.startDate}
+                              max={phase.endDate}
+                              value={line.startDate}
+                              onChange={(event) => {
+                                const startDate = event.target.value;
+                                updateSoftwareCost(phase.id, line.id, {
+                                  startDate,
+                                  endDate: line.endDate < startDate ? startDate : line.endDate
+                                });
+                              }}
                               className="h-10 min-w-0 w-full rounded-full border-0 bg-white px-3 text-sm font-bold text-ink outline-none ring-1 ring-white/20 focus:ring-limepop"
                             />
                           </label>
+                          <label className="grid min-w-0 content-start gap-1">
+                            <span className="text-xs font-black text-white/60">{t("budgetUsageEndDate")}</span>
+                            <input
+                              type="date"
+                              min={line.startDate || phase.startDate}
+                              max={phase.endDate}
+                              value={line.endDate}
+                              onChange={(event) => updateSoftwareCost(phase.id, line.id, { endDate: event.target.value })}
+                              className="h-10 min-w-0 w-full rounded-full border-0 bg-white px-3 text-sm font-bold text-ink outline-none ring-1 ring-white/20 focus:ring-limepop"
+                            />
+                          </label>
+                          <label className="grid min-w-0 content-start gap-1">
+                            <span className="text-xs font-black text-white/60">{t("budgetAllocationPercent")}</span>
+                            <span className="flex min-w-0 items-center gap-2">
+                              <input
+                                type="number"
+                                min="0"
+                                max="100"
+                                step="1"
+                                value={line.allocationPercent}
+                                onChange={(event) => updateSoftwareCost(phase.id, line.id, {
+                                  allocationPercent: Math.min(100, numberValue(event.target.value))
+                                })}
+                                className="h-10 min-w-0 w-full rounded-full border-0 bg-white px-3 text-sm font-bold text-ink outline-none ring-1 ring-white/20 focus:ring-limepop"
+                              />
+                              <span className="font-black">%</span>
+                            </span>
+                          </label>
+                          <div className="min-w-0 rounded-studio bg-white/10 px-3 py-2 text-xs font-bold leading-5 text-white/65">
+                            {t("budgetSoftwareFormula")}
+                          </div>
+                          {line.periods !== undefined ? (
+                            <p className="min-w-0 text-xs font-black leading-5 text-[#ffb4a7] sm:col-span-2 xl:col-span-4">
+                              {t("projectBudgetLegacyUsageReview")}
+                            </p>
+                          ) : null}
                           <div
                             data-budget-software-actions
-                            className="flex flex-col items-stretch gap-2 [&>button]:w-full [&>button]:justify-center sm:col-start-3 sm:row-span-2 sm:row-start-1 sm:self-center xl:col-auto xl:row-auto xl:row-span-1 xl:mt-5 xl:self-auto"
+                            className="flex min-w-0 flex-wrap items-center gap-2 sm:col-span-2 xl:col-span-4"
                           >
                             <Button
                               type="button"

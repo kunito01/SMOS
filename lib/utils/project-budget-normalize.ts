@@ -24,7 +24,85 @@ const cleanNonNegativeInteger = (value: unknown) =>
 const cleanPercentage = (value: unknown) =>
   Math.min(100, cleanNonNegativeNumber(value));
 
-const cleanPersonnelLine = (value: unknown): ProjectBudgetPersonnelLine | null => {
+const isIsoDate = (value: unknown): value is string => {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return false;
+  }
+
+  const milliseconds = Date.parse(`${value}T00:00:00Z`);
+  return Number.isFinite(milliseconds) && new Date(milliseconds).toISOString().slice(0, 10) === value;
+};
+
+const countInclusiveDays = (startDate: string, endDate: string) => {
+  const start = Date.parse(`${startDate}T00:00:00Z`);
+  const end = Date.parse(`${endDate}T00:00:00Z`);
+  return Math.max(1, Math.floor((end - start) / (24 * 60 * 60 * 1000)) + 1);
+};
+
+const clampUsageRange = (
+  startDate: unknown,
+  endDate: unknown,
+  phase: Pick<Phase, "startDate" | "endDate">
+) => {
+  if (!isIsoDate(phase.startDate) || !isIsoDate(phase.endDate) || phase.endDate < phase.startDate) {
+    return { startDate: "", endDate: "" };
+  }
+
+  if (!isIsoDate(startDate) || !isIsoDate(endDate)) {
+    return { startDate: phase.startDate, endDate: phase.endDate };
+  }
+
+  const clampedStart = startDate < phase.startDate
+    ? phase.startDate
+    : startDate > phase.endDate
+      ? phase.endDate
+      : startDate;
+  const clampedEnd = endDate > phase.endDate
+    ? phase.endDate
+    : endDate < phase.startDate
+      ? phase.startDate
+      : endDate;
+
+  return clampedEnd < clampedStart
+    ? { startDate: phase.startDate, endDate: phase.endDate }
+    : { startDate: clampedStart, endDate: clampedEnd };
+};
+
+const normalizePersonnelUsage = (
+  value: Record<string, unknown>,
+  phase: Pick<Phase, "startDate" | "endDate">
+) => {
+  const range = clampUsageRange(value.startDate, value.endDate, phase);
+  const hasModernUsage = isIsoDate(value.startDate) && isIsoDate(value.endDate);
+  const hasLegacyDays = typeof value.days === "number" && Number.isFinite(value.days) && value.days >= 0;
+
+  if (hasModernUsage) {
+    return {
+      ...range,
+      allocationPercent: cleanPercentage(value.allocationPercent ?? 100),
+      ...(hasLegacyDays ? { days: cleanNonNegativeInteger(value.days) } : {})
+    };
+  }
+
+  if (hasLegacyDays && range.startDate && range.endDate) {
+    const days = cleanNonNegativeInteger(value.days);
+    const phaseDays = countInclusiveDays(range.startDate, range.endDate);
+    const equivalentAllocation = phaseDays > 0 ? (days / phaseDays) * 100 : 0;
+
+    if (equivalentAllocation <= 100) {
+      return { ...range, allocationPercent: equivalentAllocation };
+    }
+
+    return { ...range, allocationPercent: 100, days };
+  }
+
+  return { ...range, allocationPercent: 100 };
+};
+
+const cleanPersonnelLine = (
+  value: unknown,
+  phase: Pick<Phase, "startDate" | "endDate">
+): ProjectBudgetPersonnelLine | null => {
   if (
     !isRecord(value) ||
     typeof value.id !== "string" ||
@@ -41,7 +119,7 @@ const cleanPersonnelLine = (value: unknown): ProjectBudgetPersonnelLine | null =
     headcount: cleanNonNegativeInteger(value.headcount),
     hourlyRate: cleanNonNegativeNumber(value.hourlyRate),
     currency: value.currency,
-    days: cleanNonNegativeInteger(value.days)
+    ...normalizePersonnelUsage(value, phase)
   };
 };
 
@@ -107,7 +185,44 @@ const cleanExtraCostLine = (value: unknown): ProjectBudgetExtraCostLine | null =
   };
 };
 
-const cleanSoftwareCostLine = (value: unknown): ProjectBudgetSoftwareCostLine | null => {
+const normalizeSoftwareUsage = (
+  value: Record<string, unknown>,
+  phase: Pick<Phase, "startDate" | "endDate">
+) => {
+  const range = clampUsageRange(value.startDate, value.endDate, phase);
+  const hasModernUsage = isIsoDate(value.startDate) && isIsoDate(value.endDate);
+  const hasLegacyPeriods = typeof value.periods === "number" && Number.isFinite(value.periods) && value.periods >= 0;
+
+  if (hasModernUsage) {
+    return {
+      ...range,
+      allocationPercent: cleanPercentage(value.allocationPercent ?? 100),
+      ...(hasLegacyPeriods ? { periods: cleanNonNegativeInteger(value.periods) } : {})
+    };
+  }
+
+  if (hasLegacyPeriods && range.startDate && range.endDate) {
+    const periods = cleanNonNegativeInteger(value.periods);
+    const phaseDays = countInclusiveDays(range.startDate, range.endDate);
+    const equivalentDays = value.billingCycle === "yearly"
+      ? (periods * 365) / 12
+      : periods * 30;
+    const equivalentAllocation = phaseDays > 0 ? (equivalentDays / phaseDays) * 100 : 0;
+
+    if (equivalentAllocation <= 100) {
+      return { ...range, allocationPercent: equivalentAllocation };
+    }
+
+    return { ...range, allocationPercent: 100, periods };
+  }
+
+  return { ...range, allocationPercent: 100 };
+};
+
+const cleanSoftwareCostLine = (
+  value: unknown,
+  phase: Pick<Phase, "startDate" | "endDate">
+): ProjectBudgetSoftwareCostLine | null => {
   if (
     !isRecord(value) ||
     typeof value.id !== "string" ||
@@ -126,7 +241,7 @@ const cleanSoftwareCostLine = (value: unknown): ProjectBudgetSoftwareCostLine | 
     amount: cleanNonNegativeNumber(value.amount),
     currency: value.currency,
     billingCycle: value.billingCycle,
-    periods: cleanNonNegativeInteger(value.periods)
+    ...normalizeSoftwareUsage(value, phase)
   };
 };
 
@@ -150,7 +265,7 @@ const createNormalizedPhaseBudget = (
   const phaseBudget = isRecord(value) ? value : {};
   const personnel = Array.isArray(phaseBudget.personnel)
     ? phaseBudget.personnel.flatMap((line) => {
-        const cleaned = cleanPersonnelLine(line);
+        const cleaned = cleanPersonnelLine(line, phase);
         return cleaned ? [cleaned] : [];
       })
     : [];
@@ -162,7 +277,7 @@ const createNormalizedPhaseBudget = (
     : [];
   const existingSoftwareCosts = Array.isArray(phaseBudget.softwareCosts)
     ? phaseBudget.softwareCosts.flatMap((line) => {
-        const cleaned = cleanSoftwareCostLine(line);
+        const cleaned = cleanSoftwareCostLine(line, phase);
         return cleaned ? [cleaned] : [];
       })
     : [];

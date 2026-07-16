@@ -9,6 +9,7 @@ import type {
   Phase,
   Project,
   ProjectBudget,
+  ProjectWorkflow,
   ProjectVersion,
   ProjectStatus,
   Task,
@@ -21,6 +22,12 @@ import {
 import { normalizeProjectBudgetForPhases } from "@/lib/utils/project-budget-normalize";
 import { buildProjectPhaseDateRanges } from "@/lib/utils/project-phases";
 import {
+  normalizeProjectWorkflowIds,
+  normalizeProjectWorkflows,
+  normalizeWorkflowLibrary
+} from "@/lib/utils/project-workflow";
+import {
+  createProjectSave,
   decideProjectImport,
   type ProjectImportBlockedReason,
   type ProjectImportMode,
@@ -198,6 +205,11 @@ const linkBudgetResourcesToProject = (project: Project) => {
   const linkedPersonIds = new Set(project.people.map((person) => person.id));
   const linkedToolIds = new Set(project.tools.map((tool) => tool.id));
 
+  project.phases.forEach((phase) => {
+    phase.personIds = [];
+    phase.toolIds = [];
+  });
+
   project.budget.phases.forEach((phaseBudget) => {
     const phase = project.phases.find((item) => item.id === phaseBudget.phaseId);
 
@@ -205,8 +217,10 @@ const linkBudgetResourcesToProject = (project: Project) => {
       return;
     }
 
-    const phasePersonIds = new Set(phase.personIds ?? []);
-    const phaseToolIds = new Set(phase.toolIds ?? []);
+    // Cost is the only source of truth for stage assignments. Rebuild these
+    // lists on every budget save so deleting a line also removes it from the timeline.
+    const phasePersonIds = new Set<string>();
+    const phaseToolIds = new Set<string>();
 
     phaseBudget.personnel.forEach((line) => {
       if (!line.personId) {
@@ -602,6 +616,146 @@ export async function updateProjectStatus(projectId: string, status: ProjectStat
   return mockApi(project);
 }
 
+export async function listProjectWorkflows(projectId: string) {
+  await hydrateMockDatabase();
+  const project = requireEntity(
+    mockDatabase.projects.find((item) => item.id === projectId),
+    `Project not found: ${projectId}`
+  );
+  const workflowsById = new Map(
+    mockDatabase.workflows.map((workflow) => [workflow.id, workflow])
+  );
+
+  return mockApi(
+    normalizeProjectWorkflowIds(project.workflowIds).map((workflowId) =>
+      requireEntity(workflowsById.get(workflowId), `Workflow not found: ${workflowId}`)
+    )
+  );
+}
+
+export async function setProjectWorkflowIds(
+  projectId: string,
+  workflowIds: ReadonlyArray<string>
+) {
+  await hydrateMockDatabase();
+  const projectIndex = mockDatabase.projects.findIndex((item) => item.id === projectId);
+  const project = requireEntity(
+    projectIndex >= 0 ? mockDatabase.projects[projectIndex] : undefined,
+    `Project not found: ${projectId}`
+  );
+  const normalizedWorkflowIds = normalizeProjectWorkflowIds(workflowIds);
+  const availableWorkflowIds = new Set(
+    mockDatabase.workflows.map((workflow) => workflow.id)
+  );
+  const missingWorkflowId = normalizedWorkflowIds.find(
+    (workflowId) => !availableWorkflowIds.has(workflowId)
+  );
+  if (missingWorkflowId) {
+    throw new Error(`Workflow not found: ${missingWorkflowId}`);
+  }
+
+  const previousProject = structuredClone(project);
+  const projectWithoutEmbeddedWorkflows = { ...project };
+  delete projectWithoutEmbeddedWorkflows.workflows;
+  const nextProject = structuredClone({
+    ...projectWithoutEmbeddedWorkflows,
+    workflowIds: normalizedWorkflowIds,
+    importPlaceholder: normalizedWorkflowIds.length > 0 ? false : project.importPlaceholder
+  } satisfies Project);
+
+  mockDatabase.projects[projectIndex] = nextProject;
+
+  try {
+    await persistMockDatabase();
+  } catch (error) {
+    const rollbackIndex = mockDatabase.projects.findIndex((item) => item.id === projectId);
+    if (rollbackIndex >= 0) {
+      mockDatabase.projects[rollbackIndex] = previousProject;
+    }
+    throw error;
+  }
+
+  return mockApi(nextProject);
+}
+
+export async function linkProjectWorkflow(projectId: string, workflowId: string) {
+  await hydrateMockDatabase();
+  const project = requireEntity(
+    mockDatabase.projects.find((item) => item.id === projectId),
+    `Project not found: ${projectId}`
+  );
+
+  const currentWorkflowIds = normalizeProjectWorkflowIds(project.workflowIds);
+  return setProjectWorkflowIds(
+    projectId,
+    currentWorkflowIds.includes(workflowId)
+      ? currentWorkflowIds
+      : [...currentWorkflowIds, workflowId]
+  );
+}
+
+export async function unlinkProjectWorkflow(projectId: string, workflowId: string) {
+  await hydrateMockDatabase();
+  const project = requireEntity(
+    mockDatabase.projects.find((item) => item.id === projectId),
+    `Project not found: ${projectId}`
+  );
+
+  return setProjectWorkflowIds(
+    projectId,
+    normalizeProjectWorkflowIds(project.workflowIds).filter((id) => id !== workflowId)
+  );
+}
+
+/**
+ * @deprecated Embedded project workflows were replaced by global originals.
+ * Kept temporarily so older UI builds migrate their edits atomically.
+ */
+export async function updateProjectWorkflows(
+  projectId: string,
+  workflows: ReadonlyArray<ProjectWorkflow>
+) {
+  await hydrateMockDatabase();
+  const projectIndex = mockDatabase.projects.findIndex((item) => item.id === projectId);
+  const project = requireEntity(
+    projectIndex >= 0 ? mockDatabase.projects[projectIndex] : undefined,
+    `Project not found: ${projectId}`
+  );
+  const normalizedWorkflows = normalizeProjectWorkflows(workflows);
+  const previousProject = structuredClone(project);
+  const previousWorkflows = structuredClone(mockDatabase.workflows);
+  const nextGlobalWorkflows = structuredClone(mockDatabase.workflows);
+
+  for (const workflow of normalizedWorkflows) {
+    const workflowIndex = nextGlobalWorkflows.findIndex((item) => item.id === workflow.id);
+    if (workflowIndex >= 0) {
+      nextGlobalWorkflows[workflowIndex] = workflow;
+    } else {
+      nextGlobalWorkflows.push(workflow);
+    }
+  }
+
+  mockDatabase.workflows = normalizeWorkflowLibrary(nextGlobalWorkflows);
+  const projectWithoutEmbeddedWorkflows = { ...project };
+  delete projectWithoutEmbeddedWorkflows.workflows;
+  const nextProject = {
+    ...projectWithoutEmbeddedWorkflows,
+    workflowIds: normalizedWorkflows.map((workflow) => workflow.id),
+    importPlaceholder: normalizedWorkflows.length > 0 ? false : project.importPlaceholder
+  } satisfies Project;
+  mockDatabase.projects[projectIndex] = nextProject;
+
+  try {
+    await persistMockDatabase();
+  } catch (error) {
+    mockDatabase.projects[projectIndex] = previousProject;
+    mockDatabase.workflows = previousWorkflows;
+    throw error;
+  }
+
+  return mockApi(nextProject);
+}
+
 const releaseVersionId = (project: Project, kind: NonNullable<ProjectVersion["kind"]>) =>
   `${project.id}-version-${kind}`;
 
@@ -705,7 +859,8 @@ const normalizeImportedProject = (
   projectId: string,
   archive: ValidatedProjectSave,
   currentProject: Project,
-  archiveIdentity: string
+  archiveIdentity: string,
+  workflowIds: ReadonlyArray<string>
 ): Project => {
   const importedProject = archive.project;
   const phaseIds = new Map(
@@ -778,6 +933,7 @@ const normalizeImportedProject = (
     archivedAt: currentProject.archivedAt ?? null,
     currentPhaseId: phaseIds.get(importedProject.currentPhaseId) ?? phases[0]?.id ?? "",
     phases,
+    workflowIds: normalizeProjectWorkflowIds(workflowIds),
     timelineRows: importedProject.timelineRows?.map((row) => ({
       ...row,
       id: createImportedEntityId(projectId, archiveIdentity, "timeline-row", row.id),
@@ -821,6 +977,76 @@ const normalizeImportedProject = (
   };
 };
 
+const mergeImportedWorkflows = (
+  projectId: string,
+  archiveIdentity: string,
+  archive: ValidatedProjectSave
+) => {
+  const nextLibrary = structuredClone(mockDatabase.workflows);
+  const workflowsById = new Map(nextLibrary.map((workflow) => [workflow.id, workflow]));
+  const sourceToDestinationId = new Map<string, string>();
+  const requestedSourceIds = new Set(
+    normalizeProjectWorkflowIds(archive.project.workflowIds)
+  );
+
+  for (const sourceWorkflow of archive.linkedWorkflows) {
+    if (!requestedSourceIds.has(sourceWorkflow.id)) {
+      continue;
+    }
+    const existingWorkflow = workflowsById.get(sourceWorkflow.id);
+    if (!existingWorkflow || JSON.stringify(existingWorkflow) === JSON.stringify(sourceWorkflow)) {
+      if (!existingWorkflow) {
+        nextLibrary.push(sourceWorkflow);
+        workflowsById.set(sourceWorkflow.id, sourceWorkflow);
+      }
+      sourceToDestinationId.set(sourceWorkflow.id, sourceWorkflow.id);
+      continue;
+    }
+
+    let destinationId = createImportedEntityId(
+      projectId,
+      archiveIdentity,
+      "workflow",
+      sourceWorkflow.id
+    );
+    let collisionIndex = 2;
+    while (workflowsById.has(destinationId)) {
+      const candidate = workflowsById.get(destinationId);
+      if (candidate && JSON.stringify(candidate) === JSON.stringify({ ...sourceWorkflow, id: destinationId })) {
+        break;
+      }
+      destinationId = createImportedEntityId(
+        projectId,
+        archiveIdentity,
+        "workflow",
+        `${sourceWorkflow.id}:${collisionIndex}`
+      );
+      collisionIndex += 1;
+    }
+
+    if (!workflowsById.has(destinationId)) {
+      const importedWorkflow = { ...sourceWorkflow, id: destinationId };
+      nextLibrary.push(importedWorkflow);
+      workflowsById.set(destinationId, importedWorkflow);
+    }
+    sourceToDestinationId.set(sourceWorkflow.id, destinationId);
+  }
+
+  const requestedIds = [...requestedSourceIds];
+  const sourceIds = requestedIds.length > 0
+    ? requestedIds
+    : archive.linkedWorkflows.map((workflow) => workflow.id);
+  const workflowIds = sourceIds.flatMap((sourceId) => {
+    const destinationId = sourceToDestinationId.get(sourceId) ?? sourceId;
+    return workflowsById.has(destinationId) ? [destinationId] : [];
+  });
+
+  return {
+    workflowIds: normalizeProjectWorkflowIds([...new Set(workflowIds)]),
+    workflows: normalizeWorkflowLibrary(nextLibrary)
+  };
+};
+
 export async function ensureProjectArchiveIdentity(projectId: string) {
   await hydrateMockDatabase();
   const projectIndex = mockDatabase.projects.findIndex((item) => item.id === projectId);
@@ -844,6 +1070,12 @@ export async function ensureProjectArchiveIdentity(projectId: string) {
   }
 
   return mockApi(project);
+}
+
+export async function createStandaloneProjectSave(projectId: string) {
+  const project = await ensureProjectArchiveIdentity(projectId);
+  const linkedWorkflows = await listProjectWorkflows(projectId);
+  return createProjectSave(project, linkedWorkflows);
 }
 
 export async function inspectProjectImport(projectId: string, archive: ValidatedProjectSave) {
@@ -882,19 +1114,24 @@ export async function replaceProjectFromArchive(
   }
 
   const archiveIdentity = archive.projectIdentity ?? createProjectArchiveIdentity();
+  const importedWorkflows = mergeImportedWorkflows(projectId, archiveIdentity, archive);
   const nextProject = normalizeImportedProject(
     projectId,
     archive,
     currentProject,
-    archiveIdentity
+    archiveIdentity,
+    importedWorkflows.workflowIds
   );
   const previousProject = currentProject;
+  const previousWorkflows = mockDatabase.workflows;
   mockDatabase.projects[projectIndex] = nextProject;
+  mockDatabase.workflows = importedWorkflows.workflows;
 
   try {
     await persistMockDatabase();
   } catch (error) {
     mockDatabase.projects[projectIndex] = previousProject;
+    mockDatabase.workflows = previousWorkflows;
     throw error;
   }
 

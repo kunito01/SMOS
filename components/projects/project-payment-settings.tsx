@@ -257,7 +257,14 @@ export function ProjectPaymentSettings({
                   <span className="min-w-0 text-xs font-black uppercase text-muted [overflow-wrap:anywhere] max-[480px]:text-[11px] max-[360px]:text-[10px]">{item.label}</span>
                 </div>
                 <div className="mt-4 flex min-h-8 min-w-0 items-end justify-between gap-3 max-[560px]:mt-3 max-[420px]:flex-col max-[420px]:items-start max-[420px]:gap-1">
-                  <p className={cn("min-w-0 max-w-full text-2xl font-black leading-none tabular-nums [overflow-wrap:anywhere] max-[560px]:text-xl max-[360px]:text-lg", item.valueClass)}>{item.value}</p>
+                  <p
+                    className={cn(
+                      "max-w-full whitespace-nowrap text-[clamp(0.78rem,4.8vw,1.5rem)] font-black leading-none tabular-nums tracking-[-0.02em]",
+                      item.valueClass
+                    )}
+                  >
+                    {item.value}
+                  </p>
                   {item.percent ? (
                     <span className={cn("shrink-0 text-right text-sm font-black leading-none max-[560px]:text-xs max-[420px]:text-left max-[360px]:text-[10px]", item.percentClass)}>
                       {t("profitRate")} {item.percent}

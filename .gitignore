@@ -5,6 +5,7 @@ node_modules/
 .next/
 .next-pages/
 .next-pwa/
+.next-verify/
 out/
 
 # production
@@ -14,6 +15,9 @@ dist/
 # local env files
 .env
 .env*.local
+
+# local HTTPS development certificates
+certificates/
 
 # logs
 npm-debug.log*
