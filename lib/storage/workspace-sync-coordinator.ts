@@ -411,7 +411,6 @@ const restoreRemoteBundleUnderMutationLock = async (
     // identity and change tag. An older sync must not silently attach them
     // again after that restore has completed.
     if (!cloudBindingStillMatches(workspaceId, user, preference)) {
-      console.warn("[smos-restore] stale: cloud binding no longer matches");
       return "stale";
     }
 
@@ -440,19 +439,6 @@ const restoreRemoteBundleUnderMutationLock = async (
         );
 
     if (revisionChanged || mutationEpochChanged || pendingChanged || localStateChanged) {
-      console.warn(
-        "[smos-restore] conflict guard tripped:",
-        JSON.stringify({
-          revisionChanged,
-          mutationEpochChanged,
-          pendingChanged,
-          localStateChanged,
-          expectedLocalWasInvalid: guard.expectedLocalWasInvalid,
-          latestLocalWasInvalid,
-          hasExpectedLocal: Boolean(guard.expectedLocal),
-          hasLatestLocal: Boolean(latestLocal)
-        })
-      );
       markConflict(workspaceId, guard.conflictMessage);
       return "conflict";
     }
@@ -1120,6 +1106,13 @@ export async function pullWorkspaceFromCloudOnLogin(
             expectedLocalWasInvalid: localWasInvalid,
             expectedLocalSaveRevision: localSaveRevision,
             expectedMutationEpoch: mutationEpoch,
+            // A forced restore (new-device join, missing/unreadable local copy)
+            // exists to overwrite local from cloud. Enabling the CloudKit
+            // provider sets pendingUpload=true as a side effect, but there is no
+            // real local content to preserve here, so that flag must not block
+            // the restore. The expectedLocal / revision / epoch guards still
+            // catch genuine concurrent local changes.
+            allowPendingUpload: true,
             conflictMessage:
               "The local workspace changed while its CloudKit recovery copy was being applied. Try signing in again."
           }
