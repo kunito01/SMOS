@@ -85,7 +85,12 @@ export function AppleCloudKitLoginPanel() {
       }
       setName(resolution.suggestedName);
       setFlow({ phase: "needs-setup", suggestedName: resolution.suggestedName });
-    } catch {
+    } catch (error) {
+      const detail =
+        error instanceof Error
+          ? `${(error as { code?: string }).code ?? error.name}: ${error.message}`
+          : String(error);
+      console.warn("[apple-auth] inspect failed:", detail);
       if (
         requestSequence === requestSequenceRef.current &&
         currentIdentityKeyRef.current === identityKey
