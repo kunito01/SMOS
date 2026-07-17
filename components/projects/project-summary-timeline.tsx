@@ -130,7 +130,9 @@ export function ProjectSummaryTimeline({ project, t, fixedLayout = false }: Proj
   };
 
   const handlePointerDown = (event: PointerEvent<HTMLDivElement>) => {
-    if (event.button !== 0 || !scrollRef.current) {
+    // Mouse only: touch must use the browser's native scrolling (with
+    // momentum); driving scrollLeft from touch pointer events feels dead.
+    if (event.pointerType !== "mouse" || event.button !== 0 || !scrollRef.current) {
       return;
     }
 

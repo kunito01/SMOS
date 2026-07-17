@@ -2,6 +2,7 @@ import { mockApi, requireEntity } from "@/lib/api/mock-client";
 import { hydrateMockDatabase, persistMockDatabase } from "@/lib/api/mock-persistence";
 import { createDashboardOverview, mockDatabase } from "@/lib/mock";
 import type { Company, CompanySummary } from "@/lib/types";
+import { assertUploadedImageWithinLimit } from "@/lib/utils/image-upload";
 import {
   bundledExchangeRateSnapshot,
   type ExchangeRateSnapshot,
@@ -53,6 +54,7 @@ export async function getCompany(companyId: string) {
 
 export async function createCompany(input: CreateCompanyInput) {
   await hydrateMockDatabase();
+  assertUploadedImageWithinLimit(input.coverImage);
 
   const now = new Date().toISOString();
   const company: Company = {
@@ -80,6 +82,7 @@ export async function updateCompanyBasics(companyId: string, input: CompanyBasic
   company.description = input.description.trim() || company.description;
 
   if (input.coverImage) {
+    assertUploadedImageWithinLimit(input.coverImage);
     company.coverImage = input.coverImage;
   }
 

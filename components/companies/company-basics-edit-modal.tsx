@@ -9,6 +9,7 @@ import type { CompanyBasicsInput } from "@/lib/api/companies";
 import { formatDemoEntityName } from "@/lib/i18n/domain-labels";
 import type { TranslationKey } from "@/lib/i18n/translations";
 import type { Company } from "@/lib/types";
+import { MAX_UPLOAD_IMAGE_BYTES } from "@/lib/utils/image-upload";
 
 type CompanyBasicsEditModalProps = {
   company: Company;
@@ -18,7 +19,7 @@ type CompanyBasicsEditModalProps = {
   onSaved: (company: Company) => void;
 };
 
-const maxCoverBytes = 3 * 1024 * 1024;
+const maxCoverBytes = MAX_UPLOAD_IMAGE_BYTES;
 const allowedCoverTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
 const inputClass =
   "min-h-11 w-full rounded-2xl border border-black/[0.08] bg-white px-3 py-2 text-sm font-bold text-ink outline-none transition focus:border-coral focus:ring-4 focus:ring-coral/10";

@@ -496,7 +496,7 @@ export function AppShell({ beforeNavigate, children }: AppShellProps) {
 
           <div
             ref={mobileNavRef}
-            className="studio-scroll flex w-full min-w-0 cursor-grab select-none flex-nowrap gap-2 overflow-x-auto overscroll-x-contain px-4 pb-4 touch-pan-x [-webkit-overflow-scrolling:touch] sm:px-6 xl:hidden"
+            className="studio-scroll flex w-full min-w-0 cursor-grab select-none flex-nowrap gap-2 overflow-x-auto overscroll-x-contain px-4 pb-4 touch-manipulation [-webkit-overflow-scrolling:touch] sm:px-6 xl:hidden"
             onClickCapture={handleMobileNavClickCapture}
             onDragStart={(event) => event.preventDefault()}
             onPointerCancel={stopMobileNavDrag}
@@ -546,7 +546,7 @@ export function AppShell({ beforeNavigate, children }: AppShellProps) {
         )}
       >
         <nav className="mx-auto flex w-fit max-w-[calc(100vw-1.5rem)] items-center gap-1.5 rounded-[2rem] bg-white/[0.56] p-2 shadow-[0_24px_70px_rgba(25,55,60,0.24)] ring-1 ring-white/[0.62] backdrop-blur-2xl max-[400px]:gap-1 max-[400px]:rounded-[1.5rem] max-[400px]:p-1 max-[360px]:rounded-[22px] max-[340px]:gap-0.5 max-[340px]:p-0.5">
-          <div className="studio-scroll flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto overscroll-x-contain scroll-smooth touch-pan-x [-webkit-overflow-scrolling:touch] max-[400px]:gap-1 max-[340px]:gap-0.5">
+          <div className="studio-scroll flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto overscroll-x-contain scroll-smooth touch-manipulation [-webkit-overflow-scrolling:touch] max-[400px]:gap-1 max-[340px]:gap-0.5">
             {navItems.map((item) => {
               const Icon = item.icon;
               const active = pathname === item.href || pathname.startsWith(`${item.href}/`);

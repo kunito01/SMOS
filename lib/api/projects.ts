@@ -19,6 +19,7 @@ import {
   type ExchangeRateSnapshot,
   type MoneyCurrency
 } from "@/lib/utils/money";
+import { assertUploadedImageWithinLimit } from "@/lib/utils/image-upload";
 import { normalizeProjectBudgetForPhases } from "@/lib/utils/project-budget-normalize";
 import { buildProjectPhaseDateRanges } from "@/lib/utils/project-phases";
 import {
@@ -594,6 +595,7 @@ export async function updateProjectBasics(projectId: string, input: ProjectBasic
   project.groupId = groupId;
 
   if (input.coverImage) {
+    assertUploadedImageWithinLimit(input.coverImage);
     project.coverImage = input.coverImage;
   }
 

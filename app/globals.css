@@ -3073,7 +3073,11 @@ nextjs-portal {
 
 .timeline-drag-surface {
   cursor: grab;
-  touch-action: pan-y;
+  /* manipulation keeps native horizontal swipe scrolling (with momentum) AND
+     vertical page scrolling alive on touch; pan-y disabled horizontal touch
+     panning entirely, which made the timelines feel dead on phones. Mouse
+     drag-to-scroll is handled separately in JS and is unaffected. */
+  touch-action: manipulation;
 }
 
 .timeline-drag-surface.is-dragging {

@@ -28,11 +28,12 @@ import {
 } from "@/lib/i18n/domain-labels";
 import type { CompanySummary, Project, ProjectGroupSummary } from "@/lib/types";
 import { companyPath } from "@/lib/utils/app-routes";
+import { MAX_UPLOAD_IMAGE_BYTES } from "@/lib/utils/image-upload";
 import type { ExchangeRateSnapshot, MoneyCurrency } from "@/lib/utils/money";
 
 const spring = { type: "spring", stiffness: 150, damping: 18 } as const;
 const seededGroupDescriptionSuffix = "grouped for visual planning and progress sharing.";
-const maxNewBrandCoverBytes = 3 * 1024 * 1024;
+const maxNewBrandCoverBytes = MAX_UPLOAD_IMAGE_BYTES;
 const allowedNewBrandCoverTypes = new Set(["image/png", "image/webp"]);
 
 const isSeededGroupDescription = (name: string, description: string) =>
