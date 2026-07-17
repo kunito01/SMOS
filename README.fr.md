@@ -108,7 +108,7 @@ Studio Map OS comprend une structure complète d’intégration PWA :
 - Un paquet PWA portable contenant le serveur Next.js autonome, les ressources statiques et un script de lancement.
 
 > [!NOTE]
-> Le mode développement désactive le Service Worker afin d’éviter que des caches obsolètes ne perturbent le développement. Vérifiez l’installation, la mise en cache et le fonctionnement hors ligne avec une build de production sur `localhost` ou HTTPS.
+> Le mode développement désactive le Service Worker afin d’éviter que des caches obsolètes ne perturbent le développement. L’authentification Apple ID locale doit utiliser exactement l’origine HTTPS [https://localhost:3305](https://localhost:3305) ; HTTP et les autres ports locaux ne sont pas pris en charge.
 
 ## Bien démarrer
 
@@ -124,10 +124,10 @@ Studio Map OS comprend une structure complète d’intégration PWA :
 git clone https://github.com/kunito01/SMOS.git
 cd SMOS
 npm install
-npm run dev
+npm run dev -- --port 3305
 ```
 
-Ouvrez [http://localhost:3000/register](http://localhost:3000/register) pour créer le premier compte local.
+Ouvrez [https://localhost:3305/register](https://localhost:3305/register) pour créer le premier compte local.
 
 Lors de la première utilisation :
 
@@ -139,16 +139,15 @@ Lors de la première utilisation :
 > [!IMPORTANT]
 > La clé de récupération n’est pas stockée en clair avec le compte. Si le mot de passe et la clé de récupération sont tous deux perdus et qu’aucune sauvegarde exploitable ne subsiste, les données de l’espace de travail peuvent devenir irrécupérables.
 
-Les comptes locaux existants peuvent se connecter sur [http://localhost:3000/login](http://localhost:3000/login). Aucun compte préconfiguré n’accepte un mot de passe arbitraire.
+Les comptes locaux existants peuvent se connecter sur [https://localhost:3305/login](https://localhost:3305/login). Aucun compte préconfiguré n’accepte un mot de passe arbitraire.
 
 ### Mode production et vérification de la PWA
 
 ```bash
 npm run build
-npm run start
 ```
 
-Ouvrez [http://localhost:3000/login](http://localhost:3000/login) dans un navigateur compatible PWA pour inspecter le Manifest, le Service Worker et le point d’entrée de l’installation. Les navigateurs considèrent `localhost` comme un contexte sécurisé ; les déploiements de production doivent utiliser HTTPS.
+Vérifiez la PWA de production via le site HTTPS déployé. Pour l’authentification Apple ID locale, utilisez uniquement le serveur de développement HTTPS ci-dessus et ouvrez [https://localhost:3305/login](https://localhost:3305/login). HTTP et les autres ports locaux ne sont pas pris en charge.
 
 ### Création d’un paquet PWA portable
 
@@ -156,7 +155,7 @@ Ouvrez [http://localhost:3000/login](http://localhost:3000/login) dans un naviga
 npm run package:pwa
 ```
 
-Le paquet est créé dans `output/pwa/studio-map-os-pwa/`. Il comprend le serveur autonome, les ressources PWA et des scripts de lancement pour Windows (`START_STUDIO_MAP_OS.bat`), macOS (`START_STUDIO_MAP_OS.command`) et les terminaux Linux/macOS (`START_STUDIO_MAP_OS.sh`). Tous les lanceurs utilisent `127.0.0.1:3002` par défaut.
+Le paquet est créé dans `output/pwa/studio-map-os-pwa/`. Il comprend le serveur autonome, les ressources PWA et des scripts de lancement pour Windows (`START_STUDIO_MAP_OS.bat`), macOS (`START_STUDIO_MAP_OS.command`) et les terminaux Linux/macOS (`START_STUDIO_MAP_OS.sh`). Ces lanceurs ne fournissent pas à eux seuls une origine HTTPS compatible avec Apple ID ; l’authentification Apple ID locale doit utiliser [https://localhost:3305](https://localhost:3305).
 
 ## Routes principales
 

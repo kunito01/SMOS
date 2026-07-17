@@ -108,7 +108,7 @@ Studio Map OS, eksiksiz bir PWA entegrasyon yapısı içerir:
 - Bağımsız Next.js sunucusunu, statik varlıkları ve bir başlatma betiğini içeren taşınabilir PWA paketi.
 
 > [!NOTE]
-> Geliştirme modu, eski önbelleklerin geliştirmeyi etkilemesini önlemek için Service Worker'ı devre dışı bırakır. Kurulumu, önbelleğe almayı ve çevrimdışı davranışı `localhost` üzerinde veya HTTPS üzerinden bir üretim derlemesiyle doğrulayın.
+> Geliştirme modu, eski önbelleklerin geliştirmeyi etkilemesini önlemek için Service Worker'ı devre dışı bırakır. Yerel Apple ID kimlik doğrulaması tam olarak [https://localhost:3305](https://localhost:3305) HTTPS kaynağını kullanmalıdır; HTTP ve diğer yerel bağlantı noktaları desteklenmez.
 
 ## Başlarken
 
@@ -124,10 +124,10 @@ Studio Map OS, eksiksiz bir PWA entegrasyon yapısı içerir:
 git clone https://github.com/kunito01/SMOS.git
 cd SMOS
 npm install
-npm run dev
+npm run dev -- --port 3305
 ```
 
-İlk yerel hesabı oluşturmak için [http://localhost:3000/register](http://localhost:3000/register) adresini açın.
+İlk yerel hesabı oluşturmak için [https://localhost:3305/register](https://localhost:3305/register) adresini açın.
 
 İlk kullanımda:
 
@@ -139,16 +139,15 @@ npm run dev
 > [!IMPORTANT]
 > Kurtarma anahtarı, hesapla birlikte düz metin olarak saklanmaz. Parola ve kurtarma anahtarının ikisi de kaybedilir ve kullanılabilir bir yedek kalmazsa çalışma alanı verileri kurtarılamayabilir.
 
-Mevcut yerel hesaplar [http://localhost:3000/login](http://localhost:3000/login) adresinden oturum açabilir. Herhangi bir parolayı kabul eden önceden yapılandırılmış bir hesap yoktur.
+Mevcut yerel hesaplar [https://localhost:3305/login](https://localhost:3305/login) adresinden oturum açabilir. Herhangi bir parolayı kabul eden önceden yapılandırılmış bir hesap yoktur.
 
 ### Üretim Modu ve PWA Doğrulaması
 
 ```bash
 npm run build
-npm run start
 ```
 
-Manifest'i, Service Worker'ı ve kurulum giriş noktasını incelemek için [http://localhost:3000/login](http://localhost:3000/login) adresini PWA özellikli bir tarayıcıda açın. Tarayıcılar `localhost` adresini güvenli bağlam olarak kabul eder; üretim dağıtımlarında HTTPS kullanılmalıdır.
+Üretim PWA'sını dağıtılmış HTTPS sitesi üzerinden doğrulayın. Yerel Apple ID kimlik doğrulaması için yalnızca yukarıdaki HTTPS geliştirme sunucusunu kullanın ve [https://localhost:3305/login](https://localhost:3305/login) adresini açın. HTTP ve diğer yerel bağlantı noktaları desteklenmez.
 
 ### Taşınabilir PWA Paketi Oluşturma
 
@@ -156,7 +155,7 @@ Manifest'i, Service Worker'ı ve kurulum giriş noktasını incelemek için [htt
 npm run package:pwa
 ```
 
-Paket `output/pwa/studio-map-os-pwa/` konumuna yazılır. Bağımsız sunucuyu, PWA varlıklarını ve Windows (`START_STUDIO_MAP_OS.bat`), macOS (`START_STUDIO_MAP_OS.command`) ile Linux/macOS terminalleri (`START_STUDIO_MAP_OS.sh`) için başlatma betiklerini içerir. Tüm başlatıcılar varsayılan olarak `127.0.0.1:3002` adresini kullanır.
+Paket `output/pwa/studio-map-os-pwa/` konumuna yazılır. Bağımsız sunucuyu, PWA varlıklarını ve Windows (`START_STUDIO_MAP_OS.bat`), macOS (`START_STUDIO_MAP_OS.command`) ile Linux/macOS terminalleri (`START_STUDIO_MAP_OS.sh`) için başlatma betiklerini içerir. Bu başlatıcılar tek başına Apple ID ile uyumlu bir HTTPS kaynağı sağlamaz; yerel Apple ID kimlik doğrulaması [https://localhost:3305](https://localhost:3305) adresini kullanmalıdır.
 
 ## Ana Rotalar
 

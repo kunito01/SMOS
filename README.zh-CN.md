@@ -108,7 +108,7 @@ Studio Map OS 已具备完整的 PWA 接入结构：
 - 可生成包含独立 Next.js 服务、静态资源和启动脚本的便携 PWA 压缩包。
 
 > [!NOTE]
-> 开发模式会禁用 Service Worker，避免旧缓存干扰调试。请使用生产构建并通过 `localhost` 或 HTTPS 验证安装、缓存和离线行为。
+> 开发模式会禁用 Service Worker，避免旧缓存干扰调试。本地 Apple ID 认证必须使用唯一的 HTTPS 来源 [https://localhost:3305](https://localhost:3305)；不支持 HTTP 或其他本地端口。
 
 ## 快速开始
 
@@ -124,10 +124,10 @@ Studio Map OS 已具备完整的 PWA 接入结构：
 git clone https://github.com/kunito01/SMOS.git
 cd SMOS
 npm install
-npm run dev
+npm run dev -- --port 3305
 ```
 
-打开 [http://localhost:3000/register](http://localhost:3000/register) 创建第一个本地账户。
+打开 [https://localhost:3305/register](https://localhost:3305/register) 创建第一个本地账户。
 
 首次使用时：
 
@@ -139,16 +139,15 @@ npm run dev
 > [!IMPORTANT]
 > 恢复密钥不会以明文保存在账户数据中。丢失密码、恢复密钥且没有可用备份时，工作区数据可能无法恢复。
 
-已有本地账户时，可从 [http://localhost:3000/login](http://localhost:3000/login) 登录。这里没有“任意密码可用”的预置演示账户。
+已有本地账户时，可从 [https://localhost:3305/login](https://localhost:3305/login) 登录。这里没有“任意密码可用”的预置演示账户。
 
 ### 生产模式与 PWA 验证
 
 ```bash
 npm run build
-npm run start
 ```
 
-在支持 PWA 的浏览器中打开 [http://localhost:3000/login](http://localhost:3000/login)，即可检查 Manifest、Service Worker 和安装入口。`localhost` 会被浏览器视为安全上下文；正式部署时应使用 HTTPS。
+请通过已经部署的 HTTPS 站点验证生产版 PWA。本地测试 Apple ID 认证时，只能使用上面的 HTTPS 开发服务器并打开 [https://localhost:3305/login](https://localhost:3305/login)；不支持纯 HTTP 或其他本地端口。
 
 ### 生成便携 PWA 包
 
@@ -156,7 +155,7 @@ npm run start
 npm run package:pwa
 ```
 
-打包结果会写入 `output/pwa/studio-map-os-pwa/`。其中包含独立服务、PWA 静态资源，以及适用于 Windows（`START_STUDIO_MAP_OS.bat`）、macOS（`START_STUDIO_MAP_OS.command`）和 Linux/macOS 终端（`START_STUDIO_MAP_OS.sh`）的启动脚本；所有脚本默认使用 `127.0.0.1:3002`。
+打包结果会写入 `output/pwa/studio-map-os-pwa/`。其中包含独立服务、PWA 静态资源，以及适用于 Windows（`START_STUDIO_MAP_OS.bat`）、macOS（`START_STUDIO_MAP_OS.command`）和 Linux/macOS 终端（`START_STUDIO_MAP_OS.sh`）的启动脚本。这些脚本本身不会提供 Apple ID 兼容的 HTTPS 来源；本地 Apple ID 认证必须使用 [https://localhost:3305](https://localhost:3305)。
 
 ## 主要路由
 

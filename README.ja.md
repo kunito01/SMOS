@@ -108,7 +108,7 @@ Studio Map OS には、完全な PWA 統合構成が含まれています。
 - スタンドアロン Next.js サーバー、静的アセット、起動スクリプトを収録した可搬型 PWA バンドル。
 
 > [!NOTE]
-> 開発モードでは、古いキャッシュが開発に干渉しないよう Service Worker を無効にします。インストール、キャッシュ、オフライン動作は、`localhost` または HTTPS 上の本番ビルドで確認してください。
+> 開発モードでは、古いキャッシュが開発に干渉しないよう Service Worker を無効にします。ローカルの Apple ID 認証には、正確な HTTPS オリジン [https://localhost:3305](https://localhost:3305) を使用する必要があります。HTTP および他のローカルポートには対応していません。
 
 ## はじめに
 
@@ -124,10 +124,10 @@ Studio Map OS には、完全な PWA 統合構成が含まれています。
 git clone https://github.com/kunito01/SMOS.git
 cd SMOS
 npm install
-npm run dev
+npm run dev -- --port 3305
 ```
 
-[http://localhost:3000/register](http://localhost:3000/register) を開き、最初のローカルアカウントを作成します。
+[https://localhost:3305/register](https://localhost:3305/register) を開き、最初のローカルアカウントを作成します。
 
 初回利用時：
 
@@ -139,16 +139,15 @@ npm run dev
 > [!IMPORTANT]
 > リカバリーキーは、アカウントと一緒に平文では保存されません。パスワードとリカバリーキーの両方を紛失し、利用可能なバックアップも残っていない場合、ワークスペースデータを復元できない可能性があります。
 
-既存のローカルアカウントは [http://localhost:3000/login](http://localhost:3000/login) からサインインできます。任意のパスワードを受け付ける設定済みアカウントはありません。
+既存のローカルアカウントは [https://localhost:3305/login](https://localhost:3305/login) からサインインできます。任意のパスワードを受け付ける設定済みアカウントはありません。
 
 ### 本番モードと PWA の確認
 
 ```bash
 npm run build
-npm run start
 ```
 
-PWA 対応ブラウザで [http://localhost:3000/login](http://localhost:3000/login) を開き、Manifest、Service Worker、インストールの入口を確認します。ブラウザは `localhost` をセキュアコンテキストとして扱います。本番環境へのデプロイでは HTTPS を使用してください。
+デプロイ済みの HTTPS サイトで本番 PWA を確認してください。ローカルの Apple ID 認証には、上記の HTTPS 開発サーバーだけを使用し、[https://localhost:3305/login](https://localhost:3305/login) を開いてください。HTTP および他のローカルポートには対応していません。
 
 ### 可搬型 PWA バンドルの作成
 
@@ -156,7 +155,7 @@ PWA 対応ブラウザで [http://localhost:3000/login](http://localhost:3000/lo
 npm run package:pwa
 ```
 
-バンドルは `output/pwa/studio-map-os-pwa/` に出力されます。スタンドアロンサーバー、PWA アセットに加え、Windows（`START_STUDIO_MAP_OS.bat`）、macOS（`START_STUDIO_MAP_OS.command`）、Linux/macOS のターミナル（`START_STUDIO_MAP_OS.sh`）用の起動スクリプトが含まれます。すべてのランチャーは既定で `127.0.0.1:3002` を使用します。
+バンドルは `output/pwa/studio-map-os-pwa/` に出力されます。スタンドアロンサーバー、PWA アセットに加え、Windows（`START_STUDIO_MAP_OS.bat`）、macOS（`START_STUDIO_MAP_OS.command`）、Linux/macOS のターミナル（`START_STUDIO_MAP_OS.sh`）用の起動スクリプトが含まれます。これらのランチャーだけでは Apple ID 対応の HTTPS オリジンは提供されません。ローカルの Apple ID 認証には [https://localhost:3305](https://localhost:3305) を使用してください。
 
 ## 主なルート
 

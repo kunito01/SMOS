@@ -108,7 +108,7 @@ Studio Map OS에는 완전한 PWA 통합 구조가 포함되어 있습니다.
 - 독립 실행형 Next.js 서버, 정적 자산, 실행 스크립트를 포함하는 휴대용 PWA 번들.
 
 > [!NOTE]
-> 개발 모드에서는 오래된 캐시가 개발을 방해하지 않도록 Service Worker를 비활성화합니다. 설치, 캐싱, 오프라인 동작은 `localhost` 또는 HTTPS의 프로덕션 빌드에서 확인하세요.
+> 개발 모드에서는 오래된 캐시가 개발을 방해하지 않도록 Service Worker를 비활성화합니다. 로컬 Apple ID 인증은 정확한 HTTPS 오리진 [https://localhost:3305](https://localhost:3305)를 사용해야 하며 HTTP와 다른 로컬 포트는 지원되지 않습니다.
 
 ## 시작하기
 
@@ -124,10 +124,10 @@ Studio Map OS에는 완전한 PWA 통합 구조가 포함되어 있습니다.
 git clone https://github.com/kunito01/SMOS.git
 cd SMOS
 npm install
-npm run dev
+npm run dev -- --port 3305
 ```
 
-[http://localhost:3000/register](http://localhost:3000/register)를 열어 첫 번째 로컬 계정을 만드세요.
+[https://localhost:3305/register](https://localhost:3305/register)를 열어 첫 번째 로컬 계정을 만드세요.
 
 처음 사용할 때:
 
@@ -139,16 +139,15 @@ npm run dev
 > [!IMPORTANT]
 > 복구 키는 계정과 함께 평문으로 저장되지 않습니다. 비밀번호와 복구 키를 모두 잃어버리고 사용할 수 있는 백업도 없다면 작업 공간 데이터를 복구하지 못할 수 있습니다.
 
-기존 로컬 계정은 [http://localhost:3000/login](http://localhost:3000/login)에서 로그인할 수 있습니다. 임의의 비밀번호를 허용하도록 미리 설정된 계정은 없습니다.
+기존 로컬 계정은 [https://localhost:3305/login](https://localhost:3305/login)에서 로그인할 수 있습니다. 임의의 비밀번호를 허용하도록 미리 설정된 계정은 없습니다.
 
 ### 프로덕션 모드 및 PWA 확인
 
 ```bash
 npm run build
-npm run start
 ```
 
-PWA를 지원하는 브라우저에서 [http://localhost:3000/login](http://localhost:3000/login)을 열어 Manifest, Service Worker, 설치 진입점을 확인하세요. 브라우저는 `localhost`를 보안 컨텍스트로 취급합니다. 프로덕션 배포에는 HTTPS를 사용해야 합니다.
+배포된 HTTPS 사이트에서 프로덕션 PWA를 확인하세요. 로컬 Apple ID 인증에는 위의 HTTPS 개발 서버만 사용하고 [https://localhost:3305/login](https://localhost:3305/login)을 여세요. HTTP와 다른 로컬 포트는 지원되지 않습니다.
 
 ### 휴대용 PWA 번들 만들기
 
@@ -156,7 +155,7 @@ PWA를 지원하는 브라우저에서 [http://localhost:3000/login](http://loca
 npm run package:pwa
 ```
 
-번들은 `output/pwa/studio-map-os-pwa/`에 생성됩니다. 독립 실행형 서버, PWA 자산과 함께 Windows(`START_STUDIO_MAP_OS.bat`), macOS(`START_STUDIO_MAP_OS.command`), Linux/macOS 터미널(`START_STUDIO_MAP_OS.sh`)용 실행 스크립트가 포함됩니다. 모든 실행기는 기본적으로 `127.0.0.1:3002`를 사용합니다.
+번들은 `output/pwa/studio-map-os-pwa/`에 생성됩니다. 독립 실행형 서버, PWA 자산과 함께 Windows(`START_STUDIO_MAP_OS.bat`), macOS(`START_STUDIO_MAP_OS.command`), Linux/macOS 터미널(`START_STUDIO_MAP_OS.sh`)용 실행 스크립트가 포함됩니다. 이 실행기만으로는 Apple ID 호환 HTTPS 오리진이 제공되지 않으며, 로컬 Apple ID 인증에는 [https://localhost:3305](https://localhost:3305)를 사용해야 합니다.
 
 ## 주요 경로
 
