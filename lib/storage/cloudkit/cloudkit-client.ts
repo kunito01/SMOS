@@ -96,6 +96,11 @@ export type CloudKitContainer = {
   signOut(): void;
 };
 
+type CloudKitAuthTokenStore = {
+  getToken(containerIdentifier: string): string | null;
+  putToken(containerIdentifier: string, token: string | null): void;
+};
+
 type CloudKitNamespace = {
   configure(configuration: {
     containers: Array<{
@@ -108,6 +113,9 @@ type CloudKitNamespace = {
       };
       environment: CloudKitEnvironment;
     }>;
+    services?: {
+      authTokenStore?: CloudKitAuthTokenStore;
+    };
   }): void;
   getDefaultContainer(): CloudKitContainer;
 };
@@ -176,7 +184,7 @@ export function forgetCloudKitIdentity() {
  * after the user deliberately signed out.
  */
 export function hasPersistedCloudKitSession(): boolean {
-  return readCloudKitSessionCookie() !== null;
+  return readStoredCloudKitSession() !== null;
 }
 
 // Manual test hook: setting this localStorage key in a development build makes
@@ -192,6 +200,79 @@ const isCloudKitOfflineSimulated = () => {
     return window.localStorage.getItem(OFFLINE_SIMULATION_STORAGE_KEY) === "1";
   } catch {
     return false;
+  }
+};
+
+// CloudKit JS persists the web-auth session by writing a cookie and then
+// reading it back to verify; if the read-back does not match byte-for-byte it
+// throws AUTH_PERSIST_ERROR and every database request fails. On public-suffix
+// hosts like *.github.io that verification fails for the long session token
+// (it worked on localhost). Persisting the session in localStorage through the
+// SDK's supported services.authTokenStore hook avoids the broken cookie path.
+const SESSION_STORAGE_KEY_PREFIX = "smos-cloudkit-session:";
+const sessionStorageKey = (identifier: string) =>
+  `${SESSION_STORAGE_KEY_PREFIX}${identifier}`;
+
+const readStoredCloudKitSession = (): string | null => {
+  if (typeof window === "undefined" || !containerIdentifier) {
+    return null;
+  }
+  try {
+    return window.localStorage.getItem(sessionStorageKey(containerIdentifier));
+  } catch {
+    return null;
+  }
+};
+
+const writeStoredCloudKitSession = (value: string) => {
+  if (typeof window === "undefined" || !containerIdentifier) {
+    return;
+  }
+  try {
+    window.localStorage.setItem(sessionStorageKey(containerIdentifier), value);
+  } catch {
+    // Private-mode or quota failures leave the in-memory SDK session usable
+    // for the current page load.
+  }
+};
+
+const deleteStoredCloudKitSession = () => {
+  if (typeof window === "undefined" || !containerIdentifier) {
+    return;
+  }
+  try {
+    window.localStorage.removeItem(sessionStorageKey(containerIdentifier));
+  } catch {
+    // Nothing to clean up if storage is unavailable.
+  }
+};
+
+// Supplied to CloudKit JS via services.authTokenStore so the SDK persists its
+// session here instead of through its own cookie writer.
+const cloudKitAuthTokenStore = {
+  getToken(identifier: string): string | null {
+    if (typeof window === "undefined") {
+      return null;
+    }
+    try {
+      return window.localStorage.getItem(sessionStorageKey(identifier));
+    } catch {
+      return null;
+    }
+  },
+  putToken(identifier: string, token: string | null): void {
+    if (typeof window === "undefined") {
+      return;
+    }
+    try {
+      if (token === null || token === undefined) {
+        window.localStorage.removeItem(sessionStorageKey(identifier));
+      } else {
+        window.localStorage.setItem(sessionStorageKey(identifier), token);
+      }
+    } catch {
+      // Best-effort; the SDK keeps the session in memory for this page load.
+    }
   }
 };
 
@@ -482,7 +563,12 @@ const configureCloudKit = (
           signOutButton: { id: CLOUDKIT_SIGN_OUT_BUTTON_ID, theme: "black" }
         }
       }
-    ]
+    ],
+    // Persist the session in localStorage instead of the SDK's cookie writer,
+    // which throws AUTH_PERSIST_ERROR on public-suffix hosts like *.github.io.
+    services: {
+      authTokenStore: cloudKitAuthTokenStore
+    }
   });
   window.__studioMapCloudKitConfigurationKey = key;
   return cloudKit;
@@ -580,31 +666,6 @@ type CloudKitAuthInternals = {
   };
 };
 
-const CLOUDKIT_SESSION_COOKIE_DAYS = 14;
-
-const readCloudKitSessionCookie = (): string | null => {
-  if (typeof document === "undefined" || !containerIdentifier) {
-    return null;
-  }
-  for (const part of document.cookie.split(";")) {
-    const trimmed = part.trim();
-    if (trimmed.startsWith(`${containerIdentifier}=`)) {
-      return trimmed.slice(containerIdentifier.length + 1) || null;
-    }
-  }
-  return null;
-};
-
-const writeCloudKitSessionCookie = (value: string) => {
-  if (typeof document === "undefined" || !containerIdentifier) {
-    return;
-  }
-  const expires = new Date(
-    Date.now() + CLOUDKIT_SESSION_COOKIE_DAYS * 24 * 60 * 60 * 1000
-  ).toUTCString();
-  document.cookie = `${containerIdentifier}=${value}; expires=${expires}; path=/`;
-};
-
 /**
  * CloudKit JS (frozen at v2.6.4) still resolves the signed-in identity through
  * the legacy public-database users/caller endpoint, which Apple's servers
@@ -620,7 +681,7 @@ const writeCloudKitSessionCookie = (value: string) => {
  * offline checks are not mistaken for sign-outs.
  */
 const fetchCloudKitIdentityViaRest = async (): Promise<CloudKitUserIdentity | null> => {
-  const session = readCloudKitSessionCookie();
+  const session = readStoredCloudKitSession();
   if (!session) {
     return null;
   }
@@ -658,7 +719,7 @@ const fetchCloudKitIdentityViaRest = async (): Promise<CloudKitUserIdentity | nu
     response.headers.get("x-apple-cloudkit-web-auth-token") ??
     response.headers.get("x-apple-cloudkit-session");
   if (rotatedSession) {
-    writeCloudKitSessionCookie(rotatedSession);
+    writeStoredCloudKitSession(rotatedSession);
   }
 
   return { userRecordName };
@@ -874,23 +935,11 @@ export function disarmCloudKitSignInMessageGuard() {
   disarmSignInMessageGuard();
 }
 
-const deleteCloudKitSessionCookie = () => {
-  if (typeof document === "undefined" || !containerIdentifier) {
-    return;
-  }
-  // CloudKit JS persists the session in a cookie named after the container.
-  // Expire it under both the default path and the site root; unknown paths
-  // cannot be enumerated, so this stays best-effort.
-  const expired = `${containerIdentifier}=; expires=Thu, 01 Jan 1970 00:00:00 GMT`;
-  document.cookie = expired;
-  document.cookie = `${expired}; path=/`;
-};
-
 /**
  * Signs the browser out of the persisted CloudKit session so a signed-out app
- * session cannot be silently re-entered from the stored ckSession cookie.
- * Never loads CloudKit JS just to sign out; without the SDK the persisted
- * cookie is removed directly.
+ * session cannot be silently re-entered from the stored session. Never loads
+ * CloudKit JS just to sign out; without the SDK the persisted session is
+ * removed directly.
  */
 export async function signOutCloudKitSession(): Promise<void> {
   disarmSignInMessageGuard();
@@ -905,8 +954,8 @@ export async function signOutCloudKitSession(): Promise<void> {
       window.CloudKit.getDefaultContainer().signOut();
     }
   } catch {
-    // Fall through to clearing the persisted session cookie directly.
+    // Fall through to clearing the persisted session directly.
   }
 
-  deleteCloudKitSessionCookie();
+  deleteStoredCloudKitSession();
 }
