@@ -3,10 +3,11 @@ const CLOUDKIT_SCRIPT_ID = "studio-map-os-cloudkit-js";
 const CLOUDKIT_SCRIPT_TIMEOUT_MS = 20_000;
 const SIGN_IN_MESSAGE_GUARD_WINDOW_MS = 10 * 60_000;
 // CloudKit JS database requests intermittently fail with a transport-level
-// NETWORK_ERROR (a connection that succeeds once warm), so every private-DB
-// call is retried a few times before it is surfaced to the caller.
-const CLOUDKIT_DB_MAX_ATTEMPTS = 4;
-const CLOUDKIT_DB_RETRY_BASE_DELAY_MS = 350;
+// NETWORK_ERROR. Observed loss on some routes to api.apple-cloudkit.com
+// exceeds 50%, so the retry budget must survive several consecutive drops:
+// eight attempts bring per-operation failure below 0.5% even on such links.
+const CLOUDKIT_DB_MAX_ATTEMPTS = 8;
+const CLOUDKIT_DB_RETRY_BASE_DELAY_MS = 400;
 
 export const CLOUDKIT_SIGN_IN_BUTTON_ID = "apple-sign-in-button" as const;
 export const CLOUDKIT_SIGN_OUT_BUTTON_ID = "apple-sign-out-button" as const;
