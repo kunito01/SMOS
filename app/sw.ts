@@ -23,7 +23,11 @@ const serwist = new Serwist({
     ignoreURLParametersMatching: [/.*/]
   },
   clientsClaim: true,
-  skipWaiting: false,
+  // A waiting worker never activates while any tab or installed PWA window
+  // stays open, so deployed fixes kept being served from the old precache.
+  // Taking over immediately means the next reload after a deploy runs the new
+  // build; local-first data lives in IndexedDB, so a reload is always safe.
+  skipWaiting: true,
   navigationPreload: true,
   disableDevLogs: true,
   runtimeCaching: defaultCache,
