@@ -3,11 +3,10 @@
   "version": "1.2.0",
   "private": true,
   "scripts": {
-    "dev": "next dev --experimental-https --experimental-https-key certificates/localhost-key.pem --experimental-https-cert certificates/localhost.pem",
-    "dev:http": "next dev",
+    "dev": "next dev --hostname localhost --port 3305 --experimental-https --experimental-https-key certificates/localhost-key.pem --experimental-https-cert certificates/localhost.pem",
     "build": "next build",
     "package:pwa": "node scripts/package-pwa.mjs",
-    "start": "next start",
+    "start": "npm run dev",
     "lint": "eslint ."
   },
   "dependencies": {
