@@ -833,6 +833,112 @@ export async function unlockWorkspaceRecovery(
   }
 }
 
+const MIN_ACCOUNT_UNLOCK_SECRET_LENGTH = 32;
+
+const assertAccountUnlockSecret = (secret: string) => {
+  if (typeof secret !== "string" || secret.length < MIN_ACCOUNT_UNLOCK_SECRET_LENGTH) {
+    throw new WorkspaceCryptoError(
+      "INVALID_WORKSPACE_CODE",
+      "The Apple account unlock secret is missing or too short."
+    );
+  }
+};
+
+/**
+ * Wraps a fresh workspace master key with a key derived from a high-entropy,
+ * account-bound secret (the Apple account fingerprint) instead of a 16-digit
+ * recovery code. Any device authenticated to the same Apple account can
+ * recompute that fingerprint and unlock the workspace, so Apple accounts need
+ * no recovery key. This is deliberately NOT end-to-end secret from the account
+ * holder: it trades the recovery-code protection for automatic multi-device
+ * access. Local accounts keep the code-based createWorkspaceRecovery.
+ */
+export async function createAppleAccountRecovery(
+  secret: string
+): Promise<{ metadata: WorkspaceRecoveryMetadata; masterKey: WorkspaceMasterKey }> {
+  assertAccountUnlockSecret(secret);
+
+  const masterKey = randomBytes(MASTER_KEY_BYTES);
+  const iv = randomBytes(AES_GCM_IV_BYTES);
+  const metadata: WorkspaceRecoveryMetadata = {
+    schema: RECOVERY_SCHEMA,
+    version: CRYPTO_VERSION,
+    workspaceId: `ws_${bytesToBase64Url(randomBytes(16))}`,
+    createdAt: new Date().toISOString(),
+    keyDerivation: createPbkdf2Parameters(),
+    wrappedMasterKey: createEmptyCiphertext(iv)
+  };
+
+  try {
+    const wrappingKey = await derivePbkdf2Key(secret, metadata.keyDerivation);
+    const ciphertext = await getWebCrypto().subtle.encrypt(
+      {
+        name: AES_GCM,
+        iv,
+        additionalData: recoveryAdditionalData(metadata),
+        tagLength: AES_GCM_TAG_BITS
+      },
+      wrappingKey,
+      masterKey
+    );
+
+    metadata.wrappedMasterKey.ciphertext = bytesToBase64(new Uint8Array(ciphertext));
+    return { metadata, masterKey };
+  } catch (error) {
+    masterKey.fill(0);
+    if (error instanceof WorkspaceCryptoError) {
+      throw error;
+    }
+    throw new WorkspaceCryptoError(
+      "ENCRYPTION_FAILED",
+      "The workspace master key could not be protected for the Apple account."
+    );
+  }
+}
+
+/** Unlocks an Apple-account workspace using the account fingerprint secret. */
+export async function unlockAppleAccountRecovery(
+  metadata: WorkspaceRecoveryMetadata,
+  secret: string
+): Promise<WorkspaceMasterKey> {
+  const parsedMetadata = parseRecoveryMetadata(metadata);
+  assertAccountUnlockSecret(secret);
+
+  try {
+    const wrappingKey = await derivePbkdf2Key(secret, parsedMetadata.keyDerivation);
+    const plaintext = await getWebCrypto().subtle.decrypt(
+      {
+        name: AES_GCM,
+        iv: base64ToBytes(parsedMetadata.wrappedMasterKey.iv, "AES-GCM IV", AES_GCM_IV_BYTES),
+        additionalData: recoveryAdditionalData(parsedMetadata),
+        tagLength: AES_GCM_TAG_BITS
+      },
+      wrappingKey,
+      base64ToBytes(
+        parsedMetadata.wrappedMasterKey.ciphertext,
+        "wrapped master key",
+        MASTER_KEY_BYTES + AES_GCM_TAG_BITS / 8
+      )
+    );
+    const masterKey = new Uint8Array(plaintext);
+
+    if (masterKey.byteLength !== MASTER_KEY_BYTES) {
+      masterKey.fill(0);
+      throw new Error("Invalid decrypted master key length.");
+    }
+
+    return masterKey;
+  } catch (error) {
+    if (error instanceof WorkspaceCryptoError && error.code === "CRYPTO_UNAVAILABLE") {
+      throw error;
+    }
+    throw new WorkspaceCryptoError(
+      "RECOVERY_UNLOCK_FAILED",
+      "The Apple account unlock secret does not match this workspace, or the metadata is damaged."
+    );
+  }
+}
+
 export async function protectMasterKeyWithPassword(
   masterKey: WorkspaceMasterKey,
   password: string,

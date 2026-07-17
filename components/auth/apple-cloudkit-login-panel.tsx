@@ -2,27 +2,11 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import {
-  ArrowRight,
-  Check,
-  Cloud,
-  Copy,
-  Download,
-  KeyRound,
-  LoaderCircle,
-  ShieldCheck
-} from "lucide-react";
+import { ArrowRight, Check, Cloud, LoaderCircle, ShieldCheck } from "lucide-react";
 import { useCloudKitAuth } from "@/components/providers/cloudkit-auth-provider";
 import { useAuth, useI18n } from "@/components/providers/app-providers";
 import { useCloudKitAccountDisplay } from "@/components/storage/use-cloudkit-account-display";
 import { Button } from "@/components/ui/button";
-import { LocalAuthError } from "@/lib/api/auth";
-import {
-  formatWorkspaceCode,
-  generateWorkspaceCode,
-  isValidWorkspaceCode,
-  sanitizeWorkspaceCodeInput
-} from "@/lib/security/workspace-crypto";
 import {
   CLOUDKIT_SIGN_IN_BUTTON_ID,
   CLOUDKIT_SIGN_OUT_BUTTON_ID,
@@ -34,21 +18,7 @@ type AppleAccountFlow =
   | { phase: "idle" }
   | { phase: "resolving" }
   | { phase: "needs-setup"; suggestedName: string }
-  | { phase: "needs-recovery"; displayName: string }
   | { phase: "error"; message: string };
-
-const downloadTextFile = (fileName: string, content: string) => {
-  const url = URL.createObjectURL(new Blob([content], { type: "text/plain;charset=utf-8" }));
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = fileName;
-  document.body.append(link);
-  link.click();
-  link.remove();
-  // Safari and installed iOS/iPadOS PWAs may not finish the download before
-  // the click handler returns, so keep the blob URL alive briefly.
-  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-};
 
 export function AppleCloudKitLoginPanel() {
   const router = useRouter();
@@ -57,7 +27,6 @@ export function AppleCloudKitLoginPanel() {
     commitAppleAccountUser,
     inspectAppleAccount,
     provisionAppleAccount,
-    recoverAppleAccount,
     signOut,
     unlockAppleAccountOffline,
     user
@@ -73,10 +42,6 @@ export function AppleCloudKitLoginPanel() {
   const { account, accountTag } = useCloudKitAccountDisplay(identity);
   const [flow, setFlow] = useState<AppleAccountFlow>({ phase: "idle" });
   const [name, setName] = useState("");
-  const [workspaceCode, setWorkspaceCode] = useState("");
-  const [recoveryCode, setRecoveryCode] = useState("");
-  const [acknowledged, setAcknowledged] = useState(false);
-  const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const resolvedIdentityRef = useRef<string | null>(null);
@@ -118,18 +83,8 @@ export function AppleCloudKitLoginPanel() {
         router.replace("/dashboard");
         return;
       }
-      if (resolution.kind === "needs-setup") {
-        setName(resolution.suggestedName);
-        setWorkspaceCode(generateWorkspaceCode());
-        setAcknowledged(false);
-        setFlow({ phase: "needs-setup", suggestedName: resolution.suggestedName });
-        return;
-      }
-      setRecoveryCode("");
-      setFlow({
-        phase: "needs-recovery",
-        displayName: resolution.displayName
-      });
+      setName(resolution.suggestedName);
+      setFlow({ phase: "needs-setup", suggestedName: resolution.suggestedName });
     } catch {
       if (
         requestSequence === requestSequenceRef.current &&
@@ -183,7 +138,6 @@ export function AppleCloudKitLoginPanel() {
     requestSequenceRef.current += 1;
     currentIdentityKeyRef.current = identityKey;
     setActionError(null);
-    setCopied(false);
     if (!identity) {
       resolvedIdentityRef.current = null;
       setFlow({ phase: "idle" });
@@ -193,42 +147,8 @@ export function AppleCloudKitLoginPanel() {
     void resolveIdentity(identity);
   }, [identity, resolveIdentity]);
 
-  const copyRecoveryKey = async () => {
-    if (!isValidWorkspaceCode(workspaceCode)) {
-      return;
-    }
-    setActionError(null);
-    try {
-      await navigator.clipboard.writeText(formatWorkspaceCode(workspaceCode));
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1600);
-    } catch {
-      setActionError(t("loginAppleSetupFailed"));
-    }
-  };
-
-  const downloadRecoveryKey = () => {
-    if (!isValidWorkspaceCode(workspaceCode)) {
-      return;
-    }
-    const safeName = name.trim().replace(/[^\p{L}\p{N}._-]+/gu, "-") || "apple-account";
-    downloadTextFile(
-      `studio-map-os-${safeName}-recovery-key.txt`,
-      [
-        t("workspaceRecoveryCardTitle"),
-        "Studio Map OS",
-        "",
-        `${t("registerName")}: ${name.trim()}`,
-        `${t("workspaceKeyLabel")}: ${formatWorkspaceCode(workspaceCode)}`,
-        "",
-        t("workspaceRecoveryCardWarning"),
-        t("workspaceKeyOnlyOnce")
-      ].join("\n")
-    );
-  };
-
   const completeSetup = async () => {
-    if (!identity || busy || !name.trim() || !acknowledged || !isValidWorkspaceCode(workspaceCode)) {
+    if (!identity || busy || !name.trim()) {
       return;
     }
     const identityKey = identity.userRecordName;
@@ -239,11 +159,7 @@ export function AppleCloudKitLoginPanel() {
     setBusy(true);
     setActionError(null);
     try {
-      const result = await provisionAppleAccount({
-        identity,
-        name,
-        workspaceCode
-      });
+      const result = await provisionAppleAccount({ identity, name });
       if (
         requestSequence !== requestSequenceRef.current ||
         currentIdentityKeyRef.current !== identityKey
@@ -252,7 +168,6 @@ export function AppleCloudKitLoginPanel() {
         return;
       }
       commitAppleAccountUser(result.user);
-      setWorkspaceCode("");
       router.replace("/dashboard");
     } catch {
       if (
@@ -260,50 +175,6 @@ export function AppleCloudKitLoginPanel() {
         currentIdentityKeyRef.current === identityKey
       ) {
         setActionError(t("loginAppleSetupFailed"));
-      }
-    } finally {
-      if (
-        requestSequence === requestSequenceRef.current &&
-        currentIdentityKeyRef.current === identityKey
-      ) {
-        setBusy(false);
-      }
-    }
-  };
-
-  const completeRecovery = async () => {
-    if (!identity || busy || !isValidWorkspaceCode(recoveryCode)) {
-      return;
-    }
-    const identityKey = identity.userRecordName;
-    if (currentIdentityKeyRef.current !== identityKey) {
-      return;
-    }
-    const requestSequence = ++requestSequenceRef.current;
-    setBusy(true);
-    setActionError(null);
-    try {
-      const result = await recoverAppleAccount({ identity, workspaceCode: recoveryCode });
-      if (
-        requestSequence !== requestSequenceRef.current ||
-        currentIdentityKeyRef.current !== identityKey
-      ) {
-        await signOut();
-        return;
-      }
-      commitAppleAccountUser(result.user);
-      setRecoveryCode("");
-      router.replace("/dashboard");
-    } catch (error) {
-      if (
-        requestSequence === requestSequenceRef.current &&
-        currentIdentityKeyRef.current === identityKey
-      ) {
-        setActionError(
-          error instanceof LocalAuthError && error.code === "RECOVERY_KEY_MISMATCH"
-            ? t("backupRecoveryKeyMismatch")
-            : t("loginAppleRecoveryFailed")
-        );
       }
     } finally {
       if (
@@ -439,82 +310,14 @@ export function AppleCloudKitLoginPanel() {
                 className="h-12 w-full rounded-full border-0 bg-white px-4 text-sm font-bold outline-none ring-1 ring-black/5 focus:ring-2 focus:ring-coral"
               />
             </label>
-            <div className="mt-4 overflow-hidden rounded-studio bg-ink text-white">
-              <div className="bg-coral px-4 py-3">
-                <p className="text-sm font-black">{t("workspaceKeyWarningTitle")}</p>
-                <p className="mt-1 text-xs font-bold leading-5 text-white/82">
-                  {t("workspaceKeyOnlyOnce")}
-                </p>
-              </div>
-              <div className="p-4">
-                <div className="flex items-center gap-2 text-xs font-black text-white/70">
-                  <KeyRound size={16} />
-                  {t("workspaceKeyLabel")}
-                </div>
-                <code className="mt-3 block overflow-x-auto whitespace-nowrap rounded-full bg-white/10 px-4 py-3 text-center text-lg font-black tracking-[0.08em] text-limepop sm:text-xl">
-                  {formatWorkspaceCode(workspaceCode)}
-                </code>
-                <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                  <Button type="button" variant="ghost" size="md" onClick={() => void copyRecoveryKey()}>
-                    <Copy size={16} />
-                    {copied ? t("workspaceKeyCopied") : t("workspaceKeyCopy")}
-                  </Button>
-                  <Button type="button" variant="ghost" size="md" onClick={downloadRecoveryKey}>
-                    <Download size={16} />
-                    {t("workspaceKeyDownload")}
-                  </Button>
-                </div>
-                <label className="mt-3 flex cursor-pointer items-start gap-3 rounded-studio bg-limepop/12 p-3">
-                  <input
-                    type="checkbox"
-                    checked={acknowledged}
-                    onChange={(event) => setAcknowledged(event.target.checked)}
-                    className="mt-0.5 size-5 shrink-0 accent-[#e3f596]"
-                  />
-                  <span className="text-xs font-black leading-5 text-limepop">
-                    {t("workspaceKeySavedConfirm")}
-                  </span>
-                </label>
-              </div>
-            </div>
             <Button
               type="button"
               size="lg"
               className="mt-4 w-full"
-              disabled={busy || !name.trim() || !acknowledged || !isValidWorkspaceCode(workspaceCode)}
+              disabled={busy || !name.trim()}
               onClick={() => void completeSetup()}
             >
               {busy ? t("saving") : t("loginAppleContinue")}
-              <ArrowRight size={18} />
-            </Button>
-          </div>
-        ) : null}
-
-        {flow.phase === "needs-recovery" ? (
-          <div className="rounded-studio-lg bg-[#f4f0e8] p-4 text-ink">
-            <h4 className="text-base font-black">{t("loginAppleRecoveryTitle")}</h4>
-            <p className="mt-1 text-xs font-bold leading-5 text-muted">
-              {t("loginAppleRecoveryBody")}
-            </p>
-            <label className="mt-4 block">
-              <span className="mb-2 block text-xs font-black">{t("workspaceKeyLabel")}</span>
-              <input
-                value={formatWorkspaceCode(recoveryCode)}
-                inputMode="numeric"
-                autoComplete="off"
-                onChange={(event) => setRecoveryCode(sanitizeWorkspaceCodeInput(event.target.value))}
-                placeholder="XXXX-XXXX-XXXX-XXXX"
-                className="h-12 w-full rounded-full border-0 bg-white px-4 text-center font-mono text-base font-black tracking-[0.08em] outline-none ring-1 ring-black/5 focus:ring-2 focus:ring-coral"
-              />
-            </label>
-            <Button
-              type="button"
-              size="lg"
-              className="mt-4 w-full"
-              disabled={busy || !isValidWorkspaceCode(recoveryCode)}
-              onClick={() => void completeRecovery()}
-            >
-              {busy ? t("loading") : t("loginAppleContinue")}
               <ArrowRight size={18} />
             </Button>
           </div>

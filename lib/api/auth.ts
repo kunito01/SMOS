@@ -16,6 +16,7 @@ import { languages, type Language } from "@/lib/i18n/translations";
 import type { EncryptedPublicSharePayload } from "@/lib/security/public-share-storage";
 import {
   WorkspaceCryptoError,
+  createAppleAccountRecovery,
   createWorkspaceRecovery,
   decryptWorkspaceRecord,
   decryptWorkspaceEnvelope,
@@ -23,6 +24,7 @@ import {
   isValidWorkspaceCode,
   parseEncryptedWorkspaceEnvelope,
   protectMasterKeyWithPassword,
+  unlockAppleAccountRecovery,
   unlockMasterKeyWithPassword,
   unlockWorkspaceRecovery,
   validatePasswordProtectedMasterKey,
@@ -125,10 +127,6 @@ export type AppleAccountLoginResolution =
       suggestedName: string;
     }
   | {
-      kind: "needs-recovery";
-      displayName: string;
-    }
-  | {
       kind: "ready";
       user: LocalAuthUser;
     };
@@ -136,7 +134,6 @@ export type AppleAccountLoginResolution =
 export type AppleAccountSetupPayload = {
   identity: CloudKitUserIdentity;
   name: string;
-  workspaceCode: string;
 };
 
 export type AppleAccountRecoveryPayload = {
@@ -1465,7 +1462,7 @@ const debugAppleAuth = (step: string) => {
   }
 };
 
-/** Resolves an authenticated Apple identity into setup, recovery, or login. */
+/** Resolves an authenticated Apple identity into first-time setup or login. */
 async function inspectAppleAccountUnlocked(
   identityInput: CloudKitUserIdentity
 ): Promise<AppleAccountLoginResolution> {
@@ -1486,6 +1483,10 @@ async function inspectAppleAccountUnlocked(
   }
   assertAppleProfileOwnership(profile, fingerprint);
 
+  // Same-device fast path uses the local vault; a new device (no vault) unwraps
+  // the master key from the account profile using the Apple account
+  // fingerprint, so signing in with Apple is enough — no recovery key.
+  // activateAppleAccountSession then enrolls this device's local vault.
   let masterKey: WorkspaceMasterKey;
   try {
     masterKey = await unlockAppleDeviceVaultEntry({
@@ -1498,10 +1499,11 @@ async function inspectAppleAccountUnlocked(
       error instanceof AppleDeviceVaultError &&
       ["VAULT_ENTRY_NOT_FOUND", "INVALID_VAULT_RECORD", "UNLOCK_FAILED"].includes(error.code)
     ) {
-      debugAppleAuth(`inspect: vault miss (${error.code}) -> needs-recovery`);
-      return { kind: "needs-recovery", displayName: profile.displayName };
+      debugAppleAuth(`inspect: vault miss (${error.code}) -> account unwrap`);
+      masterKey = await unlockAppleAccountRecovery(profile.recoveryMetadata, fingerprint);
+    } else {
+      throw error;
     }
-    throw error;
   }
 
   const account = createStoredAppleAccount(profile, fingerprint);
@@ -1614,9 +1616,6 @@ async function provisionAppleAccountUnlocked(
   if (!requestedName || requestedName.length > 80) {
     throw new LocalAuthError("REGISTRATION_FAILED", "Enter a name between 1 and 80 characters.");
   }
-  if (!isValidWorkspaceCode(payload.workspaceCode)) {
-    throw new LocalAuthError("INVALID_WORKSPACE_CODE", "The recovery key must contain 16 digits.");
-  }
 
   const identity = await assertCloudKitAuthenticatedUser(payload.identity);
   const fingerprint = await requireAppleFingerprint(identity);
@@ -1644,16 +1643,11 @@ async function provisionAppleAccountUnlocked(
   let createdNewLocalWorkspace = false;
 
   if (profile) {
+    // Resume an interrupted provisioning; the master key is unwrapped with the
+    // Apple account fingerprint, not a recovery code.
     workspace = profile.recoveryMetadata;
     account = createStoredAppleAccount(profile, fingerprint);
-    try {
-      masterKey = await unlockWorkspaceRecovery(workspace, payload.workspaceCode);
-    } catch (error) {
-      if (error instanceof WorkspaceCryptoError) {
-        throw new LocalAuthError("RECOVERY_KEY_MISMATCH", "The 16-digit recovery key is incorrect.", { cause: error });
-      }
-      throw error;
-    }
+    masterKey = await unlockAppleAccountRecovery(workspace, fingerprint);
   } else if (existingLocalAccount) {
     const localWorkspace = previousWorkspaces.find(
       (item) => item.workspaceId === existingLocalAccount.workspaceId
@@ -1663,21 +1657,9 @@ async function provisionAppleAccountUnlocked(
     }
     workspace = localWorkspace;
     account = existingLocalAccount;
-    try {
-      masterKey = await unlockWorkspaceRecovery(workspace, payload.workspaceCode);
-    } catch (error) {
-      if (error instanceof WorkspaceCryptoError) {
-        throw new LocalAuthError("RECOVERY_KEY_MISMATCH", "The 16-digit recovery key is incorrect.", { cause: error });
-      }
-      throw error;
-    }
+    masterKey = await unlockAppleAccountRecovery(workspace, fingerprint);
   } else {
-    const existingWorkspace = await findWorkspaceByCode(payload.workspaceCode);
-    if (existingWorkspace) {
-      existingWorkspace.masterKey.fill(0);
-      throw new LocalAuthError("WORKSPACE_CODE_IN_USE", "This recovery key already unlocks a local workspace.");
-    }
-    const createdWorkspace = await createWorkspaceRecovery(payload.workspaceCode);
+    const createdWorkspace = await createAppleAccountRecovery(fingerprint);
     workspace = createdWorkspace.metadata;
     masterKey = createdWorkspace.masterKey;
     const createdAt = new Date().toISOString();
