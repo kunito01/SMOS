@@ -30,8 +30,13 @@ import {
 import { validateWorkspaceId } from "@/lib/security/workspace-crypto";
 
 const BACKGROUND_UPLOAD_DELAY_MS = 1_500;
-const LOGIN_AUTH_TIMEOUT_MS = 2_500;
-const LOGIN_PULL_TIMEOUT_MS = 4_500;
+// These bound the login/recovery cloud steps. They must exceed the retry
+// budget of the operations they wrap (each CloudKit request retries up to
+// CLOUDKIT_DB_MAX_ATTEMPTS with linear backoff), or a lossy connection trips
+// the timeout mid-retry and the whole first-device join fails even though the
+// individual requests are eventually succeeding.
+const LOGIN_AUTH_TIMEOUT_MS = 30_000;
+const LOGIN_PULL_TIMEOUT_MS = 60_000;
 const NO_SHARED_VERSION_HISTORY_MESSAGE =
   "The restored local workspace and its CloudKit copy have no shared version history. Choose which version to keep.";
 
