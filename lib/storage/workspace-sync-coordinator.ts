@@ -411,6 +411,7 @@ const restoreRemoteBundleUnderMutationLock = async (
     // identity and change tag. An older sync must not silently attach them
     // again after that restore has completed.
     if (!cloudBindingStillMatches(workspaceId, user, preference)) {
+      console.warn("[smos-restore] stale: cloud binding no longer matches");
       return "stale";
     }
 
@@ -439,6 +440,19 @@ const restoreRemoteBundleUnderMutationLock = async (
         );
 
     if (revisionChanged || mutationEpochChanged || pendingChanged || localStateChanged) {
+      console.warn(
+        "[smos-restore] conflict guard tripped:",
+        JSON.stringify({
+          revisionChanged,
+          mutationEpochChanged,
+          pendingChanged,
+          localStateChanged,
+          expectedLocalWasInvalid: guard.expectedLocalWasInvalid,
+          latestLocalWasInvalid,
+          hasExpectedLocal: Boolean(guard.expectedLocal),
+          hasLatestLocal: Boolean(latestLocal)
+        })
+      );
       markConflict(workspaceId, guard.conflictMessage);
       return "conflict";
     }
