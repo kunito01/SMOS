@@ -149,11 +149,15 @@ const base64ToBytes = (
   expectedLength?: number,
   minimumLength?: number
 ): OwnedBytes => {
+  // Character-class scan, NOT `(?:....{4})*`: the grouped-quantifier form
+  // throws RangeError ("Maximum call stack size exceeded") on strings past
+  // ~5 MB. `length % 4 === 0` plus the round-trip re-encode below still fully
+  // guarantee canonical base64.
   if (
     typeof value !== "string" ||
     value.length === 0 ||
     value.length % 4 !== 0 ||
-    !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(value)
+    !/^[A-Za-z0-9+/]*={0,2}$/u.test(value)
   ) {
     throw new PublicShareStorageError("INVALID_RECORD", `${fieldName} is not canonical base64.`);
   }

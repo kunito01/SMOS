@@ -163,11 +163,16 @@ function base64ToBytes(
   expectedLength?: number,
   minimumLength?: number
 ): OwnedBytes {
+  // A single character-class scan, NOT `(?:....{4})*`: the grouped-quantifier
+  // form recurses per group in V8's regex engine and throws RangeError
+  // ("Maximum call stack size exceeded") once the string passes ~5 MB, which a
+  // workspace carrying an embedded image reaches. `length % 4 === 0` plus the
+  // round-trip re-encode below still fully guarantee canonical base64.
   if (
     typeof value !== "string" ||
     value.length === 0 ||
     value.length % 4 !== 0 ||
-    !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)
+    !/^[A-Za-z0-9+/]*={0,2}$/.test(value)
   ) {
     throw new WorkspaceCryptoError("INVALID_ENVELOPE", `${fieldName} is not canonical base64.`);
   }

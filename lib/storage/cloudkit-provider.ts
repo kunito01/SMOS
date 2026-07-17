@@ -98,10 +98,14 @@ const bytesToBase64 = (bytes: Uint8Array) => {
 };
 
 const base64ToBytes = (value: string) => {
+  // Character-class scan, NOT `(?:....{4})*`: the grouped-quantifier form
+  // throws RangeError ("Maximum call stack size exceeded") on strings past
+  // ~5 MB. `length % 4 === 0` plus the round-trip re-encode below still fully
+  // guarantee canonical base64.
   if (
     value.length === 0 ||
     value.length % 4 !== 0 ||
-    !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)
+    !/^[A-Za-z0-9+/]*={0,2}$/.test(value)
   ) {
     throw new CloudKitProviderError(
       "INVALID_REMOTE_DATA",
