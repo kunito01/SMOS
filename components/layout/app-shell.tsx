@@ -38,6 +38,14 @@ import { languageLocales } from "@/lib/i18n/translations";
 import { projectPath } from "@/lib/utils/app-routes";
 import { cn } from "@/lib/utils/cn";
 import {
+  getSystemNotificationPermission,
+  readNotifiedReminderIds,
+  rememberNotifiedReminderIds,
+  requestSystemNotificationPermission,
+  showSystemNotification,
+  type SystemNotificationPermission
+} from "@/lib/utils/system-notifications";
+import {
   listSubscriptionPaymentReminders,
   type SubscriptionPaymentReminder
 } from "@/lib/utils/subscription-reminders";
@@ -115,6 +123,46 @@ const toDateKey = (date: Date) => {
   return `${year}-${month}-${day}`;
 };
 
+/** Computes the current reminder set; shared by the bell and system banners. */
+const computeReminderItems = async () => {
+  const today = new Date();
+  const todayKey = toDateKey(today);
+  const [projectsResult, toolsResult] = await Promise.allSettled([
+    projectsApi.listProjects(),
+    librariesApi.listTools()
+  ]);
+  const projects = projectsResult.status === "fulfilled" ? projectsResult.value : [];
+  const tools = toolsResult.status === "fulfilled" ? toolsResult.value : [];
+  const dueTodayItems: DueTodayItem[] = projects.flatMap((project) =>
+    project.phases.flatMap((phase) =>
+      phase.deliverables.flatMap((deliverable) =>
+        deliverable.tasks
+          .filter((task) => task.dueDate === todayKey && !task.completed)
+          .map((task) => ({
+            completed: task.completed,
+            dueDate: task.dueDate ?? todayKey,
+            projectId: project.id,
+            projectIsExample: project.isExample,
+            projectName: project.name,
+            reminderId: createDueTodayReminderId(project.id, task.id, task.dueDate ?? todayKey),
+            taskId: task.id,
+            taskTitle: task.title
+          }))
+      )
+    )
+  );
+  const subscriptionItems: SubscriptionReminderItem[] = listSubscriptionPaymentReminders(
+    tools,
+    today,
+    3
+  ).map((item) => ({
+    ...item,
+    reminderId: createSubscriptionPaymentReminderId(item.toolId, item.dueDate)
+  }));
+
+  return { dueTodayItems, subscriptionItems };
+};
+
 export function AppShell({ beforeNavigate, children }: AppShellProps) {
   const pathname = usePathname();
   const router = useRouter();
@@ -133,6 +181,8 @@ export function AppShell({ beforeNavigate, children }: AppShellProps) {
   const [dueTodayItems, setDueTodayItems] = useState<DueTodayItem[]>([]);
   const [subscriptionReminderItems, setSubscriptionReminderItems] = useState<SubscriptionReminderItem[]>([]);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [systemNotificationPermission, setSystemNotificationPermission] =
+    useState<SystemNotificationPermission>("unsupported");
   const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
   const [isSigningOut, setIsSigningOut] = useState(false);
   const workspaceId = user?.workspaceId;
@@ -345,37 +395,8 @@ export function AppShell({ beforeNavigate, children }: AppShellProps) {
 
     async function loadNotificationItems() {
       try {
-        const today = new Date();
-        const todayKey = toDateKey(today);
-        const [projectsResult, toolsResult] = await Promise.allSettled([
-          projectsApi.listProjects(),
-          librariesApi.listTools()
-        ]);
-        const projects = projectsResult.status === "fulfilled" ? projectsResult.value : [];
-        const tools = toolsResult.status === "fulfilled" ? toolsResult.value : [];
-        const nextItems = projects.flatMap((project) =>
-          project.phases.flatMap((phase) =>
-            phase.deliverables.flatMap((deliverable) =>
-              deliverable.tasks
-                .filter((task) => task.dueDate === todayKey && !task.completed)
-                .map((task) => ({
-                  completed: task.completed,
-                  dueDate: task.dueDate ?? todayKey,
-                  projectId: project.id,
-                  projectIsExample: project.isExample,
-                  projectName: project.name,
-                  reminderId: createDueTodayReminderId(project.id, task.id, task.dueDate ?? todayKey),
-                  taskId: task.id,
-                  taskTitle: task.title
-                }))
-            )
-          )
-        );
-        const nextSubscriptionItems = listSubscriptionPaymentReminders(tools, today, 3)
-          .map((item) => ({
-            ...item,
-            reminderId: createSubscriptionPaymentReminderId(item.toolId, item.dueDate)
-          }));
+        const { dueTodayItems: nextItems, subscriptionItems: nextSubscriptionItems } =
+          await computeReminderItems();
 
         if (isMounted) {
           const latestDismissedDueTodayItems = readDismissedDueTodayItems(activeWorkspaceId);
@@ -399,6 +420,90 @@ export function AppShell({ beforeNavigate, children }: AppShellProps) {
       isMounted = false;
     };
   }, [notificationsOpen, workspaceId]);
+
+  useEffect(() => {
+    setSystemNotificationPermission(getSystemNotificationPermission());
+  }, []);
+
+  useEffect(() => {
+    if (!workspaceId || systemNotificationPermission !== "granted") {
+      return;
+    }
+
+    const activeWorkspaceId = workspaceId;
+    let active = true;
+
+    const announceNewReminders = async () => {
+      try {
+        const { dueTodayItems: currentDueItems, subscriptionItems: currentSubscriptionItems } =
+          await computeReminderItems();
+        if (!active) {
+          return;
+        }
+
+        const dismissedDue = readDismissedDueTodayItems(activeWorkspaceId);
+        const dismissedSubscriptions = readDismissedSubscriptionPaymentItems(activeWorkspaceId);
+        const alreadyNotified = readNotifiedReminderIds(activeWorkspaceId);
+        const banners: Array<{ body: string; id: string; title: string }> = [];
+
+        for (const item of currentDueItems) {
+          if (dismissedDue.has(item.reminderId) || alreadyNotified.has(item.reminderId)) {
+            continue;
+          }
+          const projectName = formatDemoEntityName(
+            translateDomainLabel(item.projectName, projectNameKeys, t),
+            item.projectId,
+            "project",
+            t,
+            item.projectIsExample
+          );
+          const taskTitle =
+            translateDomainLabel(item.taskTitle, taskTitleKeys, t) || t("untitledTask");
+          banners.push({
+            body: `${projectName} · ${t("dueTodayTitle")}`,
+            id: item.reminderId,
+            title: taskTitle
+          });
+        }
+
+        for (const item of currentSubscriptionItems) {
+          if (
+            dismissedSubscriptions.has(item.reminderId) ||
+            alreadyNotified.has(item.reminderId)
+          ) {
+            continue;
+          }
+          banners.push({
+            body: `${t("subscriptionPaymentReminderTitle")} · ${t("subscriptionPaymentDueLabel")} ${item.dueDate}`,
+            id: item.reminderId,
+            title: item.toolName
+          });
+        }
+
+        if (!banners.length) {
+          return;
+        }
+
+        for (const banner of banners.slice(0, 6)) {
+          await showSystemNotification(banner.title, banner.body, banner.id);
+        }
+        rememberNotifiedReminderIds(
+          activeWorkspaceId,
+          banners.map((banner) => banner.id)
+        );
+      } catch {
+        // Reminder banners must never break the shell; retry on next tick.
+      }
+    };
+
+    void announceNewReminders();
+    const interval = window.setInterval(announceNewReminders, 5 * 60_000);
+
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+    };
+  }, [systemNotificationPermission, t, workspaceId]);
 
   return (
     <div className="relative isolate min-h-screen overflow-x-hidden p-3 sm:p-5 xl:p-6">
@@ -593,6 +698,28 @@ export function AppShell({ beforeNavigate, children }: AppShellProps) {
                   <p className="break-words text-sm font-black uppercase text-white/45 [overflow-wrap:anywhere]">Studio Map OS</p>
                   <h2 className="mt-1 break-words text-2xl font-black [overflow-wrap:anywhere]">{t("notifications")}</h2>
                   <p className="mt-2 break-words text-sm font-bold leading-6 text-white/62 [overflow-wrap:anywhere]">{t("notificationsModalBody")}</p>
+                  {systemNotificationPermission === "default" ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void requestSystemNotificationPermission().then(
+                          setSystemNotificationPermission
+                        );
+                      }}
+                      className="mt-3 inline-flex min-h-10 items-center gap-2 rounded-full bg-[#ffc700] px-4 text-sm font-black text-ink transition hover:-translate-y-0.5"
+                    >
+                      <Bell size={16} />
+                      {t("systemNotificationsEnable")}
+                    </button>
+                  ) : systemNotificationPermission === "granted" ? (
+                    <p className="mt-3 break-words text-xs font-black text-limepop [overflow-wrap:anywhere]">
+                      {t("systemNotificationsEnabled")}
+                    </p>
+                  ) : systemNotificationPermission === "denied" ? (
+                    <p className="mt-3 break-words text-xs font-bold text-white/55 [overflow-wrap:anywhere]">
+                      {t("systemNotificationsBlocked")}
+                    </p>
+                  ) : null}
                 </div>
                 <button
                   type="button"
