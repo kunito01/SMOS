@@ -153,7 +153,7 @@ export function CompanyDetailPage({ companyId }: { companyId: string }) {
           <LoadingState label={t("loading")} />
         ) : (
           <>
-            <section className="grid min-w-[1120px] gap-4">
+            <section className="grid min-w-0 gap-4">
               <ImageCard
                 imageUrl={data.company.coverImage}
                 title={formatDemoEntityName(data.company.name, data.company.id, "company", t)}
@@ -185,7 +185,7 @@ export function CompanyDetailPage({ companyId }: { companyId: string }) {
                 </div>
               </ImageCard>
 
-              <div className="grid min-w-0 grid-cols-5 gap-3">
+              <div className="grid min-w-0 grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
                 {[
                   { label: t("projectsCount"), value: data.overview.totalProjectCount, icon: Layers3, iconClassName: "bg-limepop text-ink" },
                   { label: t("projectGroupsCount"), value: data.groups.length, icon: FolderKanban, iconClassName: "bg-aqua text-ink" },
@@ -205,7 +205,7 @@ export function CompanyDetailPage({ companyId }: { companyId: string }) {
                           <Icon className="size-4" />
                         </span>
                         <div className="min-w-0">
-                          <p className="max-w-full whitespace-nowrap text-3xl font-black leading-none tracking-[-0.03em] tabular-nums">
+                          <p className="max-w-full truncate whitespace-nowrap text-2xl font-black leading-none tracking-[-0.03em] tabular-nums sm:text-3xl">
                             {metric.value}
                           </p>
                           <p className="mt-1.5 max-w-full whitespace-nowrap text-xs font-black leading-none tracking-[-0.04em] text-muted">
