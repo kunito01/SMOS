@@ -40,6 +40,7 @@ public/swe-worker-*.js
 public/swe-worker-*.js.map
 
 # local planning and reference artifacts
+AUTH_PLAYBOOK.md
 Studio_Map_OS_Codex_Prompt.md
 UI 风格示意.jpg
 CODEX_HANDOFF.md
