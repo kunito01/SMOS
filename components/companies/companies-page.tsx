@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { ArrowRight, Building2, Calculator, FolderKanban, FolderPlus, ImagePlus, Layers3, Pencil, Plus, Rocket, Trash2, Upload, X } from "lucide-react";
+import { Building2, FolderKanban, FolderPlus, ImagePlus, Layers3, Pencil, Plus, Rocket, Trash2, Upload, X } from "lucide-react";
 import { ImageCard } from "@/components/cards/image-card";
 import { PixelForestScene } from "@/components/companies/pixel-forest-scene";
 import { useCostDisplayCurrency } from "@/components/costs/use-cost-display-currency";
@@ -261,44 +261,7 @@ export function CompaniesPage() {
                     meta={t("companyOverview")}
                     heightClassName="h-auto min-h-[24rem] sm:h-[24rem]"
                     className="p-4 transition duration-200 hover:-translate-y-1 sm:p-5"
-                  >
-                    <div className="grid grid-cols-3 gap-2 rounded-studio bg-white/90 p-3 text-ink sm:gap-3 sm:p-4">
-                      <div className="min-w-0">
-                        <p className="text-xl font-black sm:text-2xl">{summary.totalProjectCount}</p>
-                        <p className="mt-1 break-words text-[clamp(10px,2.8vw,12px)] font-bold leading-tight text-muted">
-                          {t("projectsCount")}
-                        </p>
-                      </div>
-                      <div className="min-w-0">
-                        <p className="text-xl font-black sm:text-2xl">{summary.activeProjectCount}</p>
-                        <p className="mt-1 break-words text-[clamp(10px,2.8vw,12px)] font-bold leading-tight text-muted">
-                          {t("activeCount")}
-                        </p>
-                      </div>
-                      <div className="min-w-0">
-                        <p className="text-xl font-black sm:text-2xl">{summary.averageProgress}%</p>
-                        <p className="mt-1 break-words text-[clamp(10px,2.8vw,12px)] font-bold leading-tight text-muted">
-                          {t("averageProgressShort")}
-                        </p>
-                      </div>
-                      <div className="col-span-3">
-                        <ProgressBar value={summary.averageProgress} />
-                      </div>
-                      <div className="col-span-3 flex min-w-0 items-center justify-between gap-2 rounded-full bg-cloud px-3 py-2">
-                        <span className="inline-flex min-w-0 items-center gap-1.5 text-[clamp(10px,2.8vw,12px)] font-black leading-tight text-muted">
-                          <Calculator className="shrink-0" size={15} />
-                          <span className="break-words">{t("projectBudgetTotal")}</span>
-                        </span>
-                        <span className="shrink-0 whitespace-nowrap text-sm font-black sm:text-base">
-                          {formatAmount(summary.budgetCostTotal, summary.currency)}
-                        </span>
-                      </div>
-                      <div className="col-span-3 inline-flex items-center gap-2 text-sm font-black">
-                        {t("openCompany")}
-                        <ArrowRight size={16} />
-                      </div>
-                    </div>
-                  </ImageCard>
+                  />
                 </Link>
               </motion.div>
             ))}
