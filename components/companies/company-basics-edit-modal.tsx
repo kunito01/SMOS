@@ -97,10 +97,14 @@ export function CompanyBasicsEditModal({
       description,
       name
     };
-    const nextCompany = await companiesApi.updateCompanyBasics(company.id, payload);
-    setSaving(false);
-    onSaved(nextCompany);
-    onClose();
+
+    try {
+      const nextCompany = await companiesApi.updateCompanyBasics(company.id, payload);
+      onSaved(nextCompany);
+      onClose();
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (

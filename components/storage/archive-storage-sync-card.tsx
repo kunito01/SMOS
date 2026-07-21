@@ -12,7 +12,7 @@ import {
   ShieldCheck
 } from "lucide-react";
 import { useCloudKitAuth } from "@/components/providers/cloudkit-auth-provider";
-import { useI18n } from "@/components/providers/app-providers";
+import { useAuth, useI18n } from "@/components/providers/app-providers";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { DeleteConfirmDialog } from "@/components/ui/delete-confirm-dialog";
@@ -25,7 +25,6 @@ import {
   CLOUDKIT_SIGN_OUT_BUTTON_ID
 } from "@/lib/storage/cloudkit/cloudkit-client";
 import {
-  disconnectWorkspaceCloudKit,
   getWorkspaceCloudSyncAvailability,
   type WorkspaceConflictResolution,
   type WorkspaceSyncResult
@@ -48,6 +47,8 @@ type StorageNotice = {
 
 export function ArchiveStorageSyncCard({ workspaceId }: ArchiveStorageSyncCardProps) {
   const { language, t } = useI18n();
+  const { user } = useAuth();
+  const isAppleAccount = Boolean(user?.isAppleAccount);
   const {
     configured: cloudKitConfigured,
     error: cloudKitAuthError,
@@ -125,7 +126,7 @@ export function ArchiveStorageSyncCard({ workspaceId }: ArchiveStorageSyncCardPr
 
       try {
         if (target === "indexeddb") {
-          const next = disconnectWorkspaceCloudKit(workspaceId);
+          const next = await authApi.disconnectActiveWorkspaceCloudKit();
           setPreference(next);
           setNotice({ message: t("storageSwitchSuccess"), tone: "success" });
           return;
@@ -154,7 +155,7 @@ export function ArchiveStorageSyncCard({ workspaceId }: ArchiveStorageSyncCardPr
         setBusy(null);
       }
     },
-    [availability.available, cloudKitIdentity, finishSyncResult, refreshCloudKitAuth, refreshPreference, t, workspaceId]
+    [availability.available, cloudKitIdentity, finishSyncResult, refreshCloudKitAuth, refreshPreference, t]
   );
 
   const syncNow = async () => {
@@ -303,16 +304,22 @@ export function ArchiveStorageSyncCard({ workspaceId }: ArchiveStorageSyncCardPr
             warning={t("storageIndexedDbWarning")}
             action={
               preference.provider === "cloudkit" ? (
-                <Button
-                  variant="ghost"
-                  size="md"
-                  disabled={Boolean(busy)}
-                  onClick={() => setSwitchTarget("indexeddb")}
-                  className="w-full sm:w-auto"
-                >
-                  <CloudOff size={17} />
-                  {t("storageCloudKitDisconnect")}
-                </Button>
+                isAppleAccount ? (
+                  <p className="rounded-studio bg-ink/[0.06] p-3 text-xs font-bold leading-5 text-muted">
+                    {t("storageAppleAlwaysCloud")}
+                  </p>
+                ) : (
+                  <Button
+                    variant="ghost"
+                    size="md"
+                    disabled={Boolean(busy)}
+                    onClick={() => setSwitchTarget("indexeddb")}
+                    className="w-full sm:w-auto"
+                  >
+                    <CloudOff size={17} />
+                    {t("storageCloudKitDisconnect")}
+                  </Button>
+                )
               ) : null
             }
           />

@@ -71,6 +71,7 @@ import {
 } from "@/lib/storage/storage-preferences";
 import {
   connectWorkspaceCloudKit,
+  disconnectWorkspaceCloudKit,
   manualSyncWorkspace,
   pullWorkspaceFromCloudOnLogin,
   resolveWorkspaceCloudConflict,
@@ -81,6 +82,7 @@ import {
   withAuthMutationLock,
   withDatabaseMutationLock
 } from "@/lib/storage/workspace-mutation-lock";
+import { isWorkspaceSyncConflictError } from "@/lib/storage/workspace-write-guard";
 import {
   IndexedDbStorageError,
   captureEncryptedDatabaseSnapshot,
@@ -110,6 +112,8 @@ export type RegisterPayload = AuthCredentials & {
 export type LocalAuthUser = User & {
   workspaceId: string;
   workspaceRole: LocalWorkspaceRole;
+  /** True when the unlocked account signs in with Apple and must store data in CloudKit. */
+  isAppleAccount: boolean;
 };
 
 export type RegisterResult = {
@@ -143,6 +147,7 @@ export type AppleAccountRecoveryPayload = {
 
 export type LocalAuthErrorCode =
   | "ACCOUNT_EXISTS"
+  | "APPLE_CLOUD_REQUIRED"
   | "BACKUP_INVALID"
   | "BACKUP_CAPTURE_CHANGED"
   | "BACKUP_REQUIRED"
@@ -795,7 +800,8 @@ const toAuthUser = (account: StoredLocalAccount, workspace: WorkspaceRecoveryMet
   avatar: account.avatar,
   createdAt: account.createdAt,
   workspaceId: workspace.workspaceId,
-  workspaceRole: account.workspaceRole
+  workspaceRole: account.workspaceRole,
+  isAppleAccount: isStoredAppleAccount(account)
 });
 
 const createBusinessUser = (account: StoredLocalAccount): User => ({
@@ -839,7 +845,16 @@ const upsertWorkspaceMember = async (account: StoredLocalAccount) => {
     mockDatabase.users.unshift(member);
   }
 
-  await persistMockDatabase();
+  try {
+    await persistMockDatabase({ notifyOnConflictRefusal: false });
+  } catch (error) {
+    // Signing in must stay possible while an iCloud conflict is pending —
+    // resolving it happens in the archive, which needs an unlocked session.
+    // The member row is a denormalized copy and is re-upserted on every login.
+    if (!isWorkspaceSyncConflictError(error)) {
+      throw error;
+    }
+  }
 };
 
 const findWorkspaceByCode = async (workspaceCode: string) => {
@@ -2107,6 +2122,22 @@ export async function connectActiveWorkspaceCloudKit(
   });
 }
 
+/** Stops iCloud sync for the active workspace. Apple ID accounts must stay on CloudKit. */
+export async function disconnectActiveWorkspaceCloudKit() {
+  if (!activeSession) {
+    throw new LocalAuthError("NO_ACTIVE_SESSION", "No local workspace is unlocked");
+  }
+
+  if (isStoredAppleAccount(activeSession.account)) {
+    throw new LocalAuthError(
+      "APPLE_CLOUD_REQUIRED",
+      "Apple ID accounts always store their data in the CloudKit private database"
+    );
+  }
+
+  return disconnectWorkspaceCloudKit(activeSession.workspace.workspaceId);
+}
+
 /** Resolves a CloudKit conflict without exposing the active workspace key. */
 export async function resolveActiveWorkspaceCloudConflict(
   resolution: WorkspaceConflictResolution,
@@ -2228,7 +2259,16 @@ export async function createEncryptedFullSiteBackup(
   }
 
   await verifyActiveWorkspaceRecoveryCode(workspaceCode);
-  await persistMockDatabase();
+  try {
+    await persistMockDatabase({ notifyOnConflictRefusal: false });
+  } catch (error) {
+    // During an unresolved iCloud conflict every save is refused and the
+    // in-memory database cannot drift, so exporting the last persisted state
+    // stays safe — and users must still be able to back up before resolving.
+    if (!isWorkspaceSyncConflictError(error)) {
+      throw error;
+    }
+  }
   const captured = await withDatabaseMutationLock(async () => {
     if (activeSession !== session) {
       throw new LocalAuthError(

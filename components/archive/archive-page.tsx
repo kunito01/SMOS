@@ -9,6 +9,7 @@ import { PixelCanyonScene } from "@/components/dashboard/pixel-canyon-scene";
 import { AppShell } from "@/components/layout/app-shell";
 import { useAuth, useI18n } from "@/components/providers/app-providers";
 import { ArchiveStorageSyncCard } from "@/components/storage/archive-storage-sync-card";
+import { isWorkspaceSyncConflictError } from "@/lib/storage/workspace-write-guard";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { DeleteConfirmDialog } from "@/components/ui/delete-confirm-dialog";
@@ -347,7 +348,12 @@ export function ArchivePage() {
         }
       }
       setPendingBackup(null);
-      setBackupNotice({ message: t("siteBackupRestoreError"), tone: "error" });
+      setBackupNotice({
+        message: isWorkspaceSyncConflictError(cause)
+          ? t("storageConflictBlockedBody")
+          : t("siteBackupRestoreError"),
+        tone: "error"
+      });
       setBackupBusy(null);
       restoreInFlightRef.current = false;
       if (cause instanceof LocalAuthError && cause.code === "STORAGE_CORRUPT") {

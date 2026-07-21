@@ -24,6 +24,7 @@ import {
   type EncryptedWorkspaceBundleSnapshot
 } from "@/lib/storage/indexed-db";
 import { noteWorkspaceLocalSave } from "@/lib/storage/workspace-sync-coordinator";
+import { assertWorkspaceWritable } from "@/lib/storage/workspace-write-guard";
 import {
   bumpWorkspaceMutationEpoch,
   getWorkspaceMutationEpoch,
@@ -1078,7 +1079,7 @@ export async function hydrateMockDatabase() {
 }
 
 export async function persistMockDatabase(
-  options: { bumpMutationEpochAfterPersist?: boolean } = {}
+  options: { bumpMutationEpochAfterPersist?: boolean; notifyOnConflictRefusal?: boolean } = {}
 ) {
   await hydrateMockDatabase();
 
@@ -1100,6 +1101,12 @@ export async function persistMockDatabase(
       validateActive();
 
       try {
+        // Throwing inside this try rolls the in-memory database back to the
+        // last persisted snapshot, so a refused save leaves no phantom edits.
+        assertWorkspaceWritable(identity.workspaceId, {
+          notify: options.notifyOnConflictRefusal ?? true
+        });
+
         const persistedDatabase = await persistEncryptedDatabaseSnapshot(
           database,
           identity.workspaceId,

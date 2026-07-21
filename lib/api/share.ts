@@ -149,7 +149,10 @@ export async function getSharedProject(token: string) {
   );
   activeShare.link.token = secureToken;
   activeShare.project.shareSettings.token = secureToken;
-  await persistMockDatabase();
+  // This lazy legacy-token migration runs while merely VIEWING a share link,
+  // so a conflict refusal here should fail the read quietly instead of
+  // popping the app-wide "resolve the conflict" dialog.
+  await persistMockDatabase({ notifyOnConflictRefusal: false });
 
   const snapshot = await readPublicShareSnapshot(secureToken);
 

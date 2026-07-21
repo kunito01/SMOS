@@ -820,6 +820,13 @@ export function noteWorkspaceLocalSave(workspaceIdInput: string) {
 
   noteLocalSaveRevision(workspaceId);
 
+  // An unresolved conflict must stay visible until the user picks a side;
+  // flipping back to "pending" here would hide it and let scheduled uploads
+  // race the pending decision.
+  if (preference.status === "conflict") {
+    return preference;
+  }
+
   const next = updateWorkspaceStoragePreference(workspaceId, {
     status: "pending",
     pendingUpload: true,
