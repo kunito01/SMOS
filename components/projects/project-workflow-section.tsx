@@ -19,6 +19,7 @@ import { Select } from "@/components/ui/select";
 import { projectsApi, workflowsApi } from "@/lib/api";
 import type { TranslationKey } from "@/lib/i18n/translations";
 import type { Project, ProjectWorkflow } from "@/lib/types";
+import { buildReportChromeLabels } from "@/lib/utils/report-share-common";
 import { downloadWorkflowShareHtml } from "@/lib/utils/workflow-share";
 
 type ProjectWorkflowSectionProps = {
@@ -242,7 +243,7 @@ export function ProjectWorkflowSection({ project, t }: ProjectWorkflowSectionPro
                 size="sm"
                 className="min-h-10 max-w-full px-4"
                 disabled={Boolean(pendingWorkflowId)}
-                onClick={() => downloadWorkflowShareHtml(selectedWorkflow)}
+                onClick={() => downloadWorkflowShareHtml(selectedWorkflow, buildReportChromeLabels(t))}
               >
                 <Download size={17} strokeWidth={2.35} />
                 <span className="min-w-0 truncate">{t("workflowShareHtml")}</span>

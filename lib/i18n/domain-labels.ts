@@ -62,6 +62,38 @@ export const groupDescriptionKeys: Record<string, TranslationKey> = {
   "Client Projects": "groupClientDescription"
 };
 
+const seededCompanyDescriptions: Record<string, string> = {
+  "company-northstar": "A compact AI-assisted studio for interactive games, visual systems, and launch-ready prototypes.",
+  "company-color-works": "A visual production studio for short films, campaign assets, brand pages, and shareable progress rooms."
+};
+
+export function getCompanyDisplayDescription(
+  company: { id: string; description: string },
+  t: (key: TranslationKey) => string
+) {
+  return company.description === seededCompanyDescriptions[company.id]
+    ? translateDomainLabel(company.id, companyDescriptionKeys, t, company.description)
+    : company.description;
+}
+
+const seededGroupDescriptionSuffix = "grouped for visual planning and progress sharing.";
+
+export function isSeededGroupDescription(name: string, description: string) {
+  return (
+    description === `${name}, ${seededGroupDescriptionSuffix}` ||
+    (description.startsWith(`${name} under `) && description.endsWith(seededGroupDescriptionSuffix))
+  );
+}
+
+export function getProjectGroupDisplayDescription(
+  group: Pick<ProjectGroup, "name" | "description">,
+  t: (key: TranslationKey) => string
+) {
+  return isSeededGroupDescription(group.name, group.description)
+    ? translateDomainLabel(group.name, groupDescriptionKeys, t, group.description)
+    : group.description;
+}
+
 export const phaseNameKeys: Record<string, TranslationKey> = {
   Planning: "stagePlanning",
   Design: "stageDesign",

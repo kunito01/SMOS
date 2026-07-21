@@ -31,6 +31,7 @@ import {
   updateWorkflow as persistWorkflow
 } from "@/lib/api/workflows";
 import type { ProjectWorkflow } from "@/lib/types";
+import { buildReportChromeLabels } from "@/lib/utils/report-share-common";
 import { downloadWorkflowShareHtml } from "@/lib/utils/workflow-share";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
@@ -430,7 +431,7 @@ export function WorkflowPage() {
                       labels={canvasLabels}
                       onChange={replaceWorkflow}
                       onShare={(workflow) => {
-                        downloadWorkflowShareHtml(workflow);
+                        downloadWorkflowShareHtml(workflow, buildReportChromeLabels(t));
                         setNotice(t("workflowShareSuccess"));
                         window.setTimeout(() => setNotice(""), 2200);
                       }}

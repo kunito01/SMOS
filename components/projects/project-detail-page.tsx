@@ -61,6 +61,7 @@ import { projectCostsPath } from "@/lib/utils/app-routes";
 import { cn } from "@/lib/utils/cn";
 import { findProjectReleaseVersion } from "@/lib/utils/project-release";
 import { downloadProjectReportHtml } from "@/lib/utils/project-report-share";
+import { buildReportChromeLabels } from "@/lib/utils/report-share-common";
 
 type ProjectDetailData = {
   costSummary: ProjectCostSummary;
@@ -347,6 +348,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
         : 0;
 
       await downloadProjectReportHtml({
+        chrome: buildReportChromeLabels(t),
         projectName: projectDisplayName,
         description: projectDescription,
         groupName: group ? getProjectGroupDisplayName(group, language, t) : undefined,

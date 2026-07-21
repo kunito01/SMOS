@@ -17,6 +17,8 @@ const queryPath = (pathname: string, parameter: string, value: string) => {
 
 export const companyPath = (companyId: string) => queryPath("/company", "companyId", companyId);
 
+export const groupPath = (groupId: string) => queryPath("/group", "groupId", groupId);
+
 export const projectPath = (projectId: string) => queryPath("/project", "projectId", projectId);
 
 export const projectCostsPath = (projectId: string) =>
@@ -29,6 +31,7 @@ export const publicSharePath = (token: string) => queryPath("/share", "token", t
 
 export const appRoutes = {
   company: companyPath,
+  group: groupPath,
   project: projectPath,
   projectCosts: projectCostsPath,
   projectShare: projectSharePath,

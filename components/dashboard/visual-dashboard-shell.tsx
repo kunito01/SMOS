@@ -16,6 +16,7 @@ import {
   Layers3,
   Network,
   Rocket,
+  Share2,
   Users
 } from "lucide-react";
 import { ImageCard } from "@/components/cards/image-card";
@@ -42,6 +43,11 @@ import type { Company, DashboardOverview, DashboardScope, Project, ProjectGroup 
 import { projectPath } from "@/lib/utils/app-routes";
 import { cn } from "@/lib/utils/cn";
 import { fixedNumericLocale } from "@/lib/utils/money";
+import {
+  buildSummaryReportData,
+  downloadSummaryReportHtml,
+  type SummaryReportScope
+} from "@/lib/utils/summary-report-share";
 
 const spring = {
   type: "spring",
@@ -89,11 +95,13 @@ export function VisualDashboardShell() {
   const {
     displayCurrency,
     exchangeRateSnapshot,
+    formatAmount,
     isReady: isCurrencyReady
   } = useCostDisplayCurrency();
   const [data, setData] = useState<DashboardData | null>(null);
   const [overview, setOverview] = useState<DashboardOverview | null>(null);
   const [scope, setScope] = useState<DashboardScope>({ type: "all" });
+  const [summarySharing, setSummarySharing] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
@@ -283,6 +291,63 @@ export function VisualDashboardShell() {
       : scope.type === "group"
         ? data?.groups ?? []
         : [];
+  const handleSummaryReportShare = async () => {
+    if (!data || !overview || summarySharing) {
+      return;
+    }
+
+    const scopeCompany = scope.type === "company" ? data.companies.find((company) => company.id === scope.id) : null;
+    const scopeGroup = scope.type === "group" ? groupById.get(scope.id) : null;
+    const reportScope: SummaryReportScope | null =
+      scope.type === "all"
+        ? { type: "all" }
+        : scope.type === "company"
+          ? scopeCompany
+            ? { type: "company", company: scopeCompany }
+            : null
+          : scopeGroup
+            ? { type: "group", group: scopeGroup }
+            : null;
+
+    if (!reportScope) {
+      return;
+    }
+
+    const reportGroups =
+      reportScope.type === "all"
+        ? data.groups
+        : reportScope.type === "company"
+          ? data.groups.filter((group) => scopedProjects.some((project) => project.groupId === group.id))
+          : [reportScope.group];
+
+    setSummarySharing(true);
+
+    try {
+      // The on-screen overview keeps archived projects in its totals and may lag a
+      // scope switch, while the report tree only lists active scoped projects — so
+      // fetch a matching archived-free overview for the current scope on demand.
+      const reportOverview = await projectsApi.getDashboardOverview(scope, {
+        includeArchivedTotal: false,
+        currency: displayCurrency,
+        snapshot: exchangeRateSnapshot
+      });
+
+      await downloadSummaryReportHtml(
+        buildSummaryReportData({
+          scope: reportScope,
+          companies: data.companies,
+          groups: reportGroups,
+          projects: scopedProjects,
+          overview: reportOverview,
+          formatAmount: (value) => formatAmount(value, reportOverview.currency),
+          language,
+          t
+        })
+      );
+    } finally {
+      setSummarySharing(false);
+    }
+  };
   return (
     <AppShell>
       <div className="studio-scroll flex-1 overflow-y-auto bg-white/[0.08] px-4 pb-8 backdrop-blur-sm sm:px-6 xl:px-8">
@@ -300,6 +365,20 @@ export function VisualDashboardShell() {
                     <Pill tone="lime" className="bg-transparent px-0 font-black">
                       {t("dashboardLabel")}
                     </Pill>
+                    <Button
+                      variant="ghost"
+                      size="md"
+                      disabled={!data || !overview || summarySharing}
+                      onClick={() => {
+                        void handleSummaryReportShare();
+                      }}
+                      aria-label={t("navShare")}
+                      aria-busy={summarySharing}
+                      className="bg-white/72 px-4 font-black shadow-soft backdrop-blur"
+                    >
+                      <Share2 className="size-[18px]" />
+                      <span>{t("navShare")}</span>
+                    </Button>
                   </div>
 
                   <div className="flex max-w-full flex-nowrap items-center gap-[clamp(2px,1vw,8px)] rounded-full bg-white/45 p-[clamp(2px,0.8vw,4px)] shadow-soft ring-1 ring-white/45 backdrop-blur-xl">

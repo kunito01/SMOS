@@ -1,4 +1,18 @@
 import type { ProjectWorkflow } from "@/lib/types";
+import {
+  clampReportPercent,
+  downloadReportHtmlFile,
+  embedReportCoverImage,
+  escapeReportHtml,
+  normalizeReportHexColor,
+  readableReportTextColor,
+  renderReportChromeFooter,
+  renderReportChromeHeader,
+  reportChromeStyles,
+  reportHexColorWithAlpha,
+  sanitizeReportFileName,
+  type ReportChromeLabels
+} from "@/lib/utils/report-share-common";
 
 export type ProjectReportMetricTone = "aqua" | "cloud" | "coral" | "ink" | "lime";
 
@@ -70,6 +84,7 @@ export type ProjectReportLabels = {
 };
 
 export type ProjectReportData = {
+  chrome: ReportChromeLabels;
   collectionBody: string;
   collectionProgress: number;
   coverImageUrl?: string;
@@ -91,81 +106,12 @@ export type ProjectReportData = {
   workflows: ProjectWorkflow[];
 };
 
-const MAX_EMBEDDED_COVER_BYTES = 12 * 1024 * 1024;
-const supportedImageMimeTypes = new Set(["image/avif", "image/gif", "image/jpeg", "image/png", "image/webp"]);
-const supportedDataImagePattern = /^data:image\/(?:avif|gif|jpe?g|png|webp);base64,[a-z0-9+/=\s]+$/i;
+const escapeHtml = escapeReportHtml;
+const clampPercent = clampReportPercent;
+const embedCoverImage = embedReportCoverImage;
 
-const escapeHtml = (value: string | number) =>
-  String(value)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-
-const clampPercent = (value: number) => Math.min(100, Math.max(0, Math.round(Number.isFinite(value) ? value : 0)));
-
-export const sanitizeProjectReportFileName = (projectName: string) => {
-  const sanitized = projectName
-    .normalize("NFKC")
-    .replace(/[\\/:*?"<>|\u0000-\u001f\u007f]/g, " ")
-    .replace(/\s+/g, " ")
-    .replace(/[. ]+$/g, "")
-    .trim()
-    .slice(0, 120);
-
-  return `${sanitized || "Studio Map OS Project"}.html`;
-};
-
-const blobToDataUrl = (blob: Blob) =>
-  new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-
-    reader.addEventListener("load", () => {
-      if (typeof reader.result === "string") {
-        resolve(reader.result);
-        return;
-      }
-
-      reject(new Error("Unable to encode the cover image"));
-    });
-    reader.addEventListener("error", () => reject(reader.error ?? new Error("Unable to read the cover image")));
-    reader.readAsDataURL(blob);
-  });
-
-const embedCoverImage = async (imageUrl?: string) => {
-  const source = imageUrl?.trim();
-
-  if (!source) {
-    return null;
-  }
-
-  if (supportedDataImagePattern.test(source)) {
-    return source;
-  }
-
-  try {
-    const controller = new AbortController();
-    const timeout = window.setTimeout(() => controller.abort(), 5000);
-    const response = await fetch(source, { credentials: "same-origin", signal: controller.signal });
-    window.clearTimeout(timeout);
-
-    if (!response.ok) {
-      return null;
-    }
-
-    const blob = await response.blob();
-
-    if (!supportedImageMimeTypes.has(blob.type) || blob.size > MAX_EMBEDDED_COVER_BYTES) {
-      return null;
-    }
-
-    const dataUrl = await blobToDataUrl(blob);
-    return supportedDataImagePattern.test(dataUrl) ? dataUrl : null;
-  } catch {
-    return null;
-  }
-};
+export const sanitizeProjectReportFileName = (projectName: string) =>
+  sanitizeReportFileName(projectName, "Studio Map OS Project");
 
 const renderMetric = (metric: ProjectReportMetric) => {
   const tone = metric.tone ?? "cloud";
@@ -192,27 +138,14 @@ const renderTask = (task: ProjectReportTask, labels: ProjectReportLabels) => `<l
   </span>
 </li>`;
 
-const normalizeTimelineColor = (value: string) =>
-  /^#[0-9a-fA-F]{6}$/.test(value) ? value.toUpperCase() : "#E3F596";
+const fallbackTimelineColor = "#E3F596";
 
-const timelineColorWithAlpha = (value: string, alpha: number) => {
-  const parsed = Number.parseInt(normalizeTimelineColor(value).slice(1), 16);
-  const red = (parsed >> 16) & 255;
-  const green = (parsed >> 8) & 255;
-  const blue = parsed & 255;
+const normalizeTimelineColor = (value: string) => normalizeReportHexColor(value, fallbackTimelineColor);
 
-  return `rgba(${red},${green},${blue},${alpha})`;
-};
+const timelineColorWithAlpha = (value: string, alpha: number) =>
+  reportHexColorWithAlpha(value, alpha, fallbackTimelineColor);
 
-const readableTimelineTextColor = (value: string) => {
-  const parsed = Number.parseInt(normalizeTimelineColor(value).slice(1), 16);
-  const red = (parsed >> 16) & 255;
-  const green = (parsed >> 8) & 255;
-  const blue = parsed & 255;
-  const luminance = (0.299 * red + 0.587 * green + 0.114 * blue) / 255;
-
-  return luminance > 0.58 ? "#1C2328" : "#FFFFFF";
-};
+const readableTimelineTextColor = (value: string) => readableReportTextColor(value, fallbackTimelineColor);
 
 const renderTimelineLabel = (label: string, tasks = false) =>
   `<div class="timeline-label${tasks ? " timeline-label--tasks" : ""}">${escapeHtml(label)}</div>`;
@@ -417,11 +350,13 @@ const createProjectReportHtmlWithCover = (data: ProjectReportData, embeddedCover
     @media(max-width:900px){.summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.payment-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.payments{grid-template-columns:1fr}.collection{grid-template-columns:1fr}}
     @media(max-width:560px){:root{--radius-xl:1.75rem;--radius-lg:1.35rem}.report{padding:.55rem}.report-section{margin-top:.7rem}.hero{min-height:28rem;padding:1rem}.hero h1{font-size:clamp(2.2rem,14vw,4rem)}.panel{padding:1rem}.status-panel{align-items:flex-start;flex-direction:column}.summary-grid,.payment-metrics{grid-template-columns:1fr 1fr;gap:.5rem}.metric{min-height:7.2rem;padding:.8rem}.metric__value{margin-top:1.15rem}.payment__heading{flex-direction:column}.payment strong{white-space:normal}.collection__value{font-size:4rem}.timeline-label,.timeline-cell{border-radius:.8rem;padding:.65rem;font-size:.68rem}.workflow-viewer{grid-template-rows:auto minmax(22rem,55vh);padding:.5rem}.workflow-header{align-items:flex-start}.workflow-controls button{min-width:2.35rem;height:2.35rem}.workflow-canvas{border-radius:1.15rem}}
     @media(max-width:360px){.summary-grid,.payment-metrics{grid-template-columns:1fr}.hero__meta{gap:.35rem}.hero__meta span{font-size:.64rem}.task__meta{display:grid}}
+    ${reportChromeStyles}
     @media print{body{background:#fff}.report{width:100%;padding:0}.report-section{break-inside:avoid;box-shadow:none}.payment{break-inside:avoid}}
   </style>
 </head>
 <body>
   <main class="report">
+    ${renderReportChromeHeader(data.chrome)}
     <section class="report-section hero"${coverStyle}>
       <div class="hero__content">
         <div class="hero__meta">${data.groupName ? `<span>${escapeHtml(data.groupName)}</span>` : ""}<span>${escapeHtml(data.dateRange)}</span></div>
@@ -473,6 +408,7 @@ const createProjectReportHtmlWithCover = (data: ProjectReportData, embeddedCover
         <p class="collection__body">${escapeHtml(data.collectionBody)}</p>
       </div>
     </section>
+    ${renderReportChromeFooter(data.chrome)}
   </main>
   <script id="project-workflow-payload" type="application/octet-stream">${workflowPayload}</script>
   <script nonce="${scriptNonce}">
@@ -650,14 +586,5 @@ export const createProjectReportHtml = async (data: ProjectReportData) =>
 
 export const downloadProjectReportHtml = async (data: ProjectReportData) => {
   const html = await createProjectReportHtml(data);
-  const url = URL.createObjectURL(new Blob([html], { type: "text/html;charset=utf-8" }));
-  const link = document.createElement("a");
-
-  link.href = url;
-  link.download = sanitizeProjectReportFileName(data.projectName);
-  link.rel = "noopener";
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 0);
+  downloadReportHtmlFile(html, sanitizeProjectReportFileName(data.projectName));
 };

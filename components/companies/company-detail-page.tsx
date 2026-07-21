@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, ArrowRight, Calculator, FolderKanban, Layers3, Pencil, Rocket, Trash2 } from "lucide-react";
+import { ArrowLeft, ArrowRight, Calculator, FolderKanban, Layers3, Pencil, Rocket, Share2, Trash2 } from "lucide-react";
 import { ImageCard } from "@/components/cards/image-card";
 import { CompanyBasicsEditModal } from "@/components/companies/company-basics-edit-modal";
 import { useCostDisplayCurrency } from "@/components/costs/use-cost-display-currency";
@@ -19,14 +19,15 @@ import { ProgressBar } from "@/components/ui/progress-bar";
 import { SectionHeader } from "@/components/ui/section-header";
 import { companiesApi, groupsApi, projectsApi } from "@/lib/api";
 import {
-  companyDescriptionKeys,
   formatDemoEntityName,
-  getProjectGroupDisplayName,
-  groupDescriptionKeys,
-  translateDomainLabel
+  getCompanyDisplayDescription,
+  getProjectGroupDisplayDescription,
+  getProjectGroupDisplayName
 } from "@/lib/i18n/domain-labels";
 import type { Company, DashboardOverview, Project, ProjectGroup, ProjectGroupSummary } from "@/lib/types";
+import { groupPath } from "@/lib/utils/app-routes";
 import type { ExchangeRateSnapshot, MoneyCurrency } from "@/lib/utils/money";
+import { buildSummaryReportData, downloadSummaryReportHtml } from "@/lib/utils/summary-report-share";
 
 type CompanyDetailData = {
   company: Company;
@@ -36,16 +37,6 @@ type CompanyDetailData = {
   projects: Project[];
   overview: DashboardOverview;
 };
-
-const defaultCompanyDescriptions: Record<string, string> = {
-  "company-northstar": "A compact AI-assisted studio for interactive games, visual systems, and launch-ready prototypes.",
-  "company-color-works": "A visual production studio for short films, campaign assets, brand pages, and shareable progress rooms."
-};
-const seededGroupDescriptionSuffix = "grouped for visual planning and progress sharing.";
-
-const isSeededGroupDescription = (name: string, description: string) =>
-  description === `${name}, ${seededGroupDescriptionSuffix}` ||
-  (description.startsWith(`${name} under `) && description.endsWith(seededGroupDescriptionSuffix));
 
 const loadCompanyDetailData = async (
   companyId: string,
@@ -89,6 +80,7 @@ export function CompanyDetailPage({ companyId }: { companyId: string }) {
   const [deleting, setDeleting] = useState(false);
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
+  const [summarySharing, setSummarySharing] = useState(false);
 
   useEffect(() => {
     if (!isCurrencyReady) {
@@ -117,11 +109,32 @@ export function CompanyDetailPage({ companyId }: { companyId: string }) {
     [data?.groups]
   );
 
-  const companyDescription = data
-    ? data.company.description === defaultCompanyDescriptions[data.company.id]
-      ? translateDomainLabel(data.company.id, companyDescriptionKeys, t)
-      : data.company.description
-    : "";
+  const companyDescription = data ? getCompanyDisplayDescription(data.company, t) : "";
+
+  const handleSummaryReportShare = async () => {
+    if (!data || summarySharing) {
+      return;
+    }
+
+    setSummarySharing(true);
+
+    try {
+      await downloadSummaryReportHtml(
+        buildSummaryReportData({
+          scope: { type: "company", company: data.company },
+          companies: [data.company],
+          groups: data.groups,
+          projects: data.projects,
+          overview: data.overview,
+          formatAmount: (value) => formatAmount(value, data.overview.currency),
+          language,
+          t
+        })
+      );
+    } finally {
+      setSummarySharing(false);
+    }
+  };
   const handleBasicsSaved = (company: Company) => {
     setData((current) => (current ? { ...current, company } : current));
     setNotice(t("companyBasicsUpdated"));
@@ -161,15 +174,31 @@ export function CompanyDetailPage({ companyId }: { companyId: string }) {
                 heightClassName="min-h-[28rem]"
                 className="[&>div.relative>h3]:max-w-56 [&>div.relative>h3]:text-2xl [&>div.relative>h3]:leading-none [&>div.relative>p]:text-sm"
                 action={
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => setBasicsOpen(true)}
-                    aria-label={t("editCompanyBasics")}
-                    className="bg-white/82 font-black shadow-soft backdrop-blur"
-                  >
-                    <Pencil size={18} />
-                  </Button>
+                  <div className="flex items-center justify-end gap-3">
+                    <Button
+                      variant="ghost"
+                      size="md"
+                      disabled={summarySharing}
+                      onClick={() => {
+                        void handleSummaryReportShare();
+                      }}
+                      aria-label={t("navShare")}
+                      aria-busy={summarySharing}
+                      className="bg-white/82 px-4 font-black shadow-soft backdrop-blur"
+                    >
+                      <Share2 className="size-[18px]" />
+                      <span>{t("navShare")}</span>
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => setBasicsOpen(true)}
+                      aria-label={t("editCompanyBasics")}
+                      className="bg-white/82 font-black shadow-soft backdrop-blur"
+                    >
+                      <Pencil size={18} />
+                    </Button>
+                  </div>
                 }
               >
                 <p className="max-w-2xl text-base font-bold leading-7 text-white/80">
@@ -232,24 +261,34 @@ export function CompanyDetailPage({ companyId }: { companyId: string }) {
                   <Card key={summary.group.id} tone="white" className="h-full p-5">
                     <div className="flex items-start justify-between gap-3">
                       <p className="text-sm font-bold text-muted">{t("groupOverview")}</p>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="size-9 shrink-0 bg-cloud"
-                        aria-label={`${t("editGroupType")}: ${getProjectGroupDisplayName(summary.group, language, t)}`}
-                        onClick={() => setEditingGroupId(summary.group.id)}
-                      >
-                        <Pencil size={16} />
-                      </Button>
+                      <div className="flex shrink-0 items-center gap-2">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="size-9 shrink-0 bg-cloud"
+                          aria-label={`${t("editGroupType")}: ${getProjectGroupDisplayName(summary.group, language, t)}`}
+                          onClick={() => setEditingGroupId(summary.group.id)}
+                        >
+                          <Pencil size={16} />
+                        </Button>
+                        <Link href={groupPath(summary.group.id)} prefetch={false}>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="size-9 shrink-0 bg-cloud"
+                            aria-label={`${t("groupOverview")}: ${getProjectGroupDisplayName(summary.group, language, t)}`}
+                          >
+                            <ArrowRight size={16} />
+                          </Button>
+                        </Link>
+                      </div>
                     </div>
                     <h2 className="mt-2 text-3xl font-black leading-none">
                       {getProjectGroupDisplayName(summary.group, language, t)}
                     </h2>
                     <p className="mt-3 text-sm font-semibold leading-6 text-muted">
-                      {isSeededGroupDescription(summary.group.name, summary.group.description)
-                        ? translateDomainLabel(summary.group.name, groupDescriptionKeys, t, summary.group.description)
-                        : summary.group.description}
+                      {getProjectGroupDisplayDescription(summary.group, t)}
                     </p>
                     <div className="mt-5">
                       <ProgressBar value={summary.averageProgress} />

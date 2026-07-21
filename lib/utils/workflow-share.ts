@@ -1,6 +1,15 @@
 import type { ProjectWorkflow, ProjectWorkflowAttachment } from "@/lib/types";
+import { reportBrandMarkSvg, type ReportChromeLabels } from "@/lib/utils/report-share-common";
 
 export const MAX_WORKFLOW_ATTACHMENT_BYTES = 1024 * 1024;
+
+const defaultWorkflowChrome: ReportChromeLabels = {
+  eyebrow: "Creative project operating system",
+  footerCopyright: "Copyright © 2026 Colorinu Games Limited.",
+  footerRights: "All rights reserved.",
+  footerCollaboration: "Interested in collaboration? Reach out to",
+  footerMoreInfo: "for more information"
+};
 
 export type WorkflowAttachmentReadErrorCode =
   | "unsupported-type"
@@ -163,7 +172,7 @@ const escapeHtml = (value: string) =>
  * Creates a dependency-free HTML viewer. User-authored strings live only in a
  * base64 JSON payload and are inserted with textContent by the viewer script.
  */
-export function createWorkflowShareHtml(workflow: ProjectWorkflow) {
+export function createWorkflowShareHtml(workflow: ProjectWorkflow, chrome: ReportChromeLabels = defaultWorkflowChrome) {
   const payload = workflowToBase64(workflow);
   const documentTitle = escapeHtml(`${workflow.name || "Workflow"} · Studio Map OS`);
 
@@ -179,7 +188,15 @@ export function createWorkflowShareHtml(workflow: ProjectWorkflow) {
     *{box-sizing:border-box}
     html,body{height:100%;margin:0;overflow:hidden;background:var(--canvas);color:var(--ink);font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
     button{font:inherit}
-    .app{height:100%;display:grid;grid-template-rows:auto minmax(0,1fr);padding:max(12px,env(safe-area-inset-top)) max(12px,env(safe-area-inset-right)) max(12px,env(safe-area-inset-bottom)) max(12px,env(safe-area-inset-left));gap:12px}
+    .app{height:100%;display:grid;grid-template-rows:auto auto minmax(0,1fr) auto;padding:max(12px,env(safe-area-inset-top)) max(12px,env(safe-area-inset-right)) max(12px,env(safe-area-inset-bottom)) max(12px,env(safe-area-inset-left));gap:12px}
+    .brand{display:flex;align-items:center;gap:9px;padding:2px 6px 0}
+    .brand svg{width:34px;height:34px;flex:none}
+    .brand-eyebrow{margin:0;color:var(--muted);font-size:8px;font-weight:900;text-transform:uppercase;letter-spacing:.1em}
+    .brand-title{margin:2px 0 0;font-size:15px;font-weight:900;letter-spacing:-.01em;line-height:1;white-space:nowrap}
+    .chrome-footer{padding:0 6px 2px;text-align:center;color:rgba(28,35,40,.48);font-size:10px;font-weight:650;line-height:1.5}
+    .chrome-footer p{margin:0;overflow-wrap:anywhere}
+    .chrome-footer a{color:#ff0099;font-weight:900;text-decoration:none}
+    .chrome-footer a:hover,.chrome-footer a:focus-visible{text-decoration:underline;text-underline-offset:3px}
     .header{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:14px 18px;border-radius:24px;background:rgba(255,255,255,.82);box-shadow:0 18px 50px rgba(28,45,55,.12);backdrop-filter:blur(18px)}
     .eyebrow{margin:0 0 4px;color:var(--muted);font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.08em}
     h1{margin:0;max-width:72vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:clamp(20px,3vw,30px);line-height:1;font-weight:900}
@@ -199,10 +216,18 @@ export function createWorkflowShareHtml(workflow: ProjectWorkflow) {
     .attachment:hover,.attachment:focus-visible{background:var(--coral);outline:2px solid #fff;outline-offset:2px}
     .empty{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);max-width:360px;padding:18px 22px;border-radius:22px;background:rgba(255,255,255,.9);text-align:center;font-weight:800;color:var(--muted);box-shadow:0 18px 45px rgba(28,45,55,.12)}
     @media(max-width:560px){.app{padding:8px;gap:8px}.header{padding:12px;border-radius:20px}.control{min-width:38px;height:38px}.canvas{border-radius:24px}}
+    @media(max-height:560px){.app{gap:6px}.brand{gap:6px;padding:0 4px}.brand svg{width:24px;height:24px}.brand-eyebrow{font-size:6px}.brand-title{margin-top:1px;font-size:12px}.chrome-footer{font-size:8px;line-height:1.35}}
   </style>
 </head>
 <body>
   <main class="app">
+    <div class="brand">
+      ${reportBrandMarkSvg}
+      <div>
+        <p class="brand-eyebrow">${escapeHtml(chrome.eyebrow)}</p>
+        <p class="brand-title">STUDIO MAP OS</p>
+      </div>
+    </div>
     <header class="header">
       <div><p class="eyebrow">Studio Map OS Workflow</p><h1 id="workflow-title">Workflow</h1></div>
       <div class="controls" aria-label="Canvas controls">
@@ -214,6 +239,10 @@ export function createWorkflowShareHtml(workflow: ProjectWorkflow) {
     <section class="canvas" id="canvas" aria-label="Read-only workflow canvas">
       <div class="scene" id="scene"><svg class="edges" id="edges" aria-hidden="true"></svg><div id="nodes"></div></div>
     </section>
+    <footer class="chrome-footer">
+      <p>${escapeHtml(chrome.footerCopyright)} ${escapeHtml(chrome.footerRights)}</p>
+      <p>${escapeHtml(chrome.footerCollaboration)} <a href="mailto:kunito.world@icloud.com">kunito.world@icloud.com</a> ${escapeHtml(chrome.footerMoreInfo)}</p>
+    </footer>
   </main>
   <script id="workflow-payload" type="application/octet-stream">${payload}</script>
   <script>
@@ -392,8 +421,8 @@ export const createWorkflowShareFileName = (workflow: ProjectWorkflow) => {
   return `studio-map-os-workflow-${slug || "workflow"}.html`;
 };
 
-export function downloadWorkflowShareHtml(workflow: ProjectWorkflow) {
-  const html = createWorkflowShareHtml(workflow);
+export function downloadWorkflowShareHtml(workflow: ProjectWorkflow, chrome?: ReportChromeLabels) {
+  const html = createWorkflowShareHtml(workflow, chrome);
 
   downloadBlob(
     new Blob([html], { type: "text/html;charset=utf-8" }),
