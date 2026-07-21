@@ -8,6 +8,9 @@ const config: Config = {
   ],
   theme: {
     extend: {
+      // The design system uses off-scale alpha steps (e.g. bg-white/82, text-ink/62);
+      // Tailwind only ships multiples of 5, so expose every integer 0-100.
+      opacity: Object.fromEntries(Array.from({ length: 101 }, (_, i) => [i, `${i / 100}`])),
       colors: {
         canvas: "rgb(var(--color-canvas) / <alpha-value>)",
         surface: "rgb(var(--color-surface) / <alpha-value>)",
