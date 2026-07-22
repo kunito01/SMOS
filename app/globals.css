@@ -296,6 +296,24 @@ html[lang="sux"] body {
 }
 
 /*
+ * Idle guard: after a few seconds without input (BackgroundMotionController
+ * sets [data-motion-idle] on <html>) freeze the decorative background even
+ * while it is on screen. Scoped to the jelly field and scene roots only, so
+ * functional UI motion — spinners, skeletons — keeps running while the user
+ * reads. Any pointer/key/scroll input clears the flag and resumes instantly.
+ */
+:root[data-motion-idle] .jelly-field,
+:root[data-motion-idle] .jelly-field::before,
+:root[data-motion-idle] .jelly-field::after,
+:root[data-motion-idle] .jelly-field *,
+:root[data-motion-idle] [data-scene-root],
+:root[data-motion-idle] [data-scene-root] *,
+:root[data-motion-idle] [data-scene-root] *::before,
+:root[data-motion-idle] [data-scene-root] *::after {
+  animation-play-state: paused !important;
+}
+
+/*
  * Game-feel interaction layer translated from refs/ui_jelly_effects.
  * JavaScript owns the interruptible squash/stretch sequences; CSS owns
  * card lift and pointer tilt so existing page motion can stay on wrappers.

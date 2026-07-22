@@ -54,7 +54,7 @@ export function SceneRoot({ className, children }: SceneRootProps) {
   }, []);
 
   return (
-    <div ref={ref} className={className} aria-hidden="true">
+    <div ref={ref} className={className} aria-hidden="true" data-scene-root="">
       {children}
     </div>
   );
