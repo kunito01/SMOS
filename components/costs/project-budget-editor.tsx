@@ -32,6 +32,7 @@ import {
   calculatePersonnelLineNativeAmount,
   calculateSoftwareLineNativeAmount,
   calculateStructuredBudget,
+  getProjectBudgetPersonnelUsageDays,
   PROJECT_BUDGET_HOURS_PER_DAY
 } from "@/lib/utils/project-budget";
 import {
@@ -435,25 +436,27 @@ export function ProjectBudgetEditor({
                 <div className="mt-3 grid gap-3">
                   {phaseBudget.personnel.map((line) => {
                     const nativeAmount = calculatePersonnelLineNativeAmount(line, phase);
+                    const workingDays = getProjectBudgetPersonnelUsageDays(line, phase);
 
                     return (
                       <div
                         key={line.id}
                         data-budget-personnel-row
-                        className="grid min-w-0 gap-3 rounded-studio bg-cloud/70 p-3 sm:grid-cols-2 xl:grid-cols-4"
+                        className="min-w-0 rounded-studio bg-cloud/70 p-3"
                       >
-                        <label className="grid min-w-0 gap-1">
+                        {line.personId ? (
+                          <p className="mb-2 text-[0.68rem] font-black text-muted">{t("importedFromPeopleLibrary")}</p>
+                        ) : null}
+                        <div className="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                        <label className="grid min-w-0 content-start gap-1">
                           <span className="text-xs font-black text-muted">{t("budgetRoleLevel")}</span>
                           <input
                             value={line.roleLevel}
                             onChange={(event) => updatePersonnel(phase.id, line.id, { roleLevel: event.target.value })}
                             className="h-10 min-w-0 w-full rounded-full border-0 bg-white px-3 text-sm font-bold outline-none ring-1 ring-black/[0.06] focus:ring-coral"
                           />
-                          {line.personId ? (
-                            <span className="text-[0.68rem] font-black text-muted">{t("importedFromPeopleLibrary")}</span>
-                          ) : null}
                         </label>
-                        <label className="grid min-w-0 gap-1">
+                        <label className="grid min-w-0 content-start gap-1">
                           <span className="text-xs font-black text-muted">{t("budgetHeadcount")}</span>
                           <input
                             type="number"
@@ -464,7 +467,7 @@ export function ProjectBudgetEditor({
                             className="h-10 min-w-0 w-full rounded-full border-0 bg-white px-3 text-sm font-bold outline-none ring-1 ring-black/[0.06] focus:ring-coral"
                           />
                         </label>
-                        <label className="grid min-w-0 gap-1">
+                        <label className="grid min-w-0 content-start gap-1">
                           <span className="text-xs font-black text-muted">{t("budgetHourlyRate")}</span>
                           <input
                             type="number"
@@ -475,18 +478,18 @@ export function ProjectBudgetEditor({
                             className="h-10 min-w-0 w-full rounded-full border-0 bg-white px-3 text-sm font-bold outline-none ring-1 ring-black/[0.06] focus:ring-coral"
                           />
                         </label>
-                        <label className="grid min-w-0 gap-1">
+                        <label className="grid min-w-0 content-start gap-1">
                           <span className="text-xs font-black text-muted">{t("currency")}</span>
                           <Select
                             value={line.currency}
                             onChange={(event) => updatePersonnel(phase.id, line.id, { currency: event.target.value as MoneyCurrency })}
-                            className="h-10 min-w-0 w-full rounded-full border-0 bg-white px-3 text-sm font-bold outline-none ring-1 ring-black/[0.06]"
+                            disabled={Boolean(line.personId)}
+                            className="h-10 min-w-0 w-full rounded-full border-0 bg-white px-3 text-sm font-bold outline-none ring-1 ring-black/[0.06] disabled:cursor-not-allowed disabled:bg-white/55 disabled:text-ink/60"
                           >
                             {supportedCurrencies.map((currency) => <option key={currency} value={currency}>{currency}</option>)}
                           </Select>
-                          <span className="text-[0.68rem] font-black text-muted">{formatCurrency(nativeAmount, line.currency)}</span>
                         </label>
-                        <label className="grid min-w-0 gap-1">
+                        <label className="grid min-w-0 content-start gap-1">
                           <span className="text-xs font-black text-muted">{t("budgetUsageStartDate")}</span>
                           <input
                             type="date"
@@ -503,7 +506,7 @@ export function ProjectBudgetEditor({
                             className="h-10 min-w-0 w-full rounded-full border-0 bg-white px-3 text-sm font-bold outline-none ring-1 ring-black/[0.06] focus:ring-coral"
                           />
                         </label>
-                        <label className="grid min-w-0 gap-1">
+                        <label className="grid min-w-0 content-start gap-1">
                           <span className="text-xs font-black text-muted">{t("budgetUsageEndDate")}</span>
                           <input
                             type="date"
@@ -513,8 +516,11 @@ export function ProjectBudgetEditor({
                             onChange={(event) => updatePersonnel(phase.id, line.id, { endDate: event.target.value })}
                             className="h-10 min-w-0 w-full rounded-full border-0 bg-white px-3 text-sm font-bold outline-none ring-1 ring-black/[0.06] focus:ring-coral"
                           />
+                          <span className="text-[0.68rem] font-black text-coral">
+                            {t("budgetActualWorkingDays").replace("{days}", String(workingDays))}
+                          </span>
                         </label>
-                        <label className="grid min-w-0 gap-1">
+                        <label className="grid min-w-0 content-start gap-1">
                           <span className="text-xs font-black text-muted">{t("budgetAllocationPercent")}</span>
                           <span className="flex min-w-0 items-center gap-2">
                             <input
@@ -534,12 +540,17 @@ export function ProjectBudgetEditor({
                         <div className="min-w-0 rounded-studio bg-white/75 px-3 py-2 text-xs font-bold leading-5 text-muted">
                           {t("budgetPersonnelFormula")}
                         </div>
+                        </div>
                         {line.days !== undefined ? (
-                          <p className="min-w-0 text-xs font-black leading-5 text-coral sm:col-span-2 xl:col-span-4">
+                          <p className="mt-2 min-w-0 text-xs font-black leading-5 text-coral">
                             {t("projectBudgetLegacyUsageReview")}
                           </p>
                         ) : null}
-                        <div className="flex min-w-0 flex-wrap items-center gap-2 sm:col-span-2 xl:col-span-4">
+                        <div className="mt-3 flex flex-wrap items-baseline justify-end gap-2 border-t border-black/[0.06] pt-3">
+                          <span className="text-xs font-black text-muted">{t("budgetLineTotal")}</span>
+                          <span className="text-2xl font-black tabular-nums text-ink">{formatCurrency(nativeAmount, line.currency)}</span>
+                        </div>
+                        <div className="mt-3 flex min-w-0 flex-wrap items-center gap-2">
                           <Button
                             type="button"
                             size="sm"
@@ -784,18 +795,19 @@ export function ProjectBudgetEditor({
                     <div
                       key={line.id}
                       data-budget-extra-cost-row
-                      className="grid min-w-0 gap-3 rounded-studio bg-cloud/70 p-3 sm:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(10rem,auto)] lg:grid-cols-[minmax(8rem,1fr)_9rem_minmax(7rem,0.7fr)_7rem_minmax(10rem,auto)]"
+                      className="min-w-0 rounded-studio bg-cloud/70 p-3"
                     >
-                      <label className="grid min-w-0 gap-1 sm:col-start-1 sm:row-start-1 lg:col-auto lg:row-auto">
+                      {line.costTemplateId ? (
+                        <p className="mb-2 text-[0.68rem] font-black text-muted">{t("importedFromCostLibrary")}</p>
+                      ) : null}
+                      <div className="grid min-w-0 gap-3 sm:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(10rem,auto)] lg:grid-cols-[minmax(8rem,1fr)_9rem_minmax(7rem,0.7fr)_7rem_minmax(10rem,auto)]">
+                      <label className="grid min-w-0 content-start gap-1 sm:col-start-1 sm:row-start-1 lg:col-auto lg:row-auto">
                         <span className="text-xs font-black text-muted">{t("budgetExtraCostName")}</span>
                         <input
                           value={line.name}
                           onChange={(event) => updateExtraCost(phase.id, line.id, { name: event.target.value })}
                           className="h-10 min-w-0 w-full rounded-full border-0 bg-white px-3 text-sm font-bold outline-none ring-1 ring-black/[0.06] focus:ring-coral"
                         />
-                        {line.costTemplateId ? (
-                          <span className="text-[0.68rem] font-black text-muted">{t("importedFromCostLibrary")}</span>
-                        ) : null}
                       </label>
                       <label className="grid min-w-0 gap-1 sm:col-start-2 sm:row-start-1 lg:col-auto lg:row-auto">
                         <span className="text-xs font-black text-muted">{t("budgetExtraCostType")}</span>
@@ -824,7 +836,8 @@ export function ProjectBudgetEditor({
                         <Select
                           value={line.currency}
                           onChange={(event) => updateExtraCost(phase.id, line.id, { currency: event.target.value as MoneyCurrency })}
-                          className="h-10 min-w-0 w-full rounded-full border-0 bg-white px-3 text-sm font-bold outline-none ring-1 ring-black/[0.06]"
+                          disabled={Boolean(line.costTemplateId)}
+                          className="h-10 min-w-0 w-full rounded-full border-0 bg-white px-3 text-sm font-bold outline-none ring-1 ring-black/[0.06] disabled:cursor-not-allowed disabled:bg-white/55 disabled:text-ink/60"
                         >
                           {supportedCurrencies.map((currency) => <option key={currency} value={currency}>{currency}</option>)}
                         </Select>
@@ -850,6 +863,7 @@ export function ProjectBudgetEditor({
                           line.name || t("budgetExtraCosts"),
                           { kind: "extraCost", phaseId: phase.id, lineId: line.id }
                         )}
+                      </div>
                       </div>
                     </div>
                   ))}

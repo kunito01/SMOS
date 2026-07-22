@@ -36,6 +36,13 @@ import { downloadWorkflowShareHtml } from "@/lib/utils/workflow-share";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
+// Viewport pan/zoom is navigation, not an edit — compare only the content a save
+// would persist, so panning around the board never counts as unsaved work.
+const sameWorkflowContent = (a: ProjectWorkflow, b: ProjectWorkflow) =>
+  a.name === b.name &&
+  JSON.stringify(a.nodes) === JSON.stringify(b.nodes) &&
+  JSON.stringify(a.edges) === JSON.stringify(b.edges);
+
 export function WorkflowPage() {
   const { t } = useI18n();
   const [workflows, setWorkflows] = useState<ProjectWorkflow[] | null>(null);
@@ -43,6 +50,7 @@ export function WorkflowPage() {
   const [selectedWorkflowId, setSelectedWorkflowId] = useState("");
   const [nameDraft, setNameDraft] = useState("");
   const [saveState, setSaveState] = useState<SaveState>("idle");
+  const [dirty, setDirty] = useState(false);
   const [mutating, setMutating] = useState(false);
   const [notice, setNotice] = useState("");
   const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false);
@@ -107,6 +115,7 @@ export function WorkflowPage() {
 
         if (isMountedRef.current && revision === saveRevisionRef.current) {
           setSaveState("saved");
+          setDirty(false);
         }
       })
       .catch(() => {
@@ -118,18 +127,23 @@ export function WorkflowPage() {
     saveQueueRef.current = job;
   }, []);
 
-  const replaceWorkflow = useCallback(
-    (nextWorkflow: ProjectWorkflow) => {
-      const nextWorkflows = workflowsRef.current.map((workflow) =>
-        workflow.id === nextWorkflow.id ? nextWorkflow : workflow
-      );
+  const replaceWorkflow = useCallback((nextWorkflow: ProjectWorkflow) => {
+    const previous = workflowsRef.current.find(
+      (workflow) => workflow.id === nextWorkflow.id
+    );
+    const nextWorkflows = workflowsRef.current.map((workflow) =>
+      workflow.id === nextWorkflow.id ? nextWorkflow : workflow
+    );
 
-      workflowsRef.current = nextWorkflows;
-      setWorkflows(nextWorkflows);
-      enqueueSave(nextWorkflow);
-    },
-    [enqueueSave]
-  );
+    workflowsRef.current = nextWorkflows;
+    setWorkflows(nextWorkflows);
+
+    // Auto-save is off: flag the edit as unsaved instead of persisting. Skip a
+    // viewport-only pan/zoom so navigating the board never looks like an edit.
+    if (!previous || !sameWorkflowContent(previous, nextWorkflow)) {
+      setDirty(true);
+    }
+  }, []);
 
   const commitWorkflowName = useCallback(() => {
     if (!selectedWorkflow) {
@@ -156,8 +170,49 @@ export function WorkflowPage() {
       nameDraft.trim() &&
       nameDraft.trim() !== selectedWorkflow.name
   );
-  const hasUnsavedWork =
-    hasNameDraft || saveState === "saving" || saveState === "error";
+  const hasUnsavedWork = dirty || hasNameDraft;
+
+  // Manual save: fold any typed-but-uncommitted name in, then persist the board.
+  const saveNow = useCallback(() => {
+    if (!selectedWorkflowId || mutating || saveState === "saving") {
+      return;
+    }
+    commitWorkflowName();
+    const workflow = workflowsRef.current.find(
+      (item) => item.id === selectedWorkflowId
+    );
+    if (workflow) {
+      enqueueSave(workflow);
+    }
+  }, [commitWorkflowName, enqueueSave, mutating, saveState, selectedWorkflowId]);
+
+  // Throw away in-memory edits by reloading the persisted boards, then continue.
+  const discardThen = useCallback(async (after: () => void) => {
+    const fresh = await listWorkflows();
+    if (!isMountedRef.current) {
+      return;
+    }
+    workflowsRef.current = fresh;
+    setWorkflows(fresh);
+    setDirty(false);
+    setSaveState("idle");
+    after();
+  }, []);
+
+  // Run `proceed`, but if there are unsaved edits, confirm leaving first.
+  const guardLeave = useCallback(
+    (proceed: () => void) => {
+      if (!hasUnsavedWork) {
+        proceed();
+        return;
+      }
+      pendingNavigationRef.current = () => {
+        void discardThen(proceed);
+      };
+      setLeaveConfirmOpen(true);
+    },
+    [discardThen, hasUnsavedWork]
+  );
 
   useEffect(() => {
     if (!hasUnsavedWork) {
@@ -224,6 +279,7 @@ export function WorkflowPage() {
       );
       setPendingDeleteWorkflow(null);
       setSaveState("idle");
+      setDirty(false);
     } catch {
       setSaveState("error");
     } finally {
@@ -268,11 +324,17 @@ export function WorkflowPage() {
             label: t("workflowSaveFailed"),
             tone: "coral" as const
           }
-        : {
-            icon: Check,
-            label: t("workflowSaved"),
-            tone: "lime" as const
-          };
+        : hasUnsavedWork
+          ? {
+              icon: AlertTriangle,
+              label: t("workflowUnsaved"),
+              tone: "aqua" as const
+            }
+          : {
+              icon: Check,
+              label: t("workflowSaved"),
+              tone: "lime" as const
+            };
   const SaveIndicatorIcon = saveIndicator.icon;
 
   const beforeNavigate = (proceed: () => void) => {
@@ -319,7 +381,7 @@ export function WorkflowPage() {
                   size="lg"
                   className="w-full sm:w-auto"
                   disabled={mutating}
-                  onClick={() => void createNewWorkflow()}
+                  onClick={() => guardLeave(() => void createNewWorkflow())}
                 >
                   <Plus size={19} strokeWidth={2.4} />
                   {t("workflowNewBoard")}
@@ -339,16 +401,14 @@ export function WorkflowPage() {
                         type="button"
                         disabled={mutating}
                         onClick={() => {
-                          if (workflow.id === selectedWorkflow?.id) {
-                            commitWorkflowName();
-                            setSelectedWorkflowId("");
+                          const target =
+                            workflow.id === selectedWorkflow?.id
+                              ? ""
+                              : workflow.id;
+                          guardLeave(() => {
+                            setSelectedWorkflowId(target);
                             setNotice("");
-                            return;
-                          }
-
-                          commitWorkflowName();
-                          setSelectedWorkflowId(workflow.id);
-                          setNotice("");
+                          });
                         }}
                         className={`min-w-0 rounded-studio-lg p-5 text-left shadow-soft ring-1 transition duration-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-coral disabled:opacity-60 ${
                           selected
@@ -410,13 +470,21 @@ export function WorkflowPage() {
                           {saveIndicator.label}
                         </Pill>
                         <Button
+                          variant="primary"
+                          size="sm"
+                          disabled={
+                            mutating || saveState === "saving" || !hasUnsavedWork
+                          }
+                          onClick={() => saveNow()}
+                        >
+                          <Save size={16} strokeWidth={2.3} />
+                          {t("workflowSaveBoard")}
+                        </Button>
+                        <Button
                           variant="ghost"
                           size="sm"
                           disabled={mutating}
-                          onClick={() => {
-                            commitWorkflowName();
-                            setPendingDeleteWorkflow(selectedWorkflow);
-                          }}
+                          onClick={() => setPendingDeleteWorkflow(selectedWorkflow)}
                         >
                           <Trash2 size={16} strokeWidth={2.3} />
                           {t("workflowDeleteBoard")}
