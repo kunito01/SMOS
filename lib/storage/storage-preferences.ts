@@ -185,12 +185,38 @@ const readRegistry = (): WorkspaceStoragePreferenceRegistry => {
   }
 };
 
+const preferenceListeners = new Set<() => void>();
+
+/**
+ * Subscribe to workspace storage-preference changes. The listener fires after
+ * any write — including the background CloudKit auto-upload marking a workspace
+ * "synced" — so status/last-sync UIs can reflect the live state without a
+ * manual refresh or page reload. Returns an unsubscribe function.
+ */
+export function subscribeWorkspaceStoragePreferences(listener: () => void): () => void {
+  preferenceListeners.add(listener);
+  return () => {
+    preferenceListeners.delete(listener);
+  };
+}
+
+const notifyPreferenceListeners = () => {
+  for (const listener of preferenceListeners) {
+    try {
+      listener();
+    } catch {
+      // A failing listener must not block the write or the other listeners.
+    }
+  }
+};
+
 const writeRegistry = (registry: WorkspaceStoragePreferenceRegistry) => {
   if (!canUseStorage()) {
     throw new Error("Workspace storage preferences are unavailable in this browser context.");
   }
 
   window.localStorage.setItem(storagePreferencesKey, JSON.stringify(registry));
+  notifyPreferenceListeners();
 };
 
 export function getStoredWorkspaceStoragePreference(

@@ -31,6 +31,7 @@ import {
 } from "@/lib/storage/workspace-sync-coordinator";
 import {
   getWorkspaceStoragePreference,
+  subscribeWorkspaceStoragePreferences,
   type WorkspaceStoragePreference,
   type WorkspaceStorageProvider
 } from "@/lib/storage/storage-preferences";
@@ -81,6 +82,42 @@ export function ArchiveStorageSyncCard({ workspaceId }: ArchiveStorageSyncCardPr
 
   useEffect(() => {
     setPreference(getWorkspaceStoragePreference(workspaceId));
+  }, [workspaceId]);
+
+  // Keep the status badge and "last sync" time live: the background CloudKit
+  // auto-upload updates the stored preference without any user action, so
+  // re-read it whenever it changes (this tab), another tab/window writes it
+  // (storage event), or the user returns to this tab.
+  useEffect(() => {
+    const refresh = () => {
+      const next = getWorkspaceStoragePreference(workspaceId);
+      setPreference((prev) =>
+        prev.updatedAt === next.updatedAt && prev.status === next.status ? prev : next
+      );
+    };
+
+    const onStorage = (event: StorageEvent) => {
+      if (!event.key || event.key.includes("workspace-storage-preferences")) {
+        refresh();
+      }
+    };
+    const onVisibility = () => {
+      if (!document.hidden) {
+        refresh();
+      }
+    };
+
+    const unsubscribe = subscribeWorkspaceStoragePreferences(refresh);
+    window.addEventListener("storage", onStorage);
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("focus", refresh);
+
+    return () => {
+      unsubscribe();
+      window.removeEventListener("storage", onStorage);
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("focus", refresh);
+    };
   }, [workspaceId]);
 
   useEffect(() => {
