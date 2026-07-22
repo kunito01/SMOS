@@ -47,8 +47,17 @@ import {
 import { formatLocalizedDate } from "@/lib/i18n/formatters";
 import type { CostItem, CostLibraryItem, Person, PersonProjectParticipation, ProjectStatus, Tool } from "@/lib/types";
 import { projectPath } from "@/lib/utils/app-routes";
+import { peopleTemplateDailyRate } from "@/lib/utils/cost-template-links";
 import { formatNumber, type MoneyCurrency } from "@/lib/utils/money";
 import { getNextActiveSubscriptionPaymentDate } from "@/lib/utils/subscription-reminders";
+
+const billingTypeLabelKeys = {
+  "one-time": "billingTypeOneTime",
+  hourly: "billingTypeHourly",
+  daily: "billingTypeDaily",
+  monthly: "billingTypeMonthly",
+  yearly: "billingTypeYearly"
+} as const;
 
 type LibrariesData = {
   people: Person[];
@@ -193,7 +202,8 @@ export function LibrariesPage() {
   const compatiblePersonTemplates = useMemo(
     () =>
       (data?.costTemplates ?? []).filter(
-        (template) => template.category === "people" && template.billingType === "daily"
+        (template) =>
+          template.category === "people" && template.billingType !== "one-time"
       ),
     [data?.costTemplates]
   );
@@ -309,7 +319,7 @@ export function LibrariesPage() {
       }
 
       const template = costTemplateById.get(costTemplateId);
-      if (!template || template.category !== "people" || template.billingType !== "daily") {
+      if (!template || template.category !== "people" || template.billingType === "one-time") {
         return current;
       }
 
@@ -317,7 +327,7 @@ export function LibrariesPage() {
         ...current,
         costTemplateId,
         role: template.name,
-        dailyCost: String(template.amount),
+        dailyCost: String(peopleTemplateDailyRate(template)),
         dailyCostCurrency: template.currency
       };
     });
@@ -573,7 +583,7 @@ export function LibrariesPage() {
                       <option value="">{t("noCostTemplate")}</option>
                       {compatiblePersonTemplates.map((template) => (
                         <option key={template.id} value={template.id}>
-                          {template.name} · {formatCurrencyAmount(template.currency, template.amount)} · {t("billingTypeDaily")}
+                          {template.name} · {formatCurrencyAmount(template.currency, template.amount)} · {t(billingTypeLabelKeys[template.billingType])} → {formatCurrencyAmount(template.currency, peopleTemplateDailyRate(template))}/{t("budgetPerDay")}
                         </option>
                       ))}
                     </Select>
@@ -717,7 +727,7 @@ export function LibrariesPage() {
                           <option value="">{t("noCostTemplate")}</option>
                           {compatiblePersonTemplates.map((template) => (
                             <option key={template.id} value={template.id}>
-                              {template.name} · {formatCurrencyAmount(template.currency, template.amount)}
+                              {template.name} · {formatCurrencyAmount(template.currency, template.amount)} · {t(billingTypeLabelKeys[template.billingType])} → {formatCurrencyAmount(template.currency, peopleTemplateDailyRate(template))}/{t("budgetPerDay")}
                             </option>
                           ))}
                         </Select>

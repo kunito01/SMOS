@@ -4,6 +4,37 @@ import type {
   Project,
   Tool
 } from "@/lib/types/domain";
+import { PROJECT_BUDGET_HOURS_PER_DAY } from "@/lib/utils/project-budget";
+
+// Personnel rate conversion basis: 20 working days per month, 10 hours per day.
+export const PROJECT_BUDGET_WORKING_DAYS_PER_MONTH = 20;
+
+/**
+ * Converts a people template's amount to a per-day rate. A people template can
+ * bill by hour, day, month, or year; the personnel library always stores and
+ * shows a single daily rate, converted with 10 hours/day and 20 workdays/month.
+ */
+export const peopleTemplateDailyRate = (template: CostLibraryItem): number => {
+  const { amount, billingType } = template;
+  let daily: number;
+
+  switch (billingType) {
+    case "hourly":
+      daily = amount * PROJECT_BUDGET_HOURS_PER_DAY;
+      break;
+    case "monthly":
+      daily = amount / PROJECT_BUDGET_WORKING_DAYS_PER_MONTH;
+      break;
+    case "yearly":
+      daily = amount / (PROJECT_BUDGET_WORKING_DAYS_PER_MONTH * 12);
+      break;
+    case "daily":
+    default:
+      daily = amount;
+  }
+
+  return Math.round(daily * 100) / 100;
+};
 
 export type CostTemplateLinkDatabase = {
   costLibrary: CostLibraryItem[];
@@ -13,7 +44,13 @@ export type CostTemplateLinkDatabase = {
 };
 
 export const isCompatiblePeopleTemplate = (template: CostLibraryItem | undefined) =>
-  Boolean(template && template.category === "people" && template.billingType === "daily");
+  Boolean(
+    template &&
+    template.category === "people" &&
+    // Any recurring rate (hourly/daily/monthly/yearly) is allowed and converted
+    // to a daily rate; a one-time amount is not a rate, so it is excluded.
+    template.billingType !== "one-time"
+  );
 
 export const isCompatibleSoftwareTemplate = (template: CostLibraryItem | undefined) =>
   Boolean(
@@ -29,7 +66,7 @@ export const applyPeopleTemplate = (
   ...person,
   costTemplateId: template.id,
   role: template.name,
-  dailyCost: template.amount,
+  dailyCost: peopleTemplateDailyRate(template),
   dailyCostCurrency: template.currency
 });
 
@@ -133,7 +170,7 @@ export const synchronizeCostTemplateLinks = <T extends CostTemplateLinkDatabase>
                   ? {
                       ...line,
                       roleLevel: [person.name, person.role].filter(Boolean).join(" · "),
-                      hourlyRate: (person.dailyCost ?? 0) / 10,
+                      hourlyRate: (person.dailyCost ?? 0) / PROJECT_BUDGET_HOURS_PER_DAY,
                       currency: person.dailyCostCurrency ?? line.currency
                     }
                   : line;

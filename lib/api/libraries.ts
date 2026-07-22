@@ -125,7 +125,7 @@ export async function addPerson(input: AddPersonInput) {
   const costTemplateId = normalizeTemplateId(input.costTemplateId);
   const template = getCostTemplate(costTemplateId);
   if (costTemplateId && !isCompatiblePeopleTemplate(template)) {
-    throw new Error("A person can only link to a daily people template");
+    throw new Error("A person can only link to a recurring (hourly/daily/monthly/yearly) people template");
   }
 
   let person: Person = {
@@ -161,7 +161,7 @@ export async function updatePerson(personId: string, input: UpdatePersonInput) {
       : person.costTemplateId;
     const template = getCostTemplate(nextTemplateId);
     if (nextTemplateId && !isCompatiblePeopleTemplate(template)) {
-      throw new Error("A person can only link to a daily people template");
+      throw new Error("A person can only link to a recurring (hourly/daily/monthly/yearly) people template");
     }
 
     Object.assign(person, input, { costTemplateId: nextTemplateId });

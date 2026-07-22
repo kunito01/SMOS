@@ -171,6 +171,35 @@ export const countInclusiveNaturalDays = (startDate: string, endDate: string) =>
   return Math.floor((end - start) / millisecondsPerDay) + 1;
 };
 
+/**
+ * Counts weekdays (Mon–Fri) between two dates inclusive; Saturdays and Sundays
+ * are excluded by the calendar. Personnel is billed per working day, so its
+ * usage window skips weekends.
+ */
+export const countInclusiveWorkingDays = (startDate: string, endDate: string) => {
+  const start = parseIsoDate(startDate, "Phase start date");
+  const end = parseIsoDate(endDate, "Phase end date");
+
+  if (end < start) {
+    throw new Error("Phase end date must not be earlier than its start date");
+  }
+
+  const totalDays = Math.floor((end - start) / millisecondsPerDay) + 1;
+  const fullWeeks = Math.floor(totalDays / 7);
+  const remainder = totalDays % 7;
+  const startDayOfWeek = new Date(start).getUTCDay(); // 0 = Sunday … 6 = Saturday
+
+  let workingDays = fullWeeks * 5;
+  for (let offset = 0; offset < remainder; offset += 1) {
+    const dayOfWeek = (startDayOfWeek + offset) % 7;
+    if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+      workingDays += 1;
+    }
+  }
+
+  return workingDays;
+};
+
 type BudgetUsageLine = Pick<
   ProjectBudgetPersonnelLine | ProjectBudgetSoftwareCostLine,
   "startDate" | "endDate" | "allocationPercent"
@@ -199,13 +228,37 @@ export const getProjectBudgetUsageDays = (
   }
 };
 
+/**
+ * Working-day (Mon–Fri) usage window for personnel. Same phase-clamp and
+ * draft-safety as getProjectBudgetUsageDays, but weekends are excluded so a
+ * person is only billed for the workdays inside the range.
+ */
+export const getProjectBudgetPersonnelUsageDays = (
+  line: BudgetUsageLine,
+  phase: Pick<Phase, "startDate" | "endDate">
+) => {
+  try {
+    if (
+      line.startDate < phase.startDate ||
+      line.endDate > phase.endDate ||
+      line.endDate < line.startDate
+    ) {
+      return 0;
+    }
+
+    return countInclusiveWorkingDays(line.startDate, line.endDate);
+  } catch {
+    return 0;
+  }
+};
+
 export const calculatePersonnelLineNativeAmount = (
   line: ProjectBudgetPersonnelLine,
   phase: Pick<Phase, "startDate" | "endDate">
 ) => {
   const effectiveDays = line.days !== undefined
     ? line.days
-    : getProjectBudgetUsageDays(line, phase) * getSafeAllocationFraction(line.allocationPercent);
+    : getProjectBudgetPersonnelUsageDays(line, phase) * getSafeAllocationFraction(line.allocationPercent);
 
   return line.headcount * line.hourlyRate * PROJECT_BUDGET_HOURS_PER_DAY * effectiveDays;
 };
@@ -414,7 +467,7 @@ export const calculateProjectPhaseBudget = ({
     }
     const usageDays = line.days !== undefined
       ? line.days
-      : getProjectBudgetUsageDays(line, phase) * getSafeAllocationFraction(line.allocationPercent);
+      : getProjectBudgetPersonnelUsageDays(line, phase) * getSafeAllocationFraction(line.allocationPercent);
     const quantity = line.headcount * usageDays * PROJECT_BUDGET_HOURS_PER_DAY;
 
     items.push({
