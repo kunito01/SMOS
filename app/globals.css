@@ -279,6 +279,23 @@ html[lang="sux"] body {
 }
 
 /*
+ * Idle-power guard: freeze decorative background motion when its frames are
+ * not being watched. [data-motion-hidden] on <html> covers a backgrounded tab
+ * (BackgroundMotionController); [data-motion-paused] on a scene root covers a
+ * scene scrolled out of view (SceneRoot). A paused animation rasterizes once
+ * and then costs nothing, while staying visually identical in place.
+ */
+:root[data-motion-hidden] *,
+:root[data-motion-hidden] *::before,
+:root[data-motion-hidden] *::after,
+[data-motion-paused="true"],
+[data-motion-paused="true"] *,
+[data-motion-paused="true"] *::before,
+[data-motion-paused="true"] *::after {
+  animation-play-state: paused !important;
+}
+
+/*
  * Game-feel interaction layer translated from refs/ui_jelly_effects.
  * JavaScript owns the interruptible squash/stretch sequences; CSS owns
  * card lift and pointer tilt so existing page motion can stay on wrappers.

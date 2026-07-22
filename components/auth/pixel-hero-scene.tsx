@@ -1,3 +1,5 @@
+import { SceneRoot } from "@/components/scenes/scene-root";
+
 const cloudRows = [
   "left-[6%] top-[13%] w-36",
   "left-[16%] top-[25%] w-28",
@@ -49,7 +51,7 @@ function BuildingWindows({ count = 15 }: { count?: number }) {
 
 export function PixelHeroScene() {
   return (
-    <div className="pixel-hero-scene pixel-hero-scene--pastel" aria-hidden="true">
+    <SceneRoot className="pixel-hero-scene pixel-hero-scene--pastel">
       <div className="pixel-pastel-sky">
         <div className="pixel-pastel-sun" />
         <div className="pixel-pastel-haze pixel-pastel-haze--one" />
@@ -86,6 +88,6 @@ export function PixelHeroScene() {
       </div>
 
       <div className="pixel-pastel-vignette" />
-    </div>
+    </SceneRoot>
   );
 }

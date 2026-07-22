@@ -1,3 +1,5 @@
+import { SceneRoot } from "@/components/scenes/scene-root";
+
 const cactusPositions = [
   "left-[3%] h-[58%]",
   "left-[10%] h-[78%]",
@@ -20,7 +22,7 @@ const dustPositions = [
 
 export function PixelDesertScene() {
   return (
-    <div className="libraries-desert-scene" aria-hidden="true">
+    <SceneRoot className="libraries-desert-scene">
       <div className="libraries-desert-sky">
         <span className="libraries-desert-sun" />
         <span className="libraries-desert-cloud libraries-desert-cloud--one" />
@@ -75,6 +77,6 @@ export function PixelDesertScene() {
       ))}
 
       <div className="libraries-desert-vignette" />
-    </div>
+    </SceneRoot>
   );
 }

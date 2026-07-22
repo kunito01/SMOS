@@ -1,3 +1,5 @@
+import { SceneRoot } from "@/components/scenes/scene-root";
+
 const emberPositions = [
   "left-[43%] top-[24%]",
   "left-[48%] top-[15%]",
@@ -20,7 +22,7 @@ const ashPositions = [
 
 export function PixelVolcanoScene() {
   return (
-    <div className="projects-volcano-scene" aria-hidden="true">
+    <SceneRoot className="projects-volcano-scene">
       <div className="projects-volcano-sky">
         <span className="projects-volcano-sun" />
         <span className="projects-volcano-cloud projects-volcano-cloud--one" />
@@ -66,6 +68,6 @@ export function PixelVolcanoScene() {
         <span className="projects-volcano-reflection projects-volcano-reflection--two" />
       </div>
       <div className="projects-volcano-vignette" />
-    </div>
+    </SceneRoot>
   );
 }

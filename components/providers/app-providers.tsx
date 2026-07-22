@@ -3,6 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { CostDisplayCurrencyProvider } from "@/components/costs/use-cost-display-currency";
 import { CloudKitAuthProvider } from "@/components/providers/cloudkit-auth-provider";
+import { BackgroundMotionController } from "@/components/providers/background-motion-controller";
 import { JellyInteractions } from "@/components/providers/jelly-interactions";
 import { WorkspaceConflictGuardDialog } from "@/components/storage/workspace-conflict-guard-dialog";
 import { authApi } from "@/lib/api";
@@ -167,6 +168,7 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
         <AuthContext.Provider value={authValue}>
           <CostDisplayCurrencyProvider>
             <JellyInteractions />
+            <BackgroundMotionController />
             <WorkspaceConflictGuardDialog />
             {children}
           </CostDisplayCurrencyProvider>

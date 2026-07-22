@@ -1,3 +1,5 @@
+import { SceneRoot } from "@/components/scenes/scene-root";
+
 const rainDrops = [
   "left-[6%] top-[6%]",
   "left-[12%] top-[28%]",
@@ -28,7 +30,7 @@ const treePositions = [
 
 export function PixelForestScene() {
   return (
-    <div className="companies-forest-scene" aria-hidden="true">
+    <SceneRoot className="companies-forest-scene">
       <div className="companies-forest-sky">
         <span className="companies-forest-glow" />
         <span className="companies-forest-mist companies-forest-mist--one" />
@@ -62,6 +64,6 @@ export function PixelForestScene() {
       </div>
 
       <div className="companies-forest-vignette" />
-    </div>
+    </SceneRoot>
   );
 }

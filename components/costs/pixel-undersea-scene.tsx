@@ -1,3 +1,5 @@
+import { SceneRoot } from "@/components/scenes/scene-root";
+
 const bubblePositions = [
   "left-[7%] top-[58%]",
   "left-[13%] top-[34%]",
@@ -27,7 +29,7 @@ const seaweedPositions = [
 
 export function PixelUnderseaScene() {
   return (
-    <div className="costs-undersea-scene" aria-hidden="true">
+    <SceneRoot className="costs-undersea-scene">
       <div className="costs-undersea-light costs-undersea-light--one" />
       <div className="costs-undersea-light costs-undersea-light--two" />
       <div className="costs-undersea-current costs-undersea-current--one" />
@@ -68,6 +70,6 @@ export function PixelUnderseaScene() {
       </div>
 
       <div className="costs-undersea-vignette" />
-    </div>
+    </SceneRoot>
   );
 }

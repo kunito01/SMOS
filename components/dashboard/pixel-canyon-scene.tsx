@@ -1,3 +1,5 @@
+import { SceneRoot } from "@/components/scenes/scene-root";
+
 const canyonDust = [
   "left-[16%] top-[28%]",
   "left-[30%] top-[42%]",
@@ -8,7 +10,7 @@ const canyonDust = [
 
 export function PixelCanyonScene() {
   return (
-    <div className="dashboard-canyon-scene" aria-hidden="true">
+    <SceneRoot className="dashboard-canyon-scene">
       <div className="dashboard-canyon-sky">
         <span className="dashboard-canyon-sun" />
         <span className="dashboard-canyon-cloud dashboard-canyon-cloud--one" />
@@ -43,6 +45,6 @@ export function PixelCanyonScene() {
       ))}
 
       <div className="dashboard-canyon-vignette" />
-    </div>
+    </SceneRoot>
   );
 }
