@@ -314,6 +314,25 @@ html[lang="sux"] body {
 }
 
 /*
+ * Native date inputs — notably iOS Safari — otherwise refuse to shrink to their
+ * container and center their value, which broke the rounded date fields on
+ * narrow (mobile) screens. Normalize them to fill the width and left-align the
+ * value like every other input, while keeping the tap-to-open picker.
+ */
+input[type="date"] {
+  -webkit-appearance: none;
+  appearance: none;
+  min-width: 0;
+}
+input[type="date"]::-webkit-date-and-time-value {
+  text-align: left;
+  margin: 0;
+}
+input[type="date"]::-webkit-calendar-picker-indicator {
+  margin-left: auto;
+}
+
+/*
  * Game-feel interaction layer translated from refs/ui_jelly_effects.
  * JavaScript owns the interruptible squash/stretch sequences; CSS owns
  * card lift and pointer tilt so existing page motion can stay on wrappers.
