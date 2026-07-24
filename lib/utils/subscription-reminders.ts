@@ -201,3 +201,81 @@ export const listSubscriptionPaymentReminders = (
       (left, right) =>
         left.dueDate.localeCompare(right.dueDate) || left.toolName.localeCompare(right.toolName)
     );
+
+export type CreditsRefreshReminder = {
+  toolId: string;
+  toolName: string;
+  refreshDay: number;
+  dueDate: string;
+  daysUntil: number;
+};
+
+export const isValidCreditsRefreshDay = (value: unknown): value is number =>
+  typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 31;
+
+/** Next calendar date (YYYY-MM-DD) that a monthly day-of-month credit refresh lands on. */
+export const getNextCreditsRefreshDate = (
+  dayOfMonth: number,
+  today: Date = new Date()
+): string | null => {
+  const currentDate = calendarDateFromLocalDate(today);
+
+  if (!currentDate || !isValidCreditsRefreshDay(dayOfMonth)) {
+    return null;
+  }
+
+  // The day is re-clamped to each month's length (e.g. 31 -> 30/28), so build
+  // the anchor from the raw chosen day rather than an already-clamped one.
+  const anchor: CalendarDate = {
+    day: dayOfMonth,
+    month: currentDate.month,
+    year: currentDate.year
+  };
+
+  let candidate = dateAtMonthlyCycle(anchor, 0);
+  if (compareCalendarDates(candidate, currentDate) < 0) {
+    candidate = dateAtMonthlyCycle(anchor, 1);
+  }
+
+  return formatDateKey(candidate);
+};
+
+export const getCreditsRefreshReminder = (
+  tool: Tool,
+  today: Date = new Date()
+): CreditsRefreshReminder | null => {
+  const refreshDay = tool.subscription?.creditsRefreshDay;
+  const currentDate = calendarDateFromLocalDate(today);
+
+  if (!currentDate || !isValidCreditsRefreshDay(refreshDay)) {
+    return null;
+  }
+
+  const dueDate = getNextCreditsRefreshDate(refreshDay, today);
+  const parsedDueDate = dueDate ? parseDateKey(dueDate) : null;
+
+  if (!dueDate || !parsedDueDate) {
+    return null;
+  }
+
+  return {
+    toolId: tool.id,
+    toolName: tool.name,
+    refreshDay,
+    dueDate,
+    daysUntil: toDayNumber(parsedDueDate) - toDayNumber(currentDate)
+  };
+};
+
+/** Every tool whose subscription has a credit-refresh day, nearest refresh first. */
+export const listCreditsRefreshReminders = (
+  tools: readonly Tool[],
+  today: Date = new Date()
+): CreditsRefreshReminder[] =>
+  tools
+    .map((tool) => getCreditsRefreshReminder(tool, today))
+    .filter((item): item is CreditsRefreshReminder => Boolean(item))
+    .sort(
+      (left, right) =>
+        left.daysUntil - right.daysUntil || left.toolName.localeCompare(right.toolName)
+    );

@@ -25,6 +25,7 @@ import { AppShell } from "@/components/layout/app-shell";
 import { useI18n } from "@/components/providers/app-providers";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { DayOfMonthPicker } from "@/components/ui/day-of-month-picker";
 import { DeleteConfirmDialog } from "@/components/ui/delete-confirm-dialog";
 import { LoadingState } from "@/components/ui/loading-state";
 import { Pill } from "@/components/ui/pill";
@@ -84,6 +85,7 @@ type ToolForm = Pick<Tool, "name" | "category"> & {
   subscriptionBillingCycle: NonNullable<Tool["subscription"]>["billingCycle"];
   subscriptionExpiresAt: string;
   subscriptionNextPaymentAt: string;
+  subscriptionCreditsRefreshDay: string;
   subscriptionAccountEmail: string;
 };
 
@@ -136,6 +138,7 @@ const defaultTool: ToolForm = {
   subscriptionBillingCycle: "monthly",
   subscriptionExpiresAt: "2026-12-31",
   subscriptionNextPaymentAt: "",
+  subscriptionCreditsRefreshDay: "",
   subscriptionAccountEmail: ""
 };
 
@@ -281,11 +284,15 @@ export function LibrariesPage() {
     subscriptionBillingCycle: tool.subscription?.billingCycle ?? "monthly",
     subscriptionExpiresAt: tool.subscription?.expiresAt ?? "2026-12-31",
     subscriptionNextPaymentAt: tool.subscription?.nextPaymentAt ?? "",
+    subscriptionCreditsRefreshDay: tool.subscription?.creditsRefreshDay
+      ? String(tool.subscription.creditsRefreshDay)
+      : "",
     subscriptionAccountEmail: tool.subscription?.accountEmail ?? ""
   });
 
   const toolPayload = (form: ToolForm) => {
     const amount = Number(form.subscriptionAmount);
+    const refreshDay = Number(form.subscriptionCreditsRefreshDay);
 
     return {
       name: form.name.trim(),
@@ -299,6 +306,13 @@ export function LibrariesPage() {
               billingCycle: form.subscriptionBillingCycle,
               expiresAt: form.subscriptionExpiresAt,
               nextPaymentAt: form.subscriptionNextPaymentAt || undefined,
+              creditsRefreshDay:
+                form.subscriptionCreditsRefreshDay &&
+                Number.isInteger(refreshDay) &&
+                refreshDay >= 1 &&
+                refreshDay <= 31
+                  ? refreshDay
+                  : undefined,
               accountEmail: form.subscriptionAccountEmail.trim()
             }
           : undefined
@@ -1032,6 +1046,19 @@ export function LibrariesPage() {
                       />
                     </label>
                   </div>
+                  <label className="grid min-w-0 gap-1.5 text-xs font-black text-white/70">
+                    <span className="break-words [overflow-wrap:anywhere]">{t("creditsRefreshField")}</span>
+                    <DayOfMonthPicker
+                      value={toolForm.subscriptionCreditsRefreshDay}
+                      onChange={(next) =>
+                        setToolForm((current) => ({ ...current, subscriptionCreditsRefreshDay: next }))
+                      }
+                      ariaLabel={t("creditsRefreshField")}
+                      placeholder={t("creditsRefreshUnset")}
+                      formatDay={(day) => t("creditsRefreshOnDay").replace("{day}", String(day))}
+                      className="h-11 w-full rounded-full border-0 bg-white/90 px-4 text-sm font-bold text-ink outline-none"
+                    />
+                  </label>
                   <input
                     type="email"
                     value={toolForm.subscriptionAccountEmail}
@@ -1181,6 +1208,22 @@ export function LibrariesPage() {
                             />
                           </label>
                         </div>
+                        <label className="grid min-w-0 gap-1.5 text-xs font-black text-ink/58">
+                          <span className="break-words [overflow-wrap:anywhere]">{t("creditsRefreshField")}</span>
+                          <DayOfMonthPicker
+                            value={editingToolForm.subscriptionCreditsRefreshDay}
+                            onChange={(next) =>
+                              setEditingToolForm((current) => ({
+                                ...current,
+                                subscriptionCreditsRefreshDay: next
+                              }))
+                            }
+                            ariaLabel={t("creditsRefreshField")}
+                            placeholder={t("creditsRefreshUnset")}
+                            formatDay={(day) => t("creditsRefreshOnDay").replace("{day}", String(day))}
+                            className="h-11 w-full rounded-full border-0 bg-cloud/75 px-4 text-sm font-bold text-ink outline-none ring-1 ring-black/[0.06]"
+                          />
+                        </label>
                         <input
                           type="email"
                           value={editingToolForm.subscriptionAccountEmail}

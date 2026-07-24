@@ -260,12 +260,16 @@ const normalizeSubscription = (subscription?: ToolSubscriptionInput): ToolSubscr
     return undefined;
   }
 
+  const refreshDay = Number(subscription.creditsRefreshDay);
+
   return {
     amount,
     currency: subscription.currency ?? "CNY",
     billingCycle: subscription.billingCycle ?? "monthly",
     expiresAt: subscription.expiresAt || "2026-12-31",
     nextPaymentAt: subscription.nextPaymentAt?.trim() || undefined,
+    creditsRefreshDay:
+      Number.isInteger(refreshDay) && refreshDay >= 1 && refreshDay <= 31 ? refreshDay : undefined,
     accountEmail: accountEmail ?? ""
   };
 };

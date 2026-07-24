@@ -44,6 +44,8 @@ export type ToolSubscription = {
   expiresAt: string;
   /** First or next recurring payment date used as the reminder anchor. */
   nextPaymentAt?: string;
+  /** Optional day of month (1–31) that usage credits refresh; drives the homepage reminder. */
+  creditsRefreshDay?: number;
   accountEmail: string;
 };
 

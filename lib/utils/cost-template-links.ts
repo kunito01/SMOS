@@ -83,6 +83,7 @@ export const applySoftwareTemplate = (
     billingCycle: template.billingType as "monthly" | "yearly",
     expiresAt: tool.subscription?.expiresAt ?? "",
     nextPaymentAt: tool.subscription?.nextPaymentAt,
+    creditsRefreshDay: tool.subscription?.creditsRefreshDay,
     accountEmail: tool.subscription?.accountEmail ?? ""
   }
 });

@@ -30,7 +30,7 @@ import { Card } from "@/components/ui/card";
 import { Pill } from "@/components/ui/pill";
 import { ProgressBar } from "@/components/ui/progress-bar";
 import { SectionHeader } from "@/components/ui/section-header";
-import { companiesApi, groupsApi, projectsApi } from "@/lib/api";
+import { companiesApi, groupsApi, librariesApi, projectsApi } from "@/lib/api";
 import {
   formatDemoEntityName,
   getProjectGroupDisplayName,
@@ -43,6 +43,10 @@ import type { Company, DashboardOverview, DashboardScope, Project, ProjectGroup 
 import { projectPath } from "@/lib/utils/app-routes";
 import { cn } from "@/lib/utils/cn";
 import { fixedNumericLocale } from "@/lib/utils/money";
+import {
+  listCreditsRefreshReminders,
+  type CreditsRefreshReminder
+} from "@/lib/utils/subscription-reminders";
 import {
   buildSummaryReportData,
   downloadSummaryReportHtml,
@@ -102,19 +106,22 @@ export function VisualDashboardShell() {
   const [overview, setOverview] = useState<DashboardOverview | null>(null);
   const [scope, setScope] = useState<DashboardScope>({ type: "all" });
   const [summarySharing, setSummarySharing] = useState(false);
+  const [creditsRefreshReminders, setCreditsRefreshReminders] = useState<CreditsRefreshReminder[]>([]);
 
   useEffect(() => {
     let isMounted = true;
 
     async function loadScopeData() {
-      const [companies, groups, projects] = await Promise.all([
+      const [companies, groups, projects, tools] = await Promise.all([
         companiesApi.listCompanies(),
         groupsApi.listGroups(),
-        projectsApi.listProjects()
+        projectsApi.listProjects(),
+        librariesApi.listTools()
       ]);
 
       if (isMounted) {
         setData({ companies, groups, projects });
+        setCreditsRefreshReminders(listCreditsRefreshReminders(tools));
       }
     }
 
@@ -502,6 +509,32 @@ export function VisualDashboardShell() {
             </Card>
           </motion.div>
         </section>
+
+        {creditsRefreshReminders.length ? (
+          <section className="mt-6">
+            <div className="rounded-studio-lg bg-[#e9e5df] p-5 shadow-soft ring-1 ring-black/[0.04] sm:p-6">
+              <div className="flex items-center gap-2">
+                <CalendarDays size={18} />
+                <h2 className="text-lg font-black">{t("creditsRefreshTitle")}</h2>
+              </div>
+              <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+                {creditsRefreshReminders.map((item) => {
+                  const urgent = item.daysUntil <= 3;
+                  return (
+                    <div key={item.toolId} className="min-w-0 rounded-studio bg-white/70 p-3">
+                      <p className="truncate font-black">{item.toolName}</p>
+                      <p className={cn("mt-2 text-sm font-medium tabular-nums", urgent ? "text-coral" : "text-ink")}>
+                        {item.daysUntil === 0
+                          ? t("creditsRefreshToday")
+                          : t("creditsRefreshInDays").replace("{days}", String(item.daysUntil))}
+                      </p>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </section>
+        ) : null}
 
         <section className="mt-8 grid gap-4 overflow-visible min-[560px]:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             <SectionHeader
