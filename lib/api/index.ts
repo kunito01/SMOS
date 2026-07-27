@@ -4,5 +4,6 @@ export * as costsApi from "./costs";
 export * as groupsApi from "./groups";
 export * as librariesApi from "./libraries";
 export * as projectsApi from "./projects";
+export * as quotesApi from "./quotes";
 export * as shareApi from "./share";
 export * as workflowsApi from "./workflows";

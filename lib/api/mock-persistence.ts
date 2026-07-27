@@ -30,8 +30,27 @@ import {
   getWorkspaceMutationEpoch,
   withWorkspaceMutationLock
 } from "@/lib/storage/workspace-mutation-lock";
-import type { Company, CostLibraryItem, Person, Project, ProjectGroup, ProjectVersion, ProjectWorkflow, ShareLink, Tool, User } from "@/lib/types";
+import type {
+  Company,
+  CostLibraryItem,
+  Person,
+  PricingTemplate,
+  Project,
+  ProjectGroup,
+  ProjectVersion,
+  ProjectWorkflow,
+  Quote,
+  ShareLink,
+  Tool,
+  User
+} from "@/lib/types";
 import { synchronizeCostTemplateLinks } from "@/lib/utils/cost-template-links";
+import {
+  isPricingTemplateLibrary,
+  isQuoteLibrary,
+  normalizePricingTemplateLibrary,
+  normalizeQuoteLibrary
+} from "@/lib/utils/pricing-templates";
 import { isMoneyCurrency, type MoneyCurrency } from "@/lib/utils/money";
 import { normalizeProjectBudgetForPhases } from "@/lib/utils/project-budget-normalize";
 import {
@@ -71,6 +90,8 @@ export type PersistedMockDatabase = {
   people: Person[];
   tools: Tool[];
   costLibrary: CostLibraryItem[];
+  pricingTemplates: PricingTemplate[];
+  quotes: Quote[];
   workflows: ProjectWorkflow[];
   shareLinks: ShareLink[];
 };
@@ -114,7 +135,9 @@ const isEntityArray = (value: unknown) =>
   Array.isArray(value) && value.every((item) => isRecord(item) && typeof item.id === "string");
 
 const isCompany = (value: unknown) =>
-  isRecord(value) && hasStrings(value, ["id", "name", "description", "coverImage", "createdAt"]);
+  isRecord(value) &&
+  hasStrings(value, ["id", "name", "description", "coverImage", "createdAt"]) &&
+  (value.logoImage === undefined || typeof value.logoImage === "string");
 
 const isUser = (value: unknown) =>
   isRecord(value) && hasStrings(value, ["id", "name", "email", "avatar", "createdAt"]);
@@ -304,6 +327,8 @@ const createPersistedDatabaseSnapshot = (): PersistedMockDatabase => ({
   people: mockDatabase.people,
   tools: mockDatabase.tools,
   costLibrary: mockDatabase.costLibrary,
+  pricingTemplates: mockDatabase.pricingTemplates,
+  quotes: mockDatabase.quotes,
   workflows: mockDatabase.workflows,
   shareLinks: mockDatabase.shareLinks
 });
@@ -328,6 +353,10 @@ const validatePersistedDatabase = (value: unknown): PersistedMockDatabase => {
     value.tools.every(isTool) &&
     Array.isArray(value.costLibrary) &&
     value.costLibrary.every(isCostLibraryItem) &&
+    Array.isArray(value.pricingTemplates) &&
+    isPricingTemplateLibrary(value.pricingTemplates) &&
+    Array.isArray(value.quotes) &&
+    isQuoteLibrary(value.quotes) &&
     Array.isArray(value.workflows) &&
     isWorkflowLibrary(value.workflows) &&
     Array.isArray(value.shareLinks) &&
@@ -574,6 +603,24 @@ export const retainBundledExampleProjects = (
   };
 };
 
+/** Drops quotes whose brand vanished and detaches links to projects that no longer exist. */
+const retainReachableQuotes = (
+  quotes: Quote[],
+  companies: ReadonlyArray<Company>,
+  projects: ReadonlyArray<Project>
+): Quote[] => {
+  const companyIds = new Set(companies.map((company) => company.id));
+  const projectIds = new Set(projects.map((project) => project.id));
+
+  return quotes
+    .filter((quote) => companyIds.has(quote.companyId))
+    .map((quote) =>
+      quote.projectId && !projectIds.has(quote.projectId)
+        ? { ...quote, projectId: undefined }
+        : quote
+    );
+};
+
 const normalizePersistedDatabase = (
   value: unknown,
   options: { allowLegacyProjectShape?: boolean } = {}
@@ -599,7 +646,10 @@ const normalizePersistedDatabase = (
   }
 
   const persisted = retainBundledExampleProjects({
-    ...(value as unknown as Omit<PersistedMockDatabase, "workflows">),
+    ...(value as unknown as Omit<PersistedMockDatabase, "pricingTemplates" | "quotes" | "workflows">),
+    // Workspaces saved before quoting shipped simply have no collection yet.
+    pricingTemplates: normalizePricingTemplateLibrary(value.pricingTemplates),
+    quotes: normalizeQuoteLibrary(value.quotes),
     workflows: normalizeWorkflowLibrary(value.workflows)
   });
   const seedDatabase = createMockDatabase();
@@ -627,6 +677,8 @@ const normalizePersistedDatabase = (
     people: persisted.people,
     tools: normalizedTools,
     costLibrary: persisted.costLibrary,
+    pricingTemplates: persisted.pricingTemplates,
+    quotes: retainReachableQuotes(persisted.quotes, persisted.companies, migratedWorkflows.projects),
     workflows: migratedWorkflows.workflows,
     shareLinks: persisted.shareLinks
   };

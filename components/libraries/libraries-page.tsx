@@ -20,6 +20,7 @@ import {
   X
 } from "lucide-react";
 import { PixelDesertScene } from "@/components/libraries/pixel-desert-scene";
+import { PricingTemplateLibrary } from "@/components/libraries/pricing-template-library";
 import { useCostDisplayCurrency } from "@/components/costs/use-cost-display-currency";
 import { AppShell } from "@/components/layout/app-shell";
 import { useI18n } from "@/components/providers/app-providers";
@@ -46,7 +47,15 @@ import {
   toolCategoryKeys
 } from "@/lib/i18n/domain-labels";
 import { formatLocalizedDate } from "@/lib/i18n/formatters";
-import type { CostItem, CostLibraryItem, Person, PersonProjectParticipation, ProjectStatus, Tool } from "@/lib/types";
+import type {
+  CostItem,
+  CostLibraryItem,
+  Person,
+  PersonProjectParticipation,
+  PricingTemplate,
+  ProjectStatus,
+  Tool
+} from "@/lib/types";
 import { projectPath } from "@/lib/utils/app-routes";
 import { peopleTemplateDailyRate } from "@/lib/utils/cost-template-links";
 import { formatNumber, type MoneyCurrency } from "@/lib/utils/money";
@@ -64,6 +73,7 @@ type LibrariesData = {
   people: Person[];
   tools: Tool[];
   costTemplates: CostLibraryItem[];
+  pricingTemplates: PricingTemplate[];
   personProjects: PersonProjectParticipation[];
   subscriptionSummary: {
     activeSubscriptionCount: number;
@@ -173,14 +183,15 @@ export function LibrariesPage() {
   const [expandedPersonProjectsId, setExpandedPersonProjectsId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const [people, tools, costTemplates, personProjects, subscriptionSummary] = await Promise.all([
+    const [people, tools, costTemplates, pricingTemplates, personProjects, subscriptionSummary] = await Promise.all([
       librariesApi.listPeople(),
       librariesApi.listTools(),
       librariesApi.listCostTemplates(),
+      librariesApi.listPricingTemplates(),
       librariesApi.listPersonProjectParticipation(displayCurrency, exchangeRateSnapshot),
       librariesApi.getToolSubscriptionSummary(displayCurrency, exchangeRateSnapshot)
     ]);
-    setData({ people, tools, costTemplates, personProjects, subscriptionSummary });
+    setData({ people, tools, costTemplates, pricingTemplates, personProjects, subscriptionSummary });
   }, [displayCurrency, exchangeRateSnapshot]);
 
   useEffect(() => {
@@ -1586,6 +1597,8 @@ export function LibrariesPage() {
                 </div>
               </Card>
             </section>
+
+            <PricingTemplateLibrary templates={data.pricingTemplates} onChanged={load} />
           </>
         )}
       </div>

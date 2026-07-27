@@ -70,6 +70,8 @@ export type SummaryReportData = {
   averageProgress: number;
   chrome: ReportChromeLabels;
   coverImageUrl?: string;
+  /** Brand logo (data URL) for company-scoped reports. */
+  logoUrl?: string;
   description: string;
   generatedOn: string;
   labels: SummaryReportLabels;
@@ -211,6 +213,10 @@ export const buildSummaryReportData = ({
     averageProgress: clampReportPercent(overview.averageProgress),
     chrome: buildReportChromeLabels(t),
     coverImageUrl: subject.coverImageUrl,
+    logoUrl:
+      scope.type === "company" && scope.company.logoImage?.startsWith("data:")
+        ? scope.company.logoImage
+        : undefined,
     description: subject.description,
     generatedOn: formatLocalizedDate(new Date(), language),
     labels: {
@@ -344,6 +350,7 @@ const createSummaryReportHtmlWithCover = (data: SummaryReportData, embeddedCover
     .hero{position:relative;display:flex;min-height:clamp(22rem,48vw,32rem);flex-direction:column;justify-content:flex-end;overflow:hidden;padding:clamp(1.2rem,4vw,3.4rem);color:#fff;background-color:#284b50;background-image:radial-gradient(circle at 20% 20%,rgba(142,219,232,.88),transparent 31%),radial-gradient(circle at 82% 78%,rgba(227,245,150,.72),transparent 34%),linear-gradient(145deg,#335b61,var(--deep));background-position:center;background-size:cover}
     .hero::after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,rgba(28,35,40,.46),transparent 62%);pointer-events:none}
     .hero__content{position:relative;z-index:1;max-width:58rem}
+    .hero__logo{display:block;height:3.4rem;width:auto;max-width:100%;margin-bottom:1.1rem;object-fit:contain}
     .hero__meta{display:flex;flex-wrap:wrap;gap:.6rem;margin-bottom:1rem}
     .hero__meta span{display:inline-flex;min-height:2.1rem;align-items:center;border-radius:999px;background:rgba(255,255,255,.85);padding:.45rem .85rem;color:var(--ink);font-size:.74rem;font-weight:850;backdrop-filter:blur(12px)}
     .hero h1{max-width:18ch;font-size:clamp(2.2rem,6.6vw,5.4rem);letter-spacing:-.065em;line-height:.91}
@@ -401,6 +408,7 @@ const createSummaryReportHtmlWithCover = (data: SummaryReportData, embeddedCover
     ${renderReportChromeHeader(data.chrome)}
     <section class="report-section hero"${coverStyle}>
       <div class="hero__content">
+        ${data.logoUrl ? `<img class="hero__logo" src="${escapeReportHtml(data.logoUrl)}" alt="${escapeReportHtml(data.title)}">` : ""}
         <div class="hero__meta"><span>${escapeReportHtml(data.scopeLabel)}</span><span>${escapeReportHtml(data.labels.generatedAt)} · ${escapeReportHtml(data.generatedOn)}</span></div>
         <h1>${escapeReportHtml(data.title)}</h1>
         <p class="hero__description">${escapeReportHtml(data.description)}</p>

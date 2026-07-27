@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { ArrowLeft, ArrowRight, Calculator, FolderKanban, Layers3, Pencil, Rocket, Share2, Trash2 } from "lucide-react";
 import { ImageCard } from "@/components/cards/image-card";
 import { CompanyBasicsEditModal } from "@/components/companies/company-basics-edit-modal";
+import { CompanyQuotesSection } from "@/components/companies/company-quotes-section";
 import { useCostDisplayCurrency } from "@/components/costs/use-cost-display-currency";
 import { ProjectGroupManagerModal } from "@/components/companies/project-group-manager-modal";
 import { ProjectCard } from "@/components/domain/project-card";
@@ -17,14 +18,22 @@ import { DeleteConfirmDialog } from "@/components/ui/delete-confirm-dialog";
 import { LoadingState } from "@/components/ui/loading-state";
 import { ProgressBar } from "@/components/ui/progress-bar";
 import { SectionHeader } from "@/components/ui/section-header";
-import { companiesApi, groupsApi, projectsApi } from "@/lib/api";
+import { companiesApi, groupsApi, librariesApi, projectsApi, quotesApi } from "@/lib/api";
 import {
   formatDemoEntityName,
   getCompanyDisplayDescription,
   getProjectGroupDisplayDescription,
   getProjectGroupDisplayName
 } from "@/lib/i18n/domain-labels";
-import type { Company, DashboardOverview, Project, ProjectGroup, ProjectGroupSummary } from "@/lib/types";
+import type {
+  Company,
+  DashboardOverview,
+  PricingTemplate,
+  Project,
+  ProjectGroup,
+  ProjectGroupSummary,
+  Quote
+} from "@/lib/types";
 import { groupPath } from "@/lib/utils/app-routes";
 import type { ExchangeRateSnapshot, MoneyCurrency } from "@/lib/utils/money";
 import { buildSummaryReportData, downloadSummaryReportHtml } from "@/lib/utils/summary-report-share";
@@ -36,6 +45,8 @@ type CompanyDetailData = {
   linkedProjectCount: number;
   projects: Project[];
   overview: DashboardOverview;
+  quotes: Quote[];
+  pricingTemplates: PricingTemplate[];
 };
 
 const loadCompanyDetailData = async (
@@ -43,7 +54,7 @@ const loadCompanyDetailData = async (
   currency: MoneyCurrency,
   snapshot: ExchangeRateSnapshot
 ): Promise<CompanyDetailData> => {
-  const [company, groupSummaries, projects, archivedProjects, overview] = await Promise.all([
+  const [company, groupSummaries, projects, archivedProjects, overview, quotes, pricingTemplates] = await Promise.all([
     companiesApi.getCompany(companyId),
     groupsApi.listGroupSummaries({ companyId, currency, snapshot }),
     companiesApi.listCompanyProjects(companyId),
@@ -51,7 +62,9 @@ const loadCompanyDetailData = async (
     projectsApi.getDashboardOverview(
       { type: "company", id: companyId },
       { includeArchivedTotal: false, currency, snapshot }
-    )
+    ),
+    quotesApi.listCompanyQuotes(companyId),
+    librariesApi.listPricingTemplates()
   ]);
 
   return {
@@ -60,7 +73,9 @@ const loadCompanyDetailData = async (
     groupSummaries,
     linkedProjectCount: projects.length + archivedProjects.length,
     projects,
-    overview
+    overview,
+    quotes,
+    pricingTemplates
   };
 };
 
@@ -201,6 +216,14 @@ export function CompanyDetailPage({ companyId }: { companyId: string }) {
                   </div>
                 }
               >
+                {data.company.logoImage ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={data.company.logoImage}
+                    alt={t("brandLogo")}
+                    className="mb-4 h-16 w-auto max-w-full object-contain"
+                  />
+                ) : null}
                 <p className="max-w-2xl text-base font-bold leading-7 text-white/80">
                   {companyDescription}
                 </p>
@@ -310,6 +333,16 @@ export function CompanyDetailPage({ companyId }: { companyId: string }) {
                 ))}
               </div>
             </section>
+
+            <CompanyQuotesSection
+              company={data.company}
+              quotes={data.quotes}
+              projects={data.projects}
+              pricingTemplates={data.pricingTemplates}
+              onChanged={async () =>
+                setData(await loadCompanyDetailData(companyId, displayCurrency, exchangeRateSnapshot))
+              }
+            />
 
             <section className="mt-6">
               <Card tone="white" className="p-5 sm:p-6">

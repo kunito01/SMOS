@@ -10,6 +10,7 @@ import type {
   PaymentItem,
   Person,
   Phase,
+  PricingTemplate,
   Project,
   ProjectGroup,
   ProjectStatus,
@@ -239,6 +240,51 @@ const costLibrarySeed: CostLibraryItem[] = [
     currency: "CNY",
     billingType: "monthly",
     isActual: false
+  }
+];
+
+const pricingTemplateSeed: PricingTemplate[] = [
+  {
+    id: "pricing-template-space-area",
+    name: "Spatial design by area",
+    kind: "area-tier",
+    currency: "CNY",
+    minimumFee: 18000,
+    createdAt: "2026-06-02T09:00:00.000Z",
+    area: {
+      mode: "unit-price",
+      tiers: [
+        { id: "pricing-tier-space-1", minArea: 0, maxArea: 100, price: 260 },
+        { id: "pricing-tier-space-2", minArea: 100, maxArea: 300, price: 210 },
+        { id: "pricing-tier-space-3", minArea: 300, price: 170 }
+      ]
+    }
+  },
+  {
+    id: "pricing-template-motion-minute",
+    name: "Motion by style and minute",
+    kind: "style-minute",
+    currency: "CNY",
+    minimumFee: 8000,
+    createdAt: "2026-06-02T09:05:00.000Z",
+    style: {
+      levels: [
+        { id: "pricing-level-motion-standard", name: "Standard", minuteRate: 4000 },
+        { id: "pricing-level-motion-detailed", name: "Detailed", minuteRate: 7200 },
+        { id: "pricing-level-motion-signature", name: "Signature", minuteRate: 12000 }
+      ]
+    }
+  },
+  {
+    id: "pricing-template-cost-markup",
+    name: "Project cost plus margin",
+    kind: "cost-markup",
+    currency: "CNY",
+    createdAt: "2026-06-02T09:10:00.000Z",
+    cost: {
+      overheadPercent: 12,
+      markupPercent: 35
+    }
   }
 ];
 
@@ -642,6 +688,8 @@ export const createMockDatabase = (): MockDatabase => {
     people: peoplePool,
     tools: toolPool,
     costLibrary: costLibrarySeed,
+    pricingTemplates: pricingTemplateSeed,
+    quotes: [],
     workflows: [],
     shareLinks
   });
@@ -656,6 +704,8 @@ export const createEmptyMockDatabase = (): MockDatabase => ({
   people: [],
   tools: [],
   costLibrary: [],
+  pricingTemplates: [],
+  quotes: [],
   workflows: [],
   shareLinks: []
 });

@@ -23,6 +23,7 @@ import { ImageCard } from "@/components/cards/image-card";
 import { PixelHeroScene } from "@/components/auth/pixel-hero-scene";
 import { useCostDisplayCurrency } from "@/components/costs/use-cost-display-currency";
 import { AppShell } from "@/components/layout/app-shell";
+import { ProjectGanttOverview } from "@/components/dashboard/project-gantt-overview";
 import { ProjectReleaseBadges } from "@/components/projects/project-release-badges";
 import { useI18n } from "@/components/providers/app-providers";
 import { Button } from "@/components/ui/button";
@@ -658,6 +659,8 @@ export function VisualDashboardShell() {
                 <p className="mt-2 text-xs font-semibold leading-5 text-white/76">{t("todayQueue")}</p>
               </div>
             </div>
+            <ProjectGanttOverview projects={scopedProjects} className="mt-6" />
+
             <div className="mt-6 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4 xl:grid-cols-[minmax(300px,0.43fr)_minmax(0,1fr)]">
               <div className="relative min-w-0 overflow-hidden rounded-studio bg-[#A33E43] p-3 text-white shadow-soft ring-1 ring-[#FAFCD9]/35 min-[400px]:p-5">
                 <div className="relative z-10 min-w-0">

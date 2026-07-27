@@ -14,6 +14,8 @@ export type Company = {
   name: string;
   description: string;
   coverImage: string;
+  /** Uploaded brand logo (data URL, ≤1 MB); stamped onto brand-scoped exports. */
+  logoImage?: string;
   createdAt: string;
 };
 
@@ -356,6 +358,167 @@ export type Project = {
   shareSettings: ShareSettings;
 };
 
+/** How a design fee is derived from the client-facing inputs of one quote line. */
+export type PricingTemplateKind = "area-tier" | "style-minute" | "cost-markup";
+
+/** Only meaningful for area templates; picked per template, never per quote line. */
+export type PricingAreaMode = "unit-price" | "progressive" | "flat";
+
+export type PricingAreaTier = {
+  id: string;
+  /** Inclusive lower bound in square meters. */
+  minArea: number;
+  /** Inclusive upper bound; omitted on the open-ended top tier. */
+  maxArea?: number;
+  /** Rate per square meter, or the whole tier price when the mode is "flat". */
+  price: number;
+};
+
+export type PricingStyleLevel = {
+  id: string;
+  name: string;
+  /** Charged for every finished minute at this difficulty level. */
+  minuteRate: number;
+};
+
+export type PricingAreaConfig = {
+  mode: PricingAreaMode;
+  tiers: PricingAreaTier[];
+};
+
+export type PricingStyleConfig = {
+  levels: PricingStyleLevel[];
+};
+
+export type PricingCostConfig = {
+  /** Administrative load applied to the cost basis first. */
+  overheadPercent: number;
+  /** Design margin applied after overhead. */
+  markupPercent: number;
+};
+
+export type PricingTemplate = {
+  id: string;
+  name: string;
+  kind: PricingTemplateKind;
+  currency: MoneyCurrency;
+  notes?: string;
+  /** Floor applied after the kind-specific formula. */
+  minimumFee?: number;
+  createdAt: string;
+  /** Present when kind is "area-tier". */
+  area?: PricingAreaConfig;
+  /** Present when kind is "style-minute". */
+  style?: PricingStyleConfig;
+  /** Present when kind is "cost-markup". */
+  cost?: PricingCostConfig;
+};
+
+export type QuoteStatus = "draft" | "sent" | "accepted" | "declined" | "expired";
+
+/** Frozen at insert time so later template edits never rewrite a sent quote. */
+export type QuoteLinePricing = {
+  /** Kept only to show provenance; the snapshot is the source of truth. */
+  templateId?: string;
+  templateName: string;
+  kind: PricingTemplateKind;
+  snapshot: PricingTemplate;
+  inputs: {
+    area?: number;
+    minutes?: number;
+    styleLevelId?: string;
+    costBasis?: number;
+  };
+  /** Result of the formula, in the template currency. */
+  sourceAmount: number;
+  sourceCurrency: MoneyCurrency;
+};
+
+export type QuoteLine = {
+  id: string;
+  name: string;
+  description?: string;
+  quantity: number;
+  /** Always expressed in the quote currency. */
+  unitPrice: number;
+  pricing?: QuoteLinePricing;
+};
+
+/** One of the four fixed Scope-of-Work groups (02) in the proposal export. */
+export type QuoteScopeColumn = {
+  id: string;
+  title: string;
+  items: string[];
+};
+
+/** Row of the Deliverables table (03); quantity is free text such as "3个方案". */
+export type QuoteDeliverableRow = {
+  id: string;
+  name: string;
+  quantity: string;
+  format: string;
+};
+
+/** Row of the phase-duration table (04); durations are counted in weeks. */
+export type QuoteTimelineRow = {
+  id: string;
+  stage: string;
+  weeks: number;
+};
+
+/** Row of the payment-schedule table (06); percentages should sum to 100. */
+export type QuotePaymentScheduleRow = {
+  id: string;
+  stage: string;
+  percent: number;
+};
+
+/** Revision & trip policy (07): only the counts and fee wording are editable. */
+export type QuoteRevisionPolicy = {
+  includedRevisions: number;
+  includedTrips: number;
+  extraRevisionFee: string;
+  extraTripFee: string;
+};
+
+export type Quote = {
+  id: string;
+  companyId: string;
+  /** Empty for a prospect that has not been turned into a project yet. */
+  projectId?: string;
+  code: string;
+  title: string;
+  clientContact?: string;
+  status: QuoteStatus;
+  currency: MoneyCurrency;
+  issuedOn: string;
+  validUntil?: string;
+  version: number;
+  lines: QuoteLine[];
+  discountPercent: number;
+  taxPercent: number;
+  /** 01 Project Overview: fully hand-written. */
+  overview?: string;
+  /** 02 Scope of Work: exactly four editable groups in the proposal layout. */
+  scope?: QuoteScopeColumn[];
+  /** 03 Deliverables table rows. */
+  deliverables?: QuoteDeliverableRow[];
+  /** 04 phase-duration rows, in weeks. */
+  timeline?: QuoteTimelineRow[];
+  /** 06 payment-schedule rows. */
+  paymentSchedule?: QuotePaymentScheduleRow[];
+  /** 07 revision & trip policy slots. */
+  revisionPolicy?: QuoteRevisionPolicy;
+  /** Signer shown at the bottom; falls back to the brand name when empty. */
+  signature?: string;
+  /** Bottom notes block: fully hand-written. */
+  notes?: string;
+  /** @deprecated 08 is a fixed universal template now; kept only for old data. */
+  terms?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type CompanySummary = {
   company: Company;
   currency: MoneyCurrency;
@@ -451,6 +614,10 @@ export type MockDatabase = {
   people: Person[];
   tools: Tool[];
   costLibrary: CostLibraryItem[];
+  /** Client-facing design fee templates; separate from the internal cost library. */
+  pricingTemplates: PricingTemplate[];
+  /** Quotes belong to a brand and optionally point at one of its projects. */
+  quotes: Quote[];
   /** Global workflow originals. Projects only keep IDs that point here. */
   workflows: ProjectWorkflow[];
   shareLinks: ShareLink[];

@@ -42,7 +42,7 @@ import { ProjectBasicsEditModal } from "@/components/projects/project-basics-edi
 import { ProjectReleaseBadges } from "@/components/projects/project-release-badges";
 import { ProjectSaveControls } from "@/components/projects/project-save-controls";
 import { ProjectSummaryTimeline } from "@/components/projects/project-summary-timeline";
-import { costsApi, groupsApi, projectsApi } from "@/lib/api";
+import { companiesApi, costsApi, groupsApi, projectsApi } from "@/lib/api";
 import type { ProjectCostSummary } from "@/lib/api/costs";
 import {
   formatDemoEntityName,
@@ -343,6 +343,13 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
       const peopleById = new Map(project.people.map((person) => [person.id, person]));
       const toolsById = new Map(project.tools.map((tool) => [tool.id, tool]));
       const linkedWorkflows = await projectsApi.listProjectWorkflows(project.id);
+      // The brand may have been deleted; the report simply omits the logo then.
+      const brandLogo = project.companyId
+        ? await companiesApi
+            .getCompany(project.companyId)
+            .then((company) => company.logoImage)
+            .catch(() => undefined)
+        : undefined;
       const collectionProgress = data.costSummary.plannedReceivable > 0
         ? Math.min(100, Math.round((data.costSummary.receivedRevenue / data.costSummary.plannedReceivable) * 100))
         : 0;
@@ -354,6 +361,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
         groupName: group ? getProjectGroupDisplayName(group, language, t) : undefined,
         language,
         coverImageUrl: project.coverImage,
+        logoUrl: brandLogo?.startsWith("data:") ? brandLogo : undefined,
         dateRange: `${formatLocalizedDate(project.startDate, language)} - ${formatLocalizedDate(project.endDate, language)}`,
         summaryMetrics: [
           { label: t("averageProgressShort"), value: `${project.progress}%`, tone: "aqua" },

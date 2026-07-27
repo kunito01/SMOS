@@ -2,7 +2,7 @@ import { mockApi, requireEntity } from "@/lib/api/mock-client";
 import { hydrateMockDatabase, persistMockDatabase } from "@/lib/api/mock-persistence";
 import { createDashboardOverview, mockDatabase } from "@/lib/mock";
 import type { Company, CompanySummary } from "@/lib/types";
-import { assertUploadedImageWithinLimit } from "@/lib/utils/image-upload";
+import { assertBrandLogoWithinLimit, assertUploadedImageWithinLimit } from "@/lib/utils/image-upload";
 import {
   bundledExchangeRateSnapshot,
   type ExchangeRateSnapshot,
@@ -17,6 +17,8 @@ type CreateCompanyInput = {
 
 export type CompanyBasicsInput = {
   coverImage?: string;
+  /** Data URL to set, or an empty string to remove the stored logo. */
+  logoImage?: string;
   description: string;
   name: string;
 };
@@ -84,6 +86,15 @@ export async function updateCompanyBasics(companyId: string, input: CompanyBasic
   if (input.coverImage) {
     assertUploadedImageWithinLimit(input.coverImage);
     company.coverImage = input.coverImage;
+  }
+
+  if (input.logoImage !== undefined) {
+    if (input.logoImage) {
+      assertBrandLogoWithinLimit(input.logoImage);
+      company.logoImage = input.logoImage;
+    } else {
+      delete company.logoImage;
+    }
   }
 
   await persistMockDatabase();

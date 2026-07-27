@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ImagePlus, Save, Upload, X } from "lucide-react";
+import { BadgeCheck, ImagePlus, Save, Trash2, Upload, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ModalPortal } from "@/components/ui/modal-portal";
 import { companiesApi } from "@/lib/api";
@@ -9,7 +9,7 @@ import type { CompanyBasicsInput } from "@/lib/api/companies";
 import { formatDemoEntityName } from "@/lib/i18n/domain-labels";
 import type { TranslationKey } from "@/lib/i18n/translations";
 import type { Company } from "@/lib/types";
-import { MAX_UPLOAD_IMAGE_BYTES } from "@/lib/utils/image-upload";
+import { MAX_BRAND_LOGO_BYTES, MAX_UPLOAD_IMAGE_BYTES } from "@/lib/utils/image-upload";
 
 type CompanyBasicsEditModalProps = {
   company: Company;
@@ -21,6 +21,9 @@ type CompanyBasicsEditModalProps = {
 
 const maxCoverBytes = MAX_UPLOAD_IMAGE_BYTES;
 const allowedCoverTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
+const maxLogoBytes = MAX_BRAND_LOGO_BYTES;
+// SVG is safe here: logos only ever render through <img>, which never runs scripts.
+const allowedLogoTypes = new Set(["image/jpeg", "image/png", "image/webp", "image/svg+xml"]);
 const inputClass =
   "min-h-11 w-full rounded-2xl border border-black/[0.08] bg-white px-3 py-2 text-sm font-bold text-ink outline-none transition focus:border-coral focus:ring-4 focus:ring-coral/10";
 const fieldLabelClass = "text-xs font-black uppercase text-muted";
@@ -35,6 +38,7 @@ export function CompanyBasicsEditModal({
   const [name, setName] = useState(company.name);
   const [description, setDescription] = useState(company.description);
   const [coverImage, setCoverImage] = useState(company.coverImage);
+  const [logoImage, setLogoImage] = useState(company.logoImage ?? "");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -46,6 +50,7 @@ export function CompanyBasicsEditModal({
     setName(company.name);
     setDescription(company.description);
     setCoverImage(company.coverImage);
+    setLogoImage(company.logoImage ?? "");
     setError("");
     setSaving(false);
   }, [company, open]);
@@ -84,6 +89,37 @@ export function CompanyBasicsEditModal({
     reader.readAsDataURL(file);
   };
 
+  const handleLogoChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+
+    if (!file) {
+      return;
+    }
+
+    if (!allowedLogoTypes.has(file.type)) {
+      setError(t("brandLogoUnsupported"));
+      event.target.value = "";
+      return;
+    }
+
+    if (file.size > maxLogoBytes) {
+      setError(t("brandLogoTooLarge"));
+      event.target.value = "";
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") {
+        setLogoImage(reader.result);
+        setError("");
+      }
+    };
+    reader.onerror = () => setError(t("brandLogoUnsupported"));
+    reader.readAsDataURL(file);
+    event.target.value = "";
+  };
+
   const save = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
@@ -94,6 +130,7 @@ export function CompanyBasicsEditModal({
     setSaving(true);
     const payload: CompanyBasicsInput = {
       coverImage,
+      logoImage,
       description,
       name
     };
@@ -176,6 +213,41 @@ export function CompanyBasicsEditModal({
                     {t("uploadCompanyCover")}
                   </label>
                   <p className="text-xs font-bold leading-5 text-muted">{t("companyCoverUploadHint")}</p>
+                </div>
+
+                <div className="grid gap-2">
+                  <span className={fieldLabelClass}>{t("brandLogo")}</span>
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,image/svg+xml"
+                    onChange={handleLogoChange}
+                    className="hidden"
+                    id="company-logo-upload"
+                  />
+                  <div className="flex flex-wrap items-center gap-3">
+                    {logoImage ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={logoImage}
+                        alt={t("brandLogo")}
+                        className="h-14 w-auto max-w-full shrink-0 object-contain"
+                      />
+                    ) : null}
+                    <label
+                      htmlFor="company-logo-upload"
+                      className="inline-flex min-h-12 cursor-pointer items-center justify-center gap-2 rounded-full bg-ink px-5 text-sm font-black text-white shadow-soft transition hover:-translate-y-0.5"
+                    >
+                      <BadgeCheck size={18} />
+                      {t("uploadBrandLogo")}
+                    </label>
+                    {logoImage ? (
+                      <Button type="button" variant="ghost" size="sm" onClick={() => setLogoImage("")}>
+                        <Trash2 size={16} />
+                        {t("removeBrandLogo")}
+                      </Button>
+                    ) : null}
+                  </div>
+                  <p className="text-xs font-bold leading-5 text-muted">{t("brandLogoUploadHint")}</p>
                   {error ? <p className="text-sm font-black text-coral">{error}</p> : null}
                 </div>
               </div>

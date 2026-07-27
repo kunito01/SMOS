@@ -1,7 +1,16 @@
 import { mockApi } from "@/lib/api/mock-client";
 import { hydrateMockDatabase, persistMockDatabase } from "@/lib/api/mock-persistence";
 import { getProjectActualCost, getTotalMonthlySubscriptionCost, mockDatabase } from "@/lib/mock";
-import type { CostLibraryItem, Person, PersonProjectParticipation, Project, Tool, ToolSubscription } from "@/lib/types";
+import type {
+  CostLibraryItem,
+  Person,
+  PersonProjectParticipation,
+  PricingTemplate,
+  Project,
+  Tool,
+  ToolSubscription
+} from "@/lib/types";
+import { normalizePricingTemplate } from "@/lib/utils/pricing-templates";
 import {
   applyPeopleTemplate,
   applySoftwareTemplate,
@@ -326,6 +335,55 @@ export async function deleteCostTemplate(costTemplateId: string) {
   await persistMockDatabase();
 
   return mockApi({ id: costTemplateId });
+}
+
+export type PricingTemplateInput = Omit<PricingTemplate, "id" | "createdAt">;
+
+export async function listPricingTemplates() {
+  await hydrateMockDatabase();
+  return mockApi(mockDatabase.pricingTemplates);
+}
+
+export async function addPricingTemplate(input: PricingTemplateInput) {
+  await hydrateMockDatabase();
+  const template = normalizePricingTemplate({
+    ...input,
+    id: createLibraryId("pricing-template"),
+    createdAt: new Date().toISOString()
+  });
+
+  mockDatabase.pricingTemplates.unshift(template);
+  await persistMockDatabase();
+
+  return mockApi(template);
+}
+
+export async function updatePricingTemplate(
+  pricingTemplateId: string,
+  input: Partial<PricingTemplateInput>
+) {
+  await hydrateMockDatabase();
+  const template = mockDatabase.pricingTemplates.find((item) => item.id === pricingTemplateId);
+
+  if (!template) {
+    return mockApi(undefined);
+  }
+
+  // Existing quote lines keep their frozen snapshots; only the library copy moves.
+  Object.assign(template, normalizePricingTemplate({ ...template, ...input, id: template.id }));
+  await persistMockDatabase();
+
+  return mockApi(mockDatabase.pricingTemplates.find((item) => item.id === pricingTemplateId));
+}
+
+export async function deletePricingTemplate(pricingTemplateId: string) {
+  await hydrateMockDatabase();
+  mockDatabase.pricingTemplates = mockDatabase.pricingTemplates.filter(
+    (template) => template.id !== pricingTemplateId
+  );
+  await persistMockDatabase();
+
+  return mockApi({ id: pricingTemplateId });
 }
 
 const projectHasPerson = (project: Project, personId: string) => {

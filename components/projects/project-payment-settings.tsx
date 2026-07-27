@@ -247,6 +247,15 @@ export function ProjectPaymentSettings({
             }
           ].map((item) => {
             const Icon = item.icon;
+            // Step the font down for long amounts: the clamp tracks the
+            // viewport, not the card, so a wide value would otherwise paint
+            // past the card edge in the five-column desktop layout.
+            const valueSizeClass =
+              item.value.length >= 14
+                ? "text-[clamp(0.7rem,3.2vw,1.02rem)]"
+                : item.value.length >= 11
+                  ? "text-[clamp(0.74rem,4vw,1.22rem)]"
+                  : "text-[clamp(0.78rem,4.8vw,1.5rem)]";
 
             return (
               <div key={item.label} className="min-w-0 rounded-studio bg-white p-4 ring-1 ring-black/[0.04] max-[560px]:p-3 max-[360px]:p-2.5">
@@ -256,17 +265,18 @@ export function ProjectPaymentSettings({
                   </span>
                   <span className="min-w-0 text-xs font-black uppercase text-muted [overflow-wrap:anywhere] max-[480px]:text-[11px] max-[360px]:text-[10px]">{item.label}</span>
                 </div>
-                <div className="mt-4 flex min-h-8 min-w-0 items-end justify-between gap-3 max-[560px]:mt-3 max-[420px]:flex-col max-[420px]:items-start max-[420px]:gap-1">
+                <div className="mt-4 flex min-h-8 min-w-0 flex-wrap items-end justify-between gap-x-3 gap-y-1.5 max-[560px]:mt-3 max-[420px]:flex-col max-[420px]:items-start max-[420px]:gap-1">
                   <p
                     className={cn(
-                      "max-w-full whitespace-nowrap text-[clamp(0.78rem,4.8vw,1.5rem)] font-black leading-none tabular-nums tracking-[-0.02em]",
+                      "max-w-full whitespace-nowrap font-black leading-none tabular-nums tracking-[-0.02em]",
+                      valueSizeClass,
                       item.valueClass
                     )}
                   >
                     {item.value}
                   </p>
                   {item.percent ? (
-                    <span className={cn("shrink-0 text-right text-sm font-black leading-none max-[560px]:text-xs max-[420px]:text-left max-[360px]:text-[10px]", item.percentClass)}>
+                    <span className={cn("whitespace-nowrap text-right text-sm font-black leading-none max-[560px]:text-xs max-[420px]:text-left max-[360px]:text-[10px]", item.percentClass)}>
                       {t("profitRate")} {item.percent}
                     </span>
                   ) : null}

@@ -41,3 +41,12 @@ export const assertUploadedImageWithinLimit = (
     throw new Error("The uploaded image exceeds the 1.5 MB size limit.");
   }
 };
+
+/** Brand logos ship inside every branded export, so they get a tighter cap. */
+export const MAX_BRAND_LOGO_BYTES = 1024 * 1024;
+
+export const assertBrandLogoWithinLimit = (value: string | null | undefined): void => {
+  if (value && value.startsWith("data:") && dataUrlByteLength(value) > MAX_BRAND_LOGO_BYTES) {
+    throw new Error("The uploaded brand logo exceeds the 1 MB size limit.");
+  }
+};
