@@ -48,11 +48,13 @@ import {
   listCreditsRefreshReminders,
   type CreditsRefreshReminder
 } from "@/lib/utils/subscription-reminders";
+import { ReportExportModal } from "@/components/share/report-export-modal";
 import {
   buildSummaryReportData,
-  downloadSummaryReportHtml,
+  createSummaryReportHtml,
   type SummaryReportScope
 } from "@/lib/utils/summary-report-share";
+import { sanitizeReportFileName } from "@/lib/utils/report-share-common";
 
 const spring = {
   type: "spring",
@@ -106,6 +108,7 @@ export function VisualDashboardShell() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [overview, setOverview] = useState<DashboardOverview | null>(null);
   const [scope, setScope] = useState<DashboardScope>({ type: "all" });
+  const [reportPreview, setReportPreview] = useState<{ html: string; fileName: string; eyebrow: string } | null>(null);
   const [summarySharing, setSummarySharing] = useState(false);
   const [creditsRefreshReminders, setCreditsRefreshReminders] = useState<CreditsRefreshReminder[]>([]);
 
@@ -340,18 +343,22 @@ export function VisualDashboardShell() {
         snapshot: exchangeRateSnapshot
       });
 
-      await downloadSummaryReportHtml(
-        buildSummaryReportData({
-          scope: reportScope,
-          companies: data.companies,
-          groups: reportGroups,
-          projects: scopedProjects,
-          overview: reportOverview,
-          formatAmount: (value) => formatAmount(value, reportOverview.currency),
-          language,
-          t
-        })
-      );
+      const reportData = buildSummaryReportData({
+        scope: reportScope,
+        companies: data.companies,
+        groups: reportGroups,
+        projects: scopedProjects,
+        overview: reportOverview,
+        formatAmount: (value) => formatAmount(value, reportOverview.currency),
+        language,
+        t
+      });
+
+      setReportPreview({
+        html: await createSummaryReportHtml(reportData),
+        fileName: sanitizeReportFileName(reportData.title, "Studio Map OS"),
+        eyebrow: reportData.title
+      });
     } finally {
       setSummarySharing(false);
     }
@@ -781,6 +788,14 @@ export function VisualDashboardShell() {
           </Card>
         </section>
       </div>
+      <ReportExportModal
+        open={Boolean(reportPreview)}
+        eyebrow={reportPreview?.eyebrow}
+        html={reportPreview?.html ?? ""}
+        fileName={reportPreview?.fileName ?? ""}
+        t={t}
+        onClose={() => setReportPreview(null)}
+      />
     </AppShell>
   );
 }

@@ -6,6 +6,10 @@ type ImageCardProps = React.HTMLAttributes<HTMLDivElement> & {
   meta?: string;
   heightClassName?: string;
   action?: React.ReactNode;
+  /** Brand logo shown in the bottom content block, just above the meta line. */
+  logoUrl?: string;
+  /** Brand logo pinned to the top-left corner of the card. */
+  cornerLogoUrl?: string;
 };
 
 export function ImageCard({
@@ -15,6 +19,8 @@ export function ImageCard({
   className,
   heightClassName = "h-72",
   action,
+  logoUrl,
+  cornerLogoUrl,
   children,
   ...props
 }: ImageCardProps) {
@@ -30,7 +36,19 @@ export function ImageCard({
       {...props}
     >
       {action ? <div className="absolute right-5 top-5 z-20">{action}</div> : null}
+      {cornerLogoUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={cornerLogoUrl}
+          alt=""
+          className="absolute left-5 top-5 z-20 h-14 w-auto max-w-[45%] object-contain object-left-top"
+        />
+      ) : null}
       <div className="relative z-10">
+        {logoUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={logoUrl} alt="" className="mb-3 h-12 w-auto max-w-[60%] object-contain object-left-bottom" />
+        ) : null}
         {meta ? (
           <p className="mb-2 max-w-full break-words text-xs font-bold leading-tight text-white/[0.82] sm:text-sm">
             {meta}

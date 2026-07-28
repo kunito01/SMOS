@@ -281,8 +281,8 @@ const createProjectReportHtmlWithCover = (data: ProjectReportData, embeddedCover
     ? `@font-face{font-family:"SMOS Cuneiform";font-style:normal;font-weight:400;font-display:swap;src:local("Noto Sans Cuneiform"),url("https://fonts.gstatic.com/s/notosanscuneiform/v18/bMrrmTWK7YY-MF22aHGGd7H8PhJtvBDWgb8.ttf") format("truetype");unicode-range:U+12000-123FF,U+12400-1247F,U+12480-1254F}`
     : "";
   const reportFontFamily = data.language === "sux"
-    ? `"SMOS Cuneiform",Inter,ui-rounded,"SF Pro Rounded","SF Pro Display",system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif`
-    : `Inter,ui-rounded,"SF Pro Rounded","SF Pro Display",system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif`;
+    ? `"SMOS Cuneiform",Inter,"SF Pro Rounded","SF Pro Display","PingFang SC","Hiragino Sans GB","Noto Sans SC","Source Han Sans SC","Microsoft YaHei",system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif`
+    : `Inter,"SF Pro Rounded","SF Pro Display","PingFang SC","Hiragino Sans GB","Noto Sans SC","Source Han Sans SC","Microsoft YaHei",system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif`;
 
   return `<!doctype html>
 <html lang="${escapeHtml(data.language)}">
@@ -308,11 +308,11 @@ const createProjectReportHtmlWithCover = (data: ProjectReportData, embeddedCover
     .hero__logo{display:block;height:3.4rem;width:auto;max-width:100%;margin-bottom:1.1rem;object-fit:contain}
     .hero__meta{display:flex;flex-wrap:wrap;gap:.6rem;margin-bottom:1rem}
     .hero__meta span{display:inline-flex;min-height:2.1rem;align-items:center;border-radius:999px;background:rgba(255,255,255,.85);padding:.45rem .85rem;color:var(--ink);font-size:.74rem;font-weight:850;backdrop-filter:blur(12px)}
-    .hero h1{max-width:18ch;font-size:clamp(2.2rem,6.6vw,6rem);letter-spacing:-.065em;line-height:.91}
+    .hero h1{max-width:18ch;font-size:clamp(1.6rem,3.2vw,2.4rem);letter-spacing:-.015em;line-height:1.1}
     .hero__description{max-width:54rem;margin-top:1.15rem;color:rgba(255,255,255,.82);font-size:clamp(.95rem,1.4vw,1.15rem);line-height:1.7}
     .panel{padding:clamp(1rem,3vw,2rem)}
     .section-kicker{font-size:.74rem;font-weight:900;letter-spacing:.13em;text-transform:uppercase;opacity:.58}
-    .section-title{margin-top:.4rem;font-size:clamp(1.55rem,3vw,2.8rem);letter-spacing:-.04em;line-height:1}
+    .section-title{margin-top:.4rem;font-size:clamp(1.35rem,2.4vw,2rem);letter-spacing:-.015em;line-height:1.1}
     .summary{background:var(--deep);color:#fff}
     .summary-grid,.payment-metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.75rem;margin-top:1.4rem}
     .metric{min-width:0;min-height:8.4rem;border-radius:var(--radius-md);padding:1rem;color:var(--ink);box-shadow:inset 0 0 0 1px rgba(255,255,255,.35)}
@@ -351,7 +351,7 @@ const createProjectReportHtmlWithCover = (data: ProjectReportData, embeddedCover
     .settings{background:#e9e5df}.payment-metrics{grid-template-columns:repeat(5,minmax(0,1fr))}.payments-label{margin-top:1.5rem;font-size:.75rem;font-weight:900;letter-spacing:.1em;text-transform:uppercase}.payments{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.75rem;margin-top:.75rem}.payment{min-width:0;border-radius:var(--radius-md);background:#fff;padding:1rem}.payment__heading{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem}.payment__type{color:var(--muted);font-size:.65rem;font-weight:900;letter-spacing:.08em;text-transform:uppercase}.payment h3{margin-top:.2rem;font-size:1rem}.payment strong{font-size:1.25rem;white-space:nowrap}.payment__meta{display:flex;flex-wrap:wrap;gap:.35rem .8rem;margin-top:.85rem;color:var(--muted);font-size:.72rem}.payment__notes{margin-top:.7rem;font-size:.78rem;line-height:1.6}.payment-empty{margin-top:.75rem;border-radius:var(--radius-md);background:#fff;padding:1rem;color:var(--muted)}
     .collection{display:grid;grid-template-columns:minmax(0,.7fr) minmax(0,1.3fr);gap:clamp(1rem,3vw,2rem);align-items:center;background:#ffc700}.collection__value{font-size:clamp(3.5rem,11vw,8rem);font-weight:950;letter-spacing:-.08em;line-height:.8}.collection__track{height:1.15rem;overflow:hidden;border-radius:999px;background:rgba(255,255,255,.68)}.collection__bar{height:100%;border-radius:inherit;background:var(--ink)}.collection__body{margin-top:1rem;color:rgba(28,35,40,.66);font-size:.88rem;line-height:1.7}
     @media(max-width:900px){.summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.payment-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.payments{grid-template-columns:1fr}.collection{grid-template-columns:1fr}}
-    @media(max-width:560px){:root{--radius-xl:1.75rem;--radius-lg:1.35rem}.report{padding:.55rem}.report-section{margin-top:.7rem}.hero{min-height:28rem;padding:1rem}.hero h1{font-size:clamp(2.2rem,14vw,4rem)}.panel{padding:1rem}.status-panel{align-items:flex-start;flex-direction:column}.summary-grid,.payment-metrics{grid-template-columns:1fr 1fr;gap:.5rem}.metric{min-height:7.2rem;padding:.8rem}.metric__value{margin-top:1.15rem}.payment__heading{flex-direction:column}.payment strong{white-space:normal}.collection__value{font-size:4rem}.timeline-label,.timeline-cell{border-radius:.8rem;padding:.65rem;font-size:.68rem}.workflow-viewer{grid-template-rows:auto minmax(22rem,55vh);padding:.5rem}.workflow-header{align-items:flex-start}.workflow-controls button{min-width:2.35rem;height:2.35rem}.workflow-canvas{border-radius:1.15rem}}
+    @media(max-width:560px){:root{--radius-xl:1.75rem;--radius-lg:1.35rem}.report{padding:.55rem}.report-section{margin-top:.7rem}.hero{min-height:28rem;padding:1rem}.hero h1{font-size:clamp(1.45rem,6.5vw,1.9rem)}.panel{padding:1rem}.status-panel{align-items:flex-start;flex-direction:column}.summary-grid,.payment-metrics{grid-template-columns:1fr 1fr;gap:.5rem}.metric{min-height:7.2rem;padding:.8rem}.metric__value{margin-top:1.15rem}.payment__heading{flex-direction:column}.payment strong{white-space:normal}.collection__value{font-size:4rem}.timeline-label,.timeline-cell{border-radius:.8rem;padding:.65rem;font-size:.68rem}.workflow-viewer{grid-template-rows:auto minmax(22rem,55vh);padding:.5rem}.workflow-header{align-items:flex-start}.workflow-controls button{min-width:2.35rem;height:2.35rem}.workflow-canvas{border-radius:1.15rem}}
     @media(max-width:360px){.summary-grid,.payment-metrics{grid-template-columns:1fr}.hero__meta{gap:.35rem}.hero__meta span{font-size:.64rem}.task__meta{display:grid}}
     ${reportChromeStyles}
     @media print{body{background:#fff}.report{width:100%;padding:0}.report-section{break-inside:avoid;box-shadow:none}.payment{break-inside:avoid}}

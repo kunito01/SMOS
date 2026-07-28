@@ -258,6 +258,7 @@ export function CompaniesPage() {
                   <ImageCard
                     imageUrl={summary.company.coverImage}
                     title={formatDemoEntityName(summary.company.name, summary.company.id, "company", t)}
+                    logoUrl={summary.company.logoImage}
                     meta={t("companyOverview")}
                     heightClassName="h-auto min-h-[24rem] sm:h-[24rem]"
                     className="p-4 transition duration-200 hover:-translate-y-1 sm:p-5"

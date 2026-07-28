@@ -36,7 +36,9 @@ import type {
 } from "@/lib/types";
 import { groupPath } from "@/lib/utils/app-routes";
 import type { ExchangeRateSnapshot, MoneyCurrency } from "@/lib/utils/money";
-import { buildSummaryReportData, downloadSummaryReportHtml } from "@/lib/utils/summary-report-share";
+import { ReportExportModal } from "@/components/share/report-export-modal";
+import { buildSummaryReportData, createSummaryReportHtml } from "@/lib/utils/summary-report-share";
+import { sanitizeReportFileName } from "@/lib/utils/report-share-common";
 
 type CompanyDetailData = {
   company: Company;
@@ -89,6 +91,7 @@ export function CompanyDetailPage({ companyId }: { companyId: string }) {
     isReady: isCurrencyReady
   } = useCostDisplayCurrency();
   const [data, setData] = useState<CompanyDetailData | null>(null);
+  const [reportPreview, setReportPreview] = useState<{ html: string; fileName: string; eyebrow: string } | null>(null);
   const [basicsOpen, setBasicsOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteError, setDeleteError] = useState("");
@@ -134,18 +137,22 @@ export function CompanyDetailPage({ companyId }: { companyId: string }) {
     setSummarySharing(true);
 
     try {
-      await downloadSummaryReportHtml(
-        buildSummaryReportData({
-          scope: { type: "company", company: data.company },
-          companies: [data.company],
-          groups: data.groups,
-          projects: data.projects,
-          overview: data.overview,
-          formatAmount: (value) => formatAmount(value, data.overview.currency),
-          language,
-          t
-        })
-      );
+      const reportData = buildSummaryReportData({
+        scope: { type: "company", company: data.company },
+        companies: [data.company],
+        groups: data.groups,
+        projects: data.projects,
+        overview: data.overview,
+        formatAmount: (value) => formatAmount(value, data.overview.currency),
+        language,
+        t
+      });
+
+      setReportPreview({
+        html: await createSummaryReportHtml(reportData),
+        fileName: sanitizeReportFileName(reportData.title, "Studio Map OS"),
+        eyebrow: reportData.title
+      });
     } finally {
       setSummarySharing(false);
     }
@@ -231,7 +238,7 @@ export function CompanyDetailPage({ companyId }: { companyId: string }) {
                   <Link href="/companies" prefetch={false}>
                     <Button variant="ghost" size="md">
                       <ArrowLeft size={18} />
-                      {t("navCompanies")}
+                      {t("companiesCount")}
                     </Button>
                   </Link>
                 </div>
@@ -395,6 +402,14 @@ export function CompanyDetailPage({ companyId }: { companyId: string }) {
               t={t}
               onClose={() => setBasicsOpen(false)}
               onSaved={handleBasicsSaved}
+            />
+            <ReportExportModal
+              open={Boolean(reportPreview)}
+              eyebrow={reportPreview?.eyebrow}
+              html={reportPreview?.html ?? ""}
+              fileName={reportPreview?.fileName ?? ""}
+              t={t}
+              onClose={() => setReportPreview(null)}
             />
             <DeleteConfirmDialog
               open={deleteDialogOpen}

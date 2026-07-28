@@ -60,13 +60,16 @@ import type { Project, ProjectGroup, ProjectStatus, ProjectVersion } from "@/lib
 import { projectCostsPath } from "@/lib/utils/app-routes";
 import { cn } from "@/lib/utils/cn";
 import { findProjectReleaseVersion } from "@/lib/utils/project-release";
-import { downloadProjectReportHtml } from "@/lib/utils/project-report-share";
+import { createProjectReportHtml, sanitizeProjectReportFileName } from "@/lib/utils/project-report-share";
+import { ReportExportModal } from "@/components/share/report-export-modal";
 import { buildReportChromeLabels } from "@/lib/utils/report-share-common";
 
 type ProjectDetailData = {
   costSummary: ProjectCostSummary;
   project: Project;
   groups: ProjectGroup[];
+  /** Logo of the project's brand; undefined when the brand has none or is gone. */
+  brandLogo?: string;
 };
 
 const phaseTone = {
@@ -129,6 +132,15 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
   const [releaseSaving, setReleaseSaving] = useState(false);
   const [reportSharing, setReportSharing] = useState(false);
   const [statusSaving, setStatusSaving] = useState<ProjectStatus | null>(null);
+  const [reportPreview, setReportPreview] = useState<{ html: string; fileName: string; eyebrow: string } | null>(null);
+
+  const fetchBrandLogo = async (companyId: string) =>
+    companyId
+      ? companiesApi
+          .getCompany(companyId)
+          .then((company) => company.logoImage)
+          .catch(() => undefined)
+      : undefined;
 
   const loadProject = async () => {
     const [project, groups, costSummary] = await Promise.all([
@@ -136,7 +148,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
       groupsApi.listGroups(),
       costsApi.getProjectCostSummary(projectId, displayCurrency, exchangeRateSnapshot)
     ]);
-    setData({ project, groups, costSummary });
+    setData({ project, groups, costSummary, brandLogo: await fetchBrandLogo(project.companyId) });
   };
 
   useEffect(() => {
@@ -152,9 +164,10 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
         groupsApi.listGroups(),
         costsApi.getProjectCostSummary(projectId, displayCurrency, exchangeRateSnapshot)
       ]);
+      const brandLogo = await fetchBrandLogo(project.companyId);
 
       if (isMounted) {
-        setData({ project, groups, costSummary });
+        setData({ project, groups, costSummary, brandLogo });
       }
     }
 
@@ -354,7 +367,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
         ? Math.min(100, Math.round((data.costSummary.receivedRevenue / data.costSummary.plannedReceivable) * 100))
         : 0;
 
-      await downloadProjectReportHtml({
+      const reportHtml = await createProjectReportHtml({
         chrome: buildReportChromeLabels(t),
         projectName: projectDisplayName,
         description: projectDescription,
@@ -506,6 +519,12 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
           workflowZoomOut: t("workflowZoomOut")
         }
       });
+
+      setReportPreview({
+        html: reportHtml,
+        fileName: sanitizeProjectReportFileName(projectDisplayName),
+        eyebrow: projectDisplayName
+      });
     } finally {
       setReportSharing(false);
     }
@@ -525,6 +544,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
               <ImageCard
                 imageUrl={data.project.coverImage}
                 title={projectDisplayName}
+                logoUrl={data.brandLogo}
                 meta={group ? getProjectGroupDisplayName(group, language, t) : ""}
                 heightClassName="h-[31rem] min-h-0 shrink-0"
                 className="min-w-0 [&>div.relative>h3]:max-w-56 [&>div.relative>h3]:text-2xl [&>div.relative>h3]:leading-none [&>div.relative>p]:text-sm"
@@ -1009,6 +1029,14 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
 	          </>
 	        )}
       </div>
+      <ReportExportModal
+        open={Boolean(reportPreview)}
+        eyebrow={reportPreview?.eyebrow}
+        html={reportPreview?.html ?? ""}
+        fileName={reportPreview?.fileName ?? ""}
+        t={t}
+        onClose={() => setReportPreview(null)}
+      />
     </AppShell>
   );
 }

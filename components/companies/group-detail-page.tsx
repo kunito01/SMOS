@@ -15,7 +15,9 @@ import { SectionHeader } from "@/components/ui/section-header";
 import { groupsApi, projectsApi } from "@/lib/api";
 import { getProjectGroupDisplayDescription, getProjectGroupDisplayName } from "@/lib/i18n/domain-labels";
 import type { DashboardOverview, Project, ProjectGroup } from "@/lib/types";
-import { buildSummaryReportData, downloadSummaryReportHtml } from "@/lib/utils/summary-report-share";
+import { ReportExportModal } from "@/components/share/report-export-modal";
+import { buildSummaryReportData, createSummaryReportHtml } from "@/lib/utils/summary-report-share";
+import { sanitizeReportFileName } from "@/lib/utils/report-share-common";
 
 type GroupDetailData = {
   group: ProjectGroup;
@@ -34,6 +36,7 @@ export function GroupDetailPage({ groupId }: { groupId: string }) {
     isReady: isCurrencyReady
   } = useCostDisplayCurrency();
   const [data, setData] = useState<GroupDetailData | null>(null);
+  const [reportPreview, setReportPreview] = useState<{ html: string; fileName: string; eyebrow: string } | null>(null);
   const [summarySharing, setSummarySharing] = useState(false);
 
   useEffect(() => {
@@ -84,18 +87,22 @@ export function GroupDetailPage({ groupId }: { groupId: string }) {
     setSummarySharing(true);
 
     try {
-      await downloadSummaryReportHtml(
-        buildSummaryReportData({
-          scope: { type: "group", group: data.group },
-          companies: [],
-          groups: [data.group],
-          projects: data.projects,
-          overview: data.overview,
-          formatAmount: (value) => formatAmount(value, data.overview.currency),
-          language,
-          t
-        })
-      );
+      const reportData = buildSummaryReportData({
+        scope: { type: "group", group: data.group },
+        companies: [],
+        groups: [data.group],
+        projects: data.projects,
+        overview: data.overview,
+        formatAmount: (value) => formatAmount(value, data.overview.currency),
+        language,
+        t
+      });
+
+      setReportPreview({
+        html: await createSummaryReportHtml(reportData),
+        fileName: sanitizeReportFileName(reportData.title, "Studio Map OS"),
+        eyebrow: reportData.title
+      });
     } finally {
       setSummarySharing(false);
     }
@@ -164,6 +171,14 @@ export function GroupDetailPage({ groupId }: { groupId: string }) {
           </>
         )}
       </div>
+      <ReportExportModal
+        open={Boolean(reportPreview)}
+        eyebrow={reportPreview?.eyebrow}
+        html={reportPreview?.html ?? ""}
+        fileName={reportPreview?.fileName ?? ""}
+        t={t}
+        onClose={() => setReportPreview(null)}
+      />
     </AppShell>
   );
 }
