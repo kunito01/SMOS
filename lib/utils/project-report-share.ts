@@ -295,7 +295,7 @@ const createProjectReportHtmlWithCover = (data: ProjectReportData, embeddedCover
   <style>
     ${cuneiformFontStyle}
     :root{color-scheme:light;--ink:#1c2328;--muted:#5d6a72;--aqua:#8edbe8;--aqua-strong:#03b5aa;--lime:#e3f596;--coral:#f94a22;--pink:#f7567c;--cloud:#f4e9d8;--cream:#fffae3;--white:#fff;--deep:#023436;--radius-xl:2.4rem;--radius-lg:1.7rem;--radius-md:1.2rem}
-    *{box-sizing:border-box}
+    *{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}
     html{background:#edf9f7}
     body{margin:0;color:var(--ink);font-family:${reportFontFamily};background:radial-gradient(circle at 8% 8%,rgba(142,219,232,.58),transparent 28rem),radial-gradient(circle at 92% 36%,rgba(227,245,150,.75),transparent 31rem),linear-gradient(150deg,#f9fffd,#f6f2e9);font-weight:650;line-height:1.5}
     h1,h2,h3,p{margin:0;overflow-wrap:anywhere}

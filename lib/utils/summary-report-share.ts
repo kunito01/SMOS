@@ -8,7 +8,7 @@ import {
   statusKeys,
   translateDomainLabel
 } from "@/lib/i18n/domain-labels";
-import type { Language, TranslationKey } from "@/lib/i18n/translations";
+import { languageLocales, type Language, type TranslationKey } from "@/lib/i18n/translations";
 import type { Company, DashboardOverview, Project, ProjectGroup, ProjectStatus } from "@/lib/types";
 import {
   buildReportChromeLabels,
@@ -78,6 +78,10 @@ export type SummaryReportData = {
   language: string;
   metrics: SummaryReportMetric[];
   scopeLabel: string;
+  /** Studio-wide reports use the dashboard's animated pixel-city hero. */
+  heroScene?: boolean;
+  /** Studio-wide project timeline board (one colored bar per project). */
+  gantt?: SummaryReportGantt;
   statusSegments: SummaryReportStatusSegment[];
   title: string;
   totalProjectCount: number;
@@ -111,6 +115,109 @@ const statusColors: Record<ProjectStatus, string> = {
   completed: "#8EDBE8",
   paused: "#1C2328",
   terminated: "#D4A1DF"
+};
+
+export type SummaryReportGanttRow = {
+  color: string;
+  leftPct: number;
+  name: string;
+  widthPct: number;
+};
+
+export type SummaryReportGantt = {
+  months: string[];
+  rows: SummaryReportGanttRow[];
+  title: string;
+  todayLabel: string;
+  todayPct: number | null;
+};
+
+const ganttPalette = [
+  "#F94622",
+  "#03B5AA",
+  "#FFC700",
+  "#3078A4",
+  "#FD0079",
+  "#8EDBE8",
+  "#A33E43",
+  "#E3F596",
+  "#1C2328",
+  "#D4A1DF"
+];
+
+const parseGanttDay = (value: string) => {
+  const parsed = Date.parse(`${value.slice(0, 10)}T00:00:00Z`);
+
+  return Number.isFinite(parsed) ? new Date(parsed) : null;
+};
+
+const ganttMonthKey = (date: Date) => date.getUTCFullYear() * 12 + date.getUTCMonth();
+
+const ganttDaysInMonth = (year: number, monthIndex: number) =>
+  new Date(Date.UTC(year, monthIndex + 1, 0)).getUTCDate();
+
+const ganttMonthPosition = (date: Date, firstMonth: number) =>
+  ganttMonthKey(date) - firstMonth +
+  (date.getUTCDate() - 1) / ganttDaysInMonth(date.getUTCFullYear(), date.getUTCMonth());
+
+const buildSummaryReportGantt = (
+  projects: Project[],
+  projectName: (project: Project) => string,
+  language: Language,
+  t: (key: TranslationKey) => string
+): SummaryReportGantt | undefined => {
+  const dated = projects
+    .map((project) => {
+      const start = parseGanttDay(project.startDate);
+      const end = parseGanttDay(project.endDate);
+
+      return start && end && end >= start ? { project, start, end } : null;
+    })
+    .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
+    .sort((left, right) => left.start.getTime() - right.start.getTime());
+
+  if (!dated.length) {
+    return undefined;
+  }
+
+  const firstMonth = Math.min(...dated.map(({ start }) => ganttMonthKey(start)));
+  const lastMonth = Math.max(...dated.map(({ end }) => ganttMonthKey(end)));
+  const totalMonths = lastMonth - firstMonth + 1;
+  const monthFormatter = new Intl.DateTimeFormat(languageLocales[language], {
+    year: "2-digit",
+    month: "short"
+  });
+
+  const today = new Date();
+  const todayUtc = new Date(Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()));
+  const todayMonth = ganttMonthKey(todayUtc);
+
+  return {
+    months: Array.from({ length: totalMonths }, (_, index) => {
+      const absolute = firstMonth + index;
+
+      return monthFormatter.format(new Date(Date.UTC(Math.floor(absolute / 12), absolute % 12, 1)));
+    }),
+    rows: dated.map(({ project, start, end }, index) => {
+      const startPos = ganttMonthPosition(start, firstMonth);
+      const endPos =
+        ganttMonthPosition(end, firstMonth) +
+        1 / ganttDaysInMonth(end.getUTCFullYear(), end.getUTCMonth());
+
+      return {
+        color: ganttPalette[index % ganttPalette.length],
+        leftPct: (startPos / totalMonths) * 100,
+        name: projectName(project),
+        widthPct: Math.max(((endPos - startPos) / totalMonths) * 100, 0.75)
+      };
+    }),
+    title: t("ganttSectionTitle"),
+    todayLabel: t("ganttToday"),
+    todayPct:
+      todayMonth >= firstMonth && todayMonth <= lastMonth
+        ? (ganttMonthPosition(todayUtc, firstMonth) / totalMonths) * 100
+        : null
+  };
 };
 
 export const buildSummaryReportData = ({
@@ -232,6 +339,11 @@ export const buildSummaryReportData = ({
     scopeLabel: t(
       scope.type === "all" ? "scopeAll" : scope.type === "company" ? "scopeCompany" : "scopeGroup"
     ),
+    heroScene: scope.type === "all",
+    gantt:
+      scope.type === "all"
+        ? buildSummaryReportGantt(projects, (project) => projectRow(project).name, language, t)
+        : undefined,
     statusSegments: statusOrder.map((status) => ({
       color: statusColors[status],
       count: projects.filter((project) => project.status === status).length,
@@ -318,6 +430,90 @@ const renderPortfolio = (data: SummaryReportData) =>
     ? `<div class="portfolio">${data.tree.map(renderCompanyBranch).join("")}</div>`
     : `<p class="portfolio-empty">—</p>`;
 
+const pixelSceneClouds = [
+  "left:6%;top:13%;width:9rem",
+  "left:16%;top:25%;width:7rem",
+  "left:56%;top:16%;width:8rem",
+  "left:72%;top:28%;width:6rem"
+];
+
+const pixelSceneFarBuildings = [
+  "left:8%;bottom:22%;height:21%;width:8%",
+  "left:18%;bottom:22%;height:30%;width:7%",
+  "left:28%;bottom:22%;height:24%;width:8%",
+  "left:39%;bottom:22%;height:43%;width:10%",
+  "left:53%;bottom:22%;height:28%;width:8%",
+  "left:65%;bottom:22%;height:34%;width:9%",
+  "left:79%;bottom:22%;height:26%;width:8%"
+];
+
+const pixelSceneNearBuildings = [
+  "left:0%;bottom:0;height:22%;width:11%",
+  "left:11%;bottom:0;height:31%;width:13%",
+  "left:25%;bottom:0;height:24%;width:9%",
+  "left:36%;bottom:0;height:34%;width:12%",
+  "left:50%;bottom:0;height:26%;width:11%",
+  "left:64%;bottom:0;height:38%;width:13%",
+  "left:79%;bottom:0;height:28%;width:10%",
+  "left:90%;bottom:0;height:36%;width:10%"
+];
+
+const pixelWindows = (count: number) => "<i></i>".repeat(count);
+
+/** Static mirror of the dashboard's PixelHeroScene; animation is CSS-only. */
+const renderPixelScene = () => `<div class="pixel-hero-scene" aria-hidden="true">
+  <div class="pixel-pastel-sky">
+    <div class="pixel-pastel-sun"></div>
+    <div class="pixel-pastel-haze pixel-pastel-haze--one"></div>
+    <div class="pixel-pastel-haze pixel-pastel-haze--two"></div>
+    ${pixelSceneClouds.map((style) => `<div class="pixel-cloud" style="${style}"><span></span><span></span><span></span><span></span></div>`).join("")}
+  </div>
+  <div class="pixel-city-horizon"></div>
+  ${pixelSceneFarBuildings.map((style, index) => `<div class="pixel-city-building pixel-city-building--far" style="${style}">${pixelWindows(index % 2 === 0 ? 12 : 15)}</div>`).join("")}
+  <div class="pixel-city-bridge"><span></span><span></span><span></span></div>
+  ${pixelSceneNearBuildings.map((style, index) => `<div class="pixel-city-building pixel-city-building--near" style="${style}">${pixelWindows(index % 3 === 0 ? 18 : 14)}</div>`).join("")}
+  <div class="pixel-city-ground"><span class="pixel-city-ground__light"></span><span class="pixel-city-ground__reflection pixel-city-ground__reflection--one"></span><span class="pixel-city-ground__reflection pixel-city-ground__reflection--two"></span></div>
+  <div class="pixel-pastel-vignette"></div>
+</div>`;
+
+const renderGanttSection = (data: SummaryReportData) => {
+  const gantt = data.gantt;
+
+  if (!gantt) {
+    return "";
+  }
+
+  const todayOverlay =
+    gantt.todayPct === null
+      ? ""
+      : `<div class="gantt-today" style="left:${gantt.todayPct}%"><i></i><b${
+          gantt.todayPct > 88 ? ` style="left:auto;right:calc(100% + 4px)"` : ""
+        }>${escapeReportHtml(gantt.todayLabel)}</b></div>`;
+
+  return `<section class="report-section panel gantt-section">
+      <p class="section-kicker">${escapeReportHtml(data.labels.projects)}</p>
+      <h2 class="section-title">${escapeReportHtml(gantt.title)}</h2>
+      <div class="gantt-flex">
+        <div class="gantt-names">${gantt.rows
+          .map((row) => `<span class="gantt-name">${escapeReportHtml(row.name)}</span>`)
+          .join("")}</div>
+        <div class="gantt-board">
+          <div class="gantt-bg" aria-hidden="true">${"<span></span>".repeat(gantt.months.length)}</div>
+          <div class="gantt-lane"></div>
+          <div class="gantt-months">${gantt.months
+            .map((month) => `<span>${escapeReportHtml(month)}</span>`)
+            .join("")}</div>
+          <div class="gantt-rows">${gantt.rows
+            .map(
+              (row) => `<div class="gantt-row"><span class="gantt-bar" style="left:${row.leftPct}%;width:${row.widthPct}%;background:${normalizeReportHexColor(row.color, "#E3F596")}"></span></div>`
+            )
+            .join("")}</div>
+          ${todayOverlay}
+        </div>
+      </div>
+    </section>`;
+};
+
 const createSummaryReportHtmlWithCover = (data: SummaryReportData, embeddedCover: string | null) => {
   const coverStyle = embeddedCover
     ? ` style="background-image:linear-gradient(180deg,rgba(28,35,40,.08),rgba(28,35,40,.86)),url('${embeddedCover}')"`
@@ -340,7 +536,7 @@ const createSummaryReportHtmlWithCover = (data: SummaryReportData, embeddedCover
   <style>
     ${cuneiformFontStyle}
     :root{color-scheme:light;--ink:#1c2328;--muted:#5d6a72;--aqua:#8edbe8;--aqua-strong:#03b5aa;--lime:#e3f596;--coral:#f94a22;--pink:#f7567c;--cloud:#f4e9d8;--cream:#fffae3;--white:#fff;--deep:#023436;--radius-xl:2.4rem;--radius-lg:1.7rem;--radius-md:1.2rem}
-    *{box-sizing:border-box}
+    *{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}
     html{background:#edf9f7}
     body{margin:0;color:var(--ink);font-family:${reportFontFamily};background:radial-gradient(circle at 8% 8%,rgba(142,219,232,.58),transparent 28rem),radial-gradient(circle at 92% 36%,rgba(227,245,150,.75),transparent 31rem),linear-gradient(150deg,#f9fffd,#f6f2e9);font-weight:650;line-height:1.5}
     h1,h2,h3,p{margin:0;overflow-wrap:anywhere}
@@ -399,6 +595,63 @@ const createSummaryReportHtmlWithCover = (data: SummaryReportData, embeddedCover
     @media(max-width:900px){.summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.status-layout{grid-template-columns:1fr}}
     @media(max-width:560px){:root{--radius-xl:1.75rem;--radius-lg:1.35rem}.report{padding:.55rem}.report-section{margin-top:.7rem}.hero{min-height:24rem;padding:1rem}.hero h1{font-size:clamp(1.45rem,6.5vw,1.9rem)}.panel{padding:1rem}.summary-grid{grid-template-columns:1fr 1fr;gap:.5rem}.metric{min-height:7.2rem;padding:.8rem}.metric__value{margin-top:1.15rem}.project-row__head{flex-direction:column;align-items:flex-start;gap:.3rem}}
     @media(max-width:360px){.summary-grid{grid-template-columns:1fr}.hero__meta{gap:.35rem}.hero__meta span{font-size:.64rem}}
+    .hero--scene{justify-content:flex-start;background:#9adfe2}
+    .hero--scene::after{content:none}
+    .hero--scene h1{color:#1c2328}
+    .hero--scene .hero__description{color:rgba(28,35,40,.8)}
+    .pixel-hero-scene{position:absolute;inset:0;overflow:hidden;image-rendering:pixelated;background:linear-gradient(180deg,#7bd8e6 0%,#bdeee7 36%,#fff2a9 62%,#75bdd7 100%)}
+    .pixel-hero-scene::before{content:"";position:absolute;inset:0;opacity:.2;background:linear-gradient(90deg,rgba(255,255,255,.22) 1px,transparent 1px),linear-gradient(180deg,rgba(255,255,255,.18) 1px,transparent 1px);background-size:12px 12px}
+    .pixel-hero-scene::after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,rgba(255,255,255,.28),transparent 18%,transparent 76%,rgba(28,73,108,.14)),linear-gradient(180deg,rgba(255,255,255,.18),transparent 38%,rgba(19,83,122,.28))}
+    .pixel-pastel-sky,.pixel-city-horizon,.pixel-city-bridge,.pixel-city-ground,.pixel-pastel-vignette{position:absolute;inset:0}
+    .pixel-pastel-sun{position:absolute;left:16%;top:47%;width:7.5rem;height:7.5rem;background:linear-gradient(90deg,transparent 0 12px,rgba(255,249,181,.96) 12px calc(100% - 12px),transparent calc(100% - 12px)),linear-gradient(180deg,transparent 0 12px,rgba(255,249,181,.96) 12px calc(100% - 12px),transparent calc(100% - 12px));box-shadow:0 0 0 12px rgba(255,244,156,.28),0 0 66px rgba(255,207,95,.4);animation:sr-sun-pulse 6s steps(4,end) infinite}
+    .pixel-pastel-haze{position:absolute;height:34%;width:30%;background:linear-gradient(90deg,transparent,rgba(255,251,182,.26),transparent);filter:blur(6px);opacity:.6;transform:skewX(-14deg);animation:sr-light-sweep 10s steps(10,end) infinite}
+    .pixel-pastel-haze--one{left:20%;top:28%}
+    .pixel-pastel-haze--two{left:58%;top:18%;animation-delay:-4s}
+    .pixel-cloud{position:absolute;height:3.4rem;opacity:.72;animation:sr-cloud-drift 18s steps(12,end) infinite}
+    .pixel-cloud span{position:absolute;display:block;height:12px;background:rgba(237,255,220,.82);box-shadow:0 12px 0 rgba(211,243,211,.74),24px 12px 0 rgba(229,252,218,.84),48px 24px 0 rgba(202,233,211,.64)}
+    .pixel-cloud span:nth-child(1){left:0;top:12px;width:48px}
+    .pixel-cloud span:nth-child(2){left:36px;top:0;width:72px}
+    .pixel-cloud span:nth-child(3){left:72px;top:24px;width:54px}
+    .pixel-cloud span:nth-child(4){left:102px;top:12px;width:42px}
+    .pixel-city-horizon{top:auto;height:48%;background:linear-gradient(180deg,transparent 0 16%,rgba(255,247,183,.34) 16% 19%,transparent 19%),linear-gradient(180deg,transparent,rgba(104,184,202,.12))}
+    .pixel-city-building{position:absolute;display:grid;grid-template-columns:repeat(3,minmax(5px,1fr));align-content:start;gap:10px;padding:14px 11px;box-shadow:inset 0 0 0 2px rgba(255,255,255,.12),0 12px 28px rgba(51,121,153,.12)}
+    .pixel-city-building--far{background:linear-gradient(180deg,rgba(130,205,211,.58),rgba(70,157,187,.68)),repeating-linear-gradient(90deg,transparent 0 22px,rgba(255,255,255,.14) 22px 24px)}
+    .pixel-city-building--near{z-index:2;background:linear-gradient(180deg,rgba(51,140,181,.86),rgba(35,94,145,.96)),repeating-linear-gradient(90deg,transparent 0 24px,rgba(255,255,255,.1) 24px 26px);box-shadow:inset 0 0 0 2px rgba(5,45,85,.22),0 -10px 0 rgba(91,184,199,.1)}
+    .pixel-city-building i{display:block;min-height:10px;background:rgba(230,255,191,.48);animation:sr-window 6.2s steps(2,end) infinite}
+    .pixel-city-building i:nth-child(2n){background:rgba(163,236,230,.56)}
+    .pixel-city-building i:nth-child(5n){opacity:.15}
+    .pixel-city-bridge{top:auto;bottom:21%;height:4.8rem;background:linear-gradient(180deg,transparent 0 54%,rgba(45,146,179,.56) 54% 66%,transparent 66%),repeating-linear-gradient(90deg,transparent 0 54px,rgba(45,146,179,.42) 54px 62px);opacity:.68}
+    .pixel-city-bridge span{position:absolute;bottom:1.35rem;width:8rem;height:.75rem;background:rgba(239,255,184,.66);animation:sr-window 4.8s steps(2,end) infinite}
+    .pixel-city-bridge span:nth-child(1){left:12%}
+    .pixel-city-bridge span:nth-child(2){left:42%;animation-delay:-1.8s}
+    .pixel-city-bridge span:nth-child(3){right:14%;animation-delay:-3s}
+    .pixel-city-ground{top:auto;z-index:3;height:22%;background:linear-gradient(180deg,rgba(255,239,164,.72),rgba(71,181,203,.3) 10%,rgba(22,91,144,.88) 52%,rgba(16,73,124,.96)),repeating-linear-gradient(90deg,rgba(255,255,255,.16) 0 38px,transparent 38px 44px)}
+    .pixel-city-ground__light{position:absolute;left:7%;right:7%;top:1rem;height:.8rem;background:rgba(255,243,165,.76);box-shadow:0 0 30px rgba(255,206,95,.32)}
+    .pixel-city-ground__reflection{position:absolute;top:3.1rem;height:1.05rem;background:rgba(239,255,184,.34);animation:sr-reflection 6s steps(4,end) infinite}
+    .pixel-city-ground__reflection--one{left:16%;width:13rem}
+    .pixel-city-ground__reflection--two{right:20%;width:9rem;animation-delay:-2.6s}
+    .pixel-pastel-vignette{z-index:4;pointer-events:none;background:linear-gradient(90deg,rgba(239,251,243,.36),transparent 20%,transparent 76%,rgba(29,95,143,.1)),linear-gradient(180deg,rgba(255,255,255,.12),transparent 45%,rgba(14,73,125,.28))}
+    @keyframes sr-sun-pulse{0%,100%{opacity:.72;transform:scale(.98)}50%{opacity:1;transform:scale(1.02)}}
+    @keyframes sr-cloud-drift{0%,100%{transform:translateX(-.5rem)}50%{transform:translateX(1.25rem)}}
+    @keyframes sr-window{0%,100%{opacity:.56}50%{opacity:.92}}
+    @keyframes sr-light-sweep{0%,100%{transform:translateX(-8%) skewX(-16deg);opacity:.2}45%{transform:translateX(14%) skewX(-16deg);opacity:.48}}
+    @keyframes sr-reflection{0%,100%{opacity:.18;transform:translateX(-.4rem)}50%{opacity:.46;transform:translateX(.6rem)}}
+    .gantt-section{background:#fafcd9}
+    .gantt-flex{display:flex;margin-top:1.4rem}
+    .gantt-names{display:grid;flex:0 0 auto;row-gap:.4rem;width:10rem;padding-top:2.15rem}
+    .gantt-name{display:flex;align-items:center;height:1.35rem;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;padding-right:.6rem;font-size:.72rem;font-weight:900;display:block;line-height:1.35rem}
+    .gantt-board{position:relative;flex:1;min-width:0}
+    .gantt-lane{height:.9rem}
+    .gantt-months{display:flex;height:1.25rem}
+    .gantt-months span{flex:1;min-width:0;overflow:hidden;white-space:nowrap;padding:0 .3rem;font-size:.6rem;font-weight:900;text-transform:uppercase;color:rgba(28,35,40,.55)}
+    .gantt-bg{position:absolute;left:0;right:0;top:.9rem;bottom:0;display:flex}
+    .gantt-bg span{flex:1;border-left:1px solid rgba(28,35,40,.15);background:linear-gradient(to right,rgba(28,35,40,.07) 1px,transparent 1px);background-size:25% 100%}
+    .gantt-rows{position:relative;display:grid;row-gap:.4rem}
+    .gantt-row{position:relative;height:1.35rem;break-inside:avoid}
+    .gantt-bar{position:absolute;top:50%;height:.85rem;transform:translateY(-50%);border-radius:999px;box-shadow:0 1px 2px rgba(28,35,40,.18)}
+    .gantt-today{position:absolute;top:0;bottom:0;z-index:2;pointer-events:none}
+    .gantt-today i{position:absolute;top:.9rem;bottom:0;display:block;border-left:2px dashed #f94622}
+    .gantt-today b{position:absolute;top:0;left:4px;border-radius:999px;background:#f94622;padding:.1rem .45rem;color:#fff;font-size:.55rem;font-style:normal;font-weight:900;white-space:nowrap}
     ${reportChromeStyles}
     @media print{body{background:#fff}.report{width:100%;padding:0}.report-section{break-inside:avoid;box-shadow:none}.company-branch,.group-branch{break-inside:avoid}}
   </style>
@@ -406,7 +659,8 @@ const createSummaryReportHtmlWithCover = (data: SummaryReportData, embeddedCover
 <body>
   <main class="report">
     ${renderReportChromeHeader(data.chrome)}
-    <section class="report-section hero"${coverStyle}>
+    <section class="report-section hero${data.heroScene ? " hero--scene" : ""}"${data.heroScene ? "" : coverStyle}>
+      ${data.heroScene ? renderPixelScene() : ""}
       <div class="hero__content">
         ${data.logoUrl ? `<img class="hero__logo" src="${escapeReportHtml(data.logoUrl)}" alt="${escapeReportHtml(data.title)}">` : ""}
         <div class="hero__meta"><span>${escapeReportHtml(data.scopeLabel)}</span><span>${escapeReportHtml(data.labels.generatedAt)} · ${escapeReportHtml(data.generatedOn)}</span></div>
@@ -434,6 +688,8 @@ const createSummaryReportHtmlWithCover = (data: SummaryReportData, embeddedCover
         <div class="status-legend">${renderStatusLegend(data.statusSegments)}</div>
       </div>
     </section>
+
+    ${renderGanttSection(data)}
 
     <section class="report-section panel portfolio-section">
       <p class="section-kicker">${escapeReportHtml(data.labels.projects)}</p>
