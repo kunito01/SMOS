@@ -54,7 +54,9 @@ export function ImageCard({
             {meta}
           </p>
         ) : null}
-        <h3 className="max-w-full break-words text-xl font-black leading-tight [overflow-wrap:anywhere] sm:max-w-56 sm:text-2xl sm:leading-none">
+        {/* break-words only splits a word that cannot fit on its own line,
+            so names like COLORINU.Games wrap between words, not mid-word. */}
+        <h3 className="max-w-full break-words text-xl font-black leading-tight sm:max-w-56 sm:text-2xl sm:leading-none">
           {title}
         </h3>
         {children ? <div className="mt-4">{children}</div> : null}

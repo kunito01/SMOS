@@ -194,7 +194,7 @@ export function CompanyDetailPage({ companyId }: { companyId: string }) {
                 title={formatDemoEntityName(data.company.name, data.company.id, "company", t)}
                 meta={t("companyOverview")}
                 heightClassName="min-h-[28rem]"
-                className="[&>div.relative>h3]:max-w-56 [&>div.relative>h3]:text-2xl [&>div.relative>h3]:leading-none [&>div.relative>p]:text-sm"
+                className="[&>div.relative>h3]:max-w-full [&>div.relative>h3]:text-2xl [&>div.relative>h3]:leading-none [&>div.relative>p]:text-sm"
                 action={
                   <div className="flex items-center justify-end gap-3">
                     <Button

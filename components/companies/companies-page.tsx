@@ -261,7 +261,7 @@ export function CompaniesPage() {
                     logoUrl={summary.company.logoImage}
                     meta={t("companyOverview")}
                     heightClassName="h-auto min-h-[24rem] sm:h-[24rem]"
-                    className="p-4 transition duration-200 hover:-translate-y-1 sm:p-5"
+                    className="p-4 transition duration-200 hover:-translate-y-1 sm:p-5 [&>div.relative>h3]:sm:max-w-full"
                   />
                 </Link>
               </motion.div>
