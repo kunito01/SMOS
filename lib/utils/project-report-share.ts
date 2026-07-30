@@ -135,7 +135,7 @@ const renderTask = (task: ProjectReportTask, labels: ProjectReportLabels) => `<l
     <span class="task__title">${escapeHtml(task.title)}</span>
     <span class="task__meta">
       <span>${escapeHtml(labels.dueDate)} · ${escapeHtml(task.dueDate)}</span>
-      <span>${escapeHtml(labels.owner)} · ${escapeHtml(task.owner)}</span>
+      ${task.owner ? `<span>${escapeHtml(labels.owner)} · ${escapeHtml(task.owner)}</span>` : ""}
     </span>
   </span>
 </li>`;

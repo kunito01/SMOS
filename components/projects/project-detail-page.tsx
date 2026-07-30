@@ -434,12 +434,14 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
               .map((toolId) => toolsById.get(toolId)?.name)
               .filter((name): name is string => Boolean(name)),
             tasks: phase.deliverables.flatMap((deliverable) =>
-              deliverable.tasks.map((task) => ({
-                completed: task.completed,
-                dueDate: formatLocalizedDate(task.dueDate ?? phase.endDate, language),
-                owner: peopleById.get(task.assigneeId)?.name ?? t("owner"),
-                title: translateDomainLabel(task.title, taskTitleKeys, t) || t("untitledTask")
-              }))
+              deliverable.tasks
+                .filter((task) => task.title.trim())
+                .map((task) => ({
+                  completed: task.completed,
+                  dueDate: formatLocalizedDate(task.dueDate ?? phase.endDate, language),
+                  owner: peopleById.get(task.assigneeId)?.name ?? "",
+                  title: translateDomainLabel(task.title, taskTitleKeys, t)
+                }))
             ),
             notes: phase.notes || t("noNotes")
           };

@@ -330,7 +330,7 @@ export function ProjectTimelineChart({ project, t, onEdit, onTaskToggle, footerA
                   className="grid min-h-36 content-start gap-2 rounded-studio p-3 max-[560px]:min-h-32 max-[560px]:gap-1.5 max-[560px]:p-2 max-[420px]:min-h-28 max-[420px]:gap-1 max-[420px]:rounded-xl max-[420px]:p-1.5"
                   style={cellStyle(index, rowAlpha.tasks)}
                 >
-                  {tasks.map((task) => {
+                  {tasks.filter((task) => task.title.trim()).map((task) => {
                     const person = peopleById.get(task.assigneeId);
 
                     return (
@@ -360,15 +360,17 @@ export function ProjectTimelineChart({ project, t, onEdit, onTaskToggle, footerA
                               task.completed ? "text-muted line-through decoration-ink/35" : "text-ink"
                             )}
                           >
-                            {translateDomainLabel(task.title, taskTitleKeys, t) || t("untitledTask")}
+                            {translateDomainLabel(task.title, taskTitleKeys, t)}
                           </span>
                           <span className="mt-1 flex max-w-full flex-wrap items-center gap-x-2 gap-y-1 text-[0.7rem] font-light leading-snug text-muted max-[560px]:gap-x-1.5 max-[560px]:text-[0.62rem] max-[420px]:mt-0.5 max-[420px]:gap-x-1 max-[420px]:gap-y-0.5 max-[420px]:text-[8px] max-[420px]:leading-tight">
                             <span className="whitespace-normal break-words">
                               {formatLocalizedDate(task.dueDate ?? phase.endDate, language)}
                             </span>
-                            <span className="max-w-full whitespace-normal break-words rounded-full bg-white/65 px-2 py-0.5 max-[420px]:px-1.5">
-                              {person?.name ?? t("owner")}
-                            </span>
+                            {person ? (
+                              <span className="max-w-full whitespace-normal break-words rounded-full bg-white/65 px-2 py-0.5 max-[420px]:px-1.5">
+                                {person.name}
+                              </span>
+                            ) : null}
                           </span>
                         </span>
                       </label>
