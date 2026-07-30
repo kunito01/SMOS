@@ -613,7 +613,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
                       <p className="break-words text-sm font-black uppercase leading-tight text-white">
                         {t("projectSummary")}
                       </p>
-                      <h2 className="mt-2 break-words text-3xl font-black leading-none text-white [overflow-wrap:anywhere]">
+                      <h2 className="mt-2 whitespace-pre-line break-words text-3xl font-black leading-[1.05] text-white">
                         {projectDisplayName}
                       </h2>
                     </div>

@@ -104,7 +104,8 @@ export function ProjectBasicsEditModal({
 
     setSaving(true);
     const payload: ProjectBasicsInput = {
-      name,
+      // Keep at most single line breaks so a two-line name stays tidy.
+      name: name.replace(/\s*\n\s*/g, "\n").trim(),
       description,
       coverImage,
       groupId
@@ -154,8 +155,9 @@ export function ProjectBasicsEditModal({
             <div className="grid content-start gap-4">
               <label className="grid gap-2">
                 <span className={fieldLabelClass}>{t("projectName")}</span>
-                <input
-                  className={inputClass}
+                <textarea
+                  rows={2}
+                  className={`${inputClass} resize-none leading-6`}
                   value={name}
                   onChange={(event) => setName(event.target.value)}
                   placeholder={t("projectNamePlaceholder")}

@@ -549,7 +549,7 @@ const createSummaryReportHtmlWithCover = (data: SummaryReportData, embeddedCover
     .hero__logo{display:block;height:3.4rem;width:auto;max-width:100%;margin-bottom:1.1rem;object-fit:contain}
     .hero__meta{display:flex;flex-wrap:wrap;gap:.6rem;margin-bottom:1rem}
     .hero__meta span{display:inline-flex;min-height:2.1rem;align-items:center;border-radius:999px;background:rgba(255,255,255,.85);padding:.45rem .85rem;color:var(--ink);font-size:.74rem;font-weight:850;backdrop-filter:blur(12px)}
-    .hero h1{max-width:18ch;font-size:clamp(1.6rem,3.2vw,2.4rem);letter-spacing:-.015em;line-height:1.1}
+    .hero h1{max-width:26ch;white-space:pre-line;font-size:clamp(1.6rem,3.2vw,2.4rem);letter-spacing:-.015em;line-height:1.1}
     .hero__description{max-width:54rem;margin-top:1.15rem;color:rgba(255,255,255,.82);font-size:clamp(.95rem,1.4vw,1.15rem);line-height:1.7}
     .panel{padding:clamp(1rem,3vw,2rem)}
     .section-kicker{font-size:.74rem;font-weight:900;letter-spacing:.13em;text-transform:uppercase;opacity:.58}

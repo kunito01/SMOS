@@ -118,7 +118,7 @@ export function ProjectCreateModal({ companies, groups, open, onClose, onCreated
 
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const name = form.name.trim() || t("projectNamePlaceholder");
+    const name = form.name.replace(/\s*\n\s*/g, "\n").trim() || t("projectNamePlaceholder");
     const project = await projectsApi.createProject({
       ...form,
       name,
@@ -157,11 +157,12 @@ export function ProjectCreateModal({ companies, groups, open, onClose, onCreated
                   <div className="mt-4 grid gap-3 sm:grid-cols-2">
                     <label className="grid gap-2 sm:col-span-2">
                       <span className="text-sm font-black text-muted">{t("projectName")}</span>
-                      <input
+                      <textarea
+                        rows={2}
                         value={form.name}
                         onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
                         placeholder={t("projectNamePlaceholder")}
-                        className="h-12 rounded-full border-0 bg-white px-4 text-sm font-bold text-ink outline-none ring-1 ring-black/[0.06] focus:ring-coral"
+                        className="resize-none rounded-2xl border-0 bg-white px-4 py-3 text-sm font-bold leading-6 text-ink outline-none ring-1 ring-black/[0.06] focus:ring-coral"
                       />
                     </label>
                     <label className="grid gap-2">
