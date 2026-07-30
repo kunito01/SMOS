@@ -88,7 +88,7 @@ const projectStatusOptions: Array<{ activeClassName: string; value: ProjectStatu
 
 const defaultProjectDescription =
   "A visual studio initiative managed through phases, deliverables, people, tools, and private costs.";
-const summaryPanelColor = "#023436";
+const summaryPanelColor = "#023047";
 const summaryAccentMetricColor = "#03b5aa";
 const summaryLightMetricColor = "#fffae3";
 const summaryFinanceMetricColor = "#f7567c";
