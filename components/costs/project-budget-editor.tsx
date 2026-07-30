@@ -1,9 +1,11 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   BriefcaseBusiness,
   BusFront,
+  ChevronDown,
+  ChevronUp,
   CircleCheck,
   CirclePlus,
   Percent,
@@ -97,6 +99,8 @@ export function ProjectBudgetEditor({
   isSaving = false
 }: ProjectBudgetEditorProps) {
   const { t } = useI18n();
+  const [collapsedPhaseIds, setCollapsedPhaseIds] = useState<Set<string>>(new Set());
+  const [importedNoticePhaseId, setImportedNoticePhaseId] = useState<string | null>(null);
   const calculation = useMemo(
     () => calculateStructuredBudget(value, phases, tools, {
       currency: displayCurrency,
@@ -155,6 +159,79 @@ export function ProjectBudgetEditor({
     onChange({
       ...value,
       phases: value.phases.map((phase) => (phase.phaseId === phaseId ? update(phase) : phase))
+    });
+  };
+
+  /**
+   * Replaces the target phase's draft with a copy of another phase's budget.
+   * Line ids are regenerated and usage ranges are remapped onto the target
+   * phase's own date span; the legacy days/periods fields stay behind because
+   * the copy is fully expressed by allocation percentages.
+   */
+  const copyPhaseBudget = (targetPhaseId: string, sourcePhaseId: string) => {
+    const source = getPhaseBudget(value, sourcePhaseId);
+    const targetPhase = phases.find((phase) => phase.id === targetPhaseId);
+
+    if (!source || !targetPhase || sourcePhaseId === targetPhaseId) {
+      return;
+    }
+
+    updatePhase(targetPhaseId, () => ({
+      phaseId: targetPhaseId,
+      personnel: source.personnel.map((line) => ({
+        id: createLineId(`${targetPhaseId}:personnel`),
+        personId: line.personId,
+        roleLevel: line.roleLevel,
+        headcount: line.headcount,
+        hourlyRate: line.hourlyRate,
+        currency: line.currency,
+        startDate: targetPhase.startDate,
+        endDate: targetPhase.endDate,
+        allocationPercent: line.allocationPercent
+      })),
+      travel: source.travel ? { ...source.travel } : undefined,
+      dailyExpenseLines: source.dailyExpenseLines.map((line) => ({
+        id: createLineId(`${targetPhaseId}:daily-expenses`),
+        name: line.name,
+        amount: line.amount,
+        currency: line.currency
+      })),
+      extraCosts: source.extraCosts.map((line) => ({
+        id: createLineId(`${targetPhaseId}:${line.kind}`),
+        costTemplateId: line.costTemplateId,
+        name: line.name,
+        kind: line.kind,
+        amount: line.amount,
+        currency: line.currency
+      })),
+      softwareCosts: source.softwareCosts.map((line) => ({
+        id: createLineId(`${targetPhaseId}:software`),
+        toolId: line.toolId,
+        name: line.name,
+        amount: line.amount,
+        currency: line.currency,
+        billingCycle: line.billingCycle,
+        startDate: targetPhase.startDate,
+        endDate: targetPhase.endDate,
+        allocationPercent: line.allocationPercent
+      }))
+    }));
+    setImportedNoticePhaseId(targetPhaseId);
+    window.setTimeout(
+      () => setImportedNoticePhaseId((current) => (current === targetPhaseId ? null : current)),
+      4000
+    );
+  };
+
+  const togglePhaseCollapsed = (phaseId: string) => {
+    setCollapsedPhaseIds((current) => {
+      const next = new Set(current);
+      if (next.has(phaseId)) {
+        next.delete(phaseId);
+      } else {
+        next.add(phaseId);
+      }
+      return next;
     });
   };
 
@@ -349,6 +426,8 @@ export function ProjectBudgetEditor({
         const phaseBudget = getPhaseBudget(value, phase.id);
         const breakdown = phaseBreakdownById.get(phase.id);
         const savedPhaseBudget = savedPhaseBudgetById.get(phase.id);
+        const isCollapsed = collapsedPhaseIds.has(phase.id);
+        const otherPhases = phases.filter((candidate) => candidate.id !== phase.id);
 
         if (!phaseBudget || !breakdown) {
           return null;
@@ -370,15 +449,47 @@ export function ProjectBudgetEditor({
                   {phase.startDate} – {phase.endDate}
                 </p>
               </div>
-              <div
-                data-budget-phase-subtotal
-                className="rounded-full bg-[#f0c79f] px-4 py-2 text-sm font-black text-[#12263A]"
-              >
-                {t("budgetPhaseSubtotal")}: {formatAmount(breakdown.subtotal, displayCurrency)}
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                {!isCollapsed && otherPhases.length ? (
+                  <Select
+                    value=""
+                    aria-label={t("budgetCopyFromPhase")}
+                    onChange={(event) => copyPhaseBudget(phase.id, event.target.value)}
+                    className="h-10 min-w-[14rem] rounded-full border-0 bg-white/10 px-3 text-sm font-bold text-[#97EECE] outline-none ring-1 ring-white/15"
+                  >
+                    <option value="">{t("budgetCopyFromPhase")}</option>
+                    {otherPhases.map((candidate) => (
+                      <option key={candidate.id} value={candidate.id}>
+                        {candidate.name} · {candidate.startDate} – {candidate.endDate}
+                      </option>
+                    ))}
+                  </Select>
+                ) : null}
+                <div
+                  data-budget-phase-subtotal
+                  className="rounded-full bg-[#f0c79f] px-4 py-2 text-sm font-black text-[#12263A]"
+                >
+                  {t("budgetPhaseSubtotal")}: {formatAmount(breakdown.subtotal, displayCurrency)}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => togglePhaseCollapsed(phase.id)}
+                  aria-expanded={!isCollapsed}
+                  aria-label={t(isCollapsed ? "budgetExpandPhase" : "budgetCollapsePhase")}
+                  className="grid size-10 shrink-0 place-items-center rounded-full bg-white/10 text-[#97EECE] ring-1 ring-white/15 transition hover:bg-[#97EECE] hover:text-[#12263A]"
+                >
+                  {isCollapsed ? <ChevronDown size={18} /> : <ChevronUp size={18} />}
+                </button>
               </div>
             </div>
 
-            <div className="mt-4 grid gap-4">
+            {importedNoticePhaseId === phase.id ? (
+              <p className="mt-3 rounded-2xl bg-[#97EECE]/15 px-3 py-2 text-xs font-black leading-5 text-[#97EECE]">
+                {t("budgetCopyFromPhaseDone")}
+              </p>
+            ) : null}
+
+            <div className={isCollapsed ? "hidden" : "mt-4 grid gap-4"}>
               <div className="rounded-studio bg-white p-4 text-black">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="flex items-center gap-2">
