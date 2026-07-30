@@ -216,7 +216,9 @@ const isProjectBudgetDailyExpenseLine = (value: unknown) =>
   isRecord(value) &&
   hasStrings(value, ["id", "name", "currency"]) &&
   isMoneyCurrency(value.currency) &&
-  isFiniteNonNegativeNumber(value.amount);
+  isFiniteNonNegativeNumber(value.amount) &&
+  (value.costTemplateId === undefined || typeof value.costTemplateId === "string") &&
+  (value.billingCycle === undefined || value.billingCycle === "monthly" || value.billingCycle === "yearly");
 
 const isProjectBudgetExtraCostLine = (value: unknown) =>
   isRecord(value) &&

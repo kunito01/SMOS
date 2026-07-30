@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Banknote, Calculator, ChevronDown, CircleDollarSign, ReceiptText, Save, TrendingUp } from "lucide-react";
+import { ArrowLeft, Banknote, Calculator, ChevronDown, ChevronUp, CircleDollarSign, ReceiptText, Save, TrendingUp } from "lucide-react";
 import { CostCurrencySelector } from "@/components/costs/cost-currency-selector";
 import {
   ProjectBudgetEditor,
@@ -180,6 +180,7 @@ export function ProjectCostsPage({ projectId }: { projectId: string }) {
   const [budgetDraft, setBudgetDraft] = useState<ProjectBudget | null>(null);
   const [budgetBaseline, setBudgetBaseline] = useState<ProjectBudget | null>(null);
   const [budgetOpen, setBudgetOpen] = useState(false);
+  const [costRecordsOpen, setCostRecordsOpen] = useState(true);
   const [isSavingBudget, setIsSavingBudget] = useState(false);
   const [budgetMessage, setBudgetMessage] = useState("");
   const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false);
@@ -580,9 +581,20 @@ export function ProjectCostsPage({ projectId }: { projectId: string }) {
                   eyebrow={t("privateCost")}
                   title={t("actualCostRecords")}
                   eyebrowClassName="text-[#ebe4cf]"
+                  action={
+                    <button
+                      type="button"
+                      onClick={() => setCostRecordsOpen((current) => !current)}
+                      aria-expanded={costRecordsOpen}
+                      aria-label={t(costRecordsOpen ? "collapseCostRecords" : "expandCostRecords")}
+                      className="grid size-10 place-items-center rounded-full bg-white/15 text-white ring-1 ring-white/25 transition hover:bg-white hover:text-[#D03D01]"
+                    >
+                      {costRecordsOpen ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+                    </button>
+                  }
                 />
                 <p className="mt-3 text-sm font-bold leading-6 text-[#ebe4cf]">{t("actualCostRecordsBody")}</p>
-                <div className="mt-4 grid gap-3">
+                <div className={costRecordsOpen ? "mt-4 grid gap-3" : "hidden"}>
                   {actualCosts.map((cost) => (
                     <div key={cost.id} className="rounded-studio bg-cloud/70 p-4">
                       <div className="flex flex-wrap items-start justify-between gap-3">

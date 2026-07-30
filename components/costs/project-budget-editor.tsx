@@ -16,6 +16,7 @@ import {
   Wrench
 } from "lucide-react";
 import { useI18n } from "@/components/providers/app-providers";
+import { billingTypeKeys } from "@/lib/i18n/domain-labels";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import type {
@@ -34,6 +35,7 @@ import {
   calculatePersonnelLineNativeAmount,
   calculateSoftwareLineNativeAmount,
   calculateStructuredBudget,
+  getProjectBudgetBillingMonthKeys,
   getProjectBudgetPersonnelUsageDays,
   PROJECT_BUDGET_HOURS_PER_DAY
 } from "@/lib/utils/project-budget";
@@ -116,6 +118,10 @@ export function ProjectBudgetEditor({
     () => costTemplates.filter((template) => template.category === "outsourcing"),
     [costTemplates]
   );
+  const miscTemplates = useMemo(
+    () => costTemplates.filter((template) => ["asset", "server", "other"].includes(template.category)),
+    [costTemplates]
+  );
   const savedPhaseBudgetById = useMemo(
     () => new Map((savedValue?.phases ?? []).map((phase) => [phase.phaseId, phase])),
     [savedValue]
@@ -194,7 +200,9 @@ export function ProjectBudgetEditor({
         id: createLineId(`${targetPhaseId}:daily-expenses`),
         name: line.name,
         amount: line.amount,
-        currency: line.currency
+        currency: line.currency,
+        costTemplateId: line.costTemplateId,
+        billingCycle: line.billingCycle
       })),
       extraCosts: source.extraCosts.map((line) => ({
         id: createLineId(`${targetPhaseId}:${line.kind}`),
@@ -367,6 +375,45 @@ export function ProjectBudgetEditor({
             kind: "outsourcing",
             amount: template.amount,
             currency: template.currency
+          }
+        ]
+      };
+    });
+  };
+
+  /**
+   * Asset/server/other templates land in the daily & miscellaneous bucket.
+   * Monthly/yearly templates become recurring lines (billed once per month,
+   * deduped project-wide); anything else is a flat amount that may stack.
+   */
+  const importMiscExpense = (phaseId: string, costTemplateId: string) => {
+    const template = miscTemplates.find((item) => item.id === costTemplateId);
+
+    if (!template) {
+      return;
+    }
+
+    const isRecurring = template.billingType === "monthly" || template.billingType === "yearly";
+
+    updatePhase(phaseId, (phase) => {
+      if (
+        isRecurring &&
+        (phase.dailyExpenseLines ?? []).some((line) => line.costTemplateId === template.id)
+      ) {
+        return phase;
+      }
+
+      return {
+        ...phase,
+        dailyExpenseLines: [
+          ...(phase.dailyExpenseLines ?? []),
+          {
+            id: createLineId(`${phaseId}:daily-expenses:${template.id}`),
+            costTemplateId: template.id,
+            name: template.name,
+            amount: template.amount,
+            currency: template.currency,
+            ...(isRecurring ? { billingCycle: template.billingType as "monthly" | "yearly" } : {})
           }
         ]
       };
@@ -767,26 +814,41 @@ export function ProjectBudgetEditor({
                       <ReceiptText size={18} />
                       <h5 className="font-black">{t("budgetDailyExpenses")}</h5>
                     </div>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => updatePhase(phase.id, (current) => ({
-                        ...current,
-                        dailyExpenseLines: [
-                          ...(current.dailyExpenseLines ?? []),
-                          {
-                            id: createLineId(`${phase.id}:daily-expenses`),
-                            name: "",
-                            amount: 0,
-                            currency: displayCurrency
-                          }
-                        ]
-                      }))}
-                    >
-                      <CirclePlus size={16} />
-                      {t("addBudgetDailyExpense")}
-                    </Button>
+                    <div className="flex min-w-0 flex-wrap items-center gap-2">
+                      <Select
+                        value=""
+                        aria-label={t("importMiscFromLibrary")}
+                        onChange={(event) => importMiscExpense(phase.id, event.target.value)}
+                        className="h-10 min-w-[13rem] rounded-full border-0 bg-cloud px-3 text-sm font-bold outline-none ring-1 ring-black/[0.06]"
+                      >
+                        <option value="">{t("importMiscFromLibrary")}</option>
+                        {miscTemplates.map((template) => (
+                          <option key={template.id} value={template.id}>
+                            {template.name} · {formatCurrency(template.amount, template.currency)} · {t(billingTypeKeys[template.billingType])}
+                          </option>
+                        ))}
+                      </Select>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => updatePhase(phase.id, (current) => ({
+                          ...current,
+                          dailyExpenseLines: [
+                            ...(current.dailyExpenseLines ?? []),
+                            {
+                              id: createLineId(`${phase.id}:daily-expenses`),
+                              name: "",
+                              amount: 0,
+                              currency: displayCurrency
+                            }
+                          ]
+                        }))}
+                      >
+                        <CirclePlus size={16} />
+                        {t("addBudgetDailyExpense")}
+                      </Button>
+                    </div>
                   </div>
                   {(phaseBudget.dailyExpenseLines ?? []).length ? (
                     <div className="mt-3 grid gap-3">
@@ -799,6 +861,15 @@ export function ProjectBudgetEditor({
                               onChange={(event) => updateDailyExpense(phase.id, line.id, { name: event.target.value })}
                               className="h-10 min-w-0 w-full rounded-full border-0 bg-white px-3 text-sm font-bold outline-none ring-1 ring-black/[0.06] focus:ring-coral"
                             />
+                            {line.billingCycle ? (
+                              <span className="text-[0.68rem] font-black text-muted">
+                                {t(line.billingCycle === "monthly" ? "billingTypeMonthly" : "billingTypeYearly")} · ×
+                                {getProjectBudgetBillingMonthKeys(
+                                  { startDate: phase.startDate, endDate: phase.endDate },
+                                  phase
+                                ).length}
+                              </span>
+                            ) : null}
                           </label>
                           <label className="grid min-w-0 gap-1">
                             <span className="text-xs font-black text-muted">{t("amount")}</span>

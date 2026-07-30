@@ -271,7 +271,7 @@ const renderPayment = (payment: ProjectReportPayment, labels: ProjectReportLabel
 
 const createProjectReportHtmlWithCover = (data: ProjectReportData, embeddedCover: string | null) => {
   const progress = clampPercent(data.collectionProgress);
-  const coverStyle = embeddedCover ? ` style="background-image:linear-gradient(180deg,rgba(28,35,40,.04),rgba(28,35,40,.43)),url('${embeddedCover}')"` : "";
+  const coverStyle = embeddedCover ? ` style="background-image:url('${embeddedCover}')"` : "";
   const statusTone = data.status.tone;
   const workflowPayload = encodeBase64Json(data.workflows);
   const nonceBytes = new Uint8Array(16);
@@ -303,7 +303,7 @@ const createProjectReportHtmlWithCover = (data: ProjectReportData, embeddedCover
     .report{width:min(100%,94rem);margin:0 auto;padding:clamp(.85rem,2.4vw,2.4rem)}
     .report-section{margin-top:clamp(1rem,2vw,1.6rem);border:1px solid rgba(28,35,40,.06);border-radius:var(--radius-xl);box-shadow:0 24px 70px rgba(28,35,40,.10)}
     .hero{position:relative;display:flex;min-height:clamp(25rem,58vw,38rem);flex-direction:column;justify-content:flex-end;overflow:hidden;padding:clamp(1.2rem,4vw,3.4rem);color:#fff;background-color:#284b50;background-image:radial-gradient(circle at 20% 20%,rgba(142,219,232,.88),transparent 31%),radial-gradient(circle at 82% 78%,rgba(227,245,150,.72),transparent 34%),linear-gradient(145deg,#335b61,var(--deep));background-position:center;background-size:cover}
-    .hero::after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,rgba(28,35,40,.23),transparent 62%);pointer-events:none}
+    .hero::after{content:"";position:absolute;inset:0;background:linear-gradient(to top right,rgba(28,35,40,1),rgba(28,35,40,0));pointer-events:none}
     .hero__content{position:relative;z-index:1;max-width:58rem}
     .hero__logo{display:block;height:3.4rem;width:auto;max-width:100%;margin-bottom:1.1rem;object-fit:contain}
     .hero__meta{display:flex;flex-wrap:wrap;gap:.6rem;margin-bottom:1rem}

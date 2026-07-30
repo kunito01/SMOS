@@ -516,7 +516,7 @@ const renderGanttSection = (data: SummaryReportData) => {
 
 const createSummaryReportHtmlWithCover = (data: SummaryReportData, embeddedCover: string | null) => {
   const coverStyle = embeddedCover
-    ? ` style="background-image:linear-gradient(180deg,rgba(28,35,40,.04),rgba(28,35,40,.43)),url('${embeddedCover}')"`
+    ? ` style="background-image:url('${embeddedCover}')"`
     : "";
   const cuneiformFontStyle = data.language === "sux"
     ? `@font-face{font-family:"SMOS Cuneiform";font-style:normal;font-weight:400;font-display:swap;src:local("Noto Sans Cuneiform"),url("https://fonts.gstatic.com/s/notosanscuneiform/v18/bMrrmTWK7YY-MF22aHGGd7H8PhJtvBDWgb8.ttf") format("truetype");unicode-range:U+12000-123FF,U+12400-1247F,U+12480-1254F}`
@@ -544,7 +544,7 @@ const createSummaryReportHtmlWithCover = (data: SummaryReportData, embeddedCover
     .report{width:min(100%,94rem);margin:0 auto;padding:clamp(.85rem,2.4vw,2.4rem)}
     .report-section{margin-top:clamp(1rem,2vw,1.6rem);border:1px solid rgba(28,35,40,.06);border-radius:var(--radius-xl);box-shadow:0 24px 70px rgba(28,35,40,.10)}
     .hero{position:relative;display:flex;min-height:clamp(22rem,48vw,32rem);flex-direction:column;justify-content:flex-end;overflow:hidden;padding:clamp(1.2rem,4vw,3.4rem);color:#fff;background-color:#284b50;background-image:radial-gradient(circle at 20% 20%,rgba(142,219,232,.88),transparent 31%),radial-gradient(circle at 82% 78%,rgba(227,245,150,.72),transparent 34%),linear-gradient(145deg,#335b61,var(--deep));background-position:center;background-size:cover}
-    .hero::after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,rgba(28,35,40,.23),transparent 62%);pointer-events:none}
+    .hero::after{content:"";position:absolute;inset:0;background:linear-gradient(to top right,rgba(28,35,40,1),rgba(28,35,40,0));pointer-events:none}
     .hero__content{position:relative;z-index:1;max-width:58rem}
     .hero__logo{display:block;height:3.4rem;width:auto;max-width:100%;margin-bottom:1.1rem;object-fit:contain}
     .hero__meta{display:flex;flex-wrap:wrap;gap:.6rem;margin-bottom:1rem}

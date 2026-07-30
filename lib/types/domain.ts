@@ -129,6 +129,14 @@ export type ProjectBudgetDirectExpense = {
 export type ProjectBudgetDailyExpenseLine = ProjectBudgetDirectExpense & {
   id: string;
   name: string;
+  /** Present when imported from an asset/server/other cost template. */
+  costTemplateId?: string;
+  /**
+   * Recurring template imports bill once per calendar month the phase
+   * touches (project-wide, never twice for the same template and month);
+   * absent means a flat one-time amount that may stack freely.
+   */
+  billingCycle?: "monthly" | "yearly";
 };
 
 export type ProjectBudgetExtraCostLine = ProjectBudgetDirectExpense & {

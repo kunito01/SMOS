@@ -160,7 +160,13 @@ const cleanDailyExpenseLine = (value: unknown): ProjectBudgetDailyExpenseLine | 
     id: value.id,
     name: value.name,
     amount: cleanNonNegativeNumber(value.amount),
-    currency: value.currency
+    currency: value.currency,
+    ...(typeof value.costTemplateId === "string" && value.costTemplateId
+      ? { costTemplateId: value.costTemplateId }
+      : {}),
+    ...(value.billingCycle === "monthly" || value.billingCycle === "yearly"
+      ? { billingCycle: value.billingCycle }
+      : {})
   };
 };
 
