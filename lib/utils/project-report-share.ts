@@ -313,7 +313,7 @@ const createProjectReportHtmlWithCover = (data: ProjectReportData, embeddedCover
     .panel{padding:clamp(1rem,3vw,2rem)}
     .section-kicker{font-size:.74rem;font-weight:900;letter-spacing:.13em;text-transform:uppercase;opacity:.58}
     .section-title{margin-top:.4rem;font-size:clamp(1.35rem,2.4vw,2rem);letter-spacing:-.015em;line-height:1.1}
-    .summary{background:var(--deep);color:#fff}
+    .summary{background:#023047;color:#fff}
     .summary-grid,.payment-metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.75rem;margin-top:1.4rem}
     .metric{min-width:0;min-height:8.4rem;border-radius:var(--radius-md);padding:1rem;color:var(--ink);box-shadow:inset 0 0 0 1px rgba(255,255,255,.35)}
     .metric--aqua{background:var(--aqua-strong)}.metric--cloud{background:var(--cream)}.metric--coral{background:var(--pink)}.metric--ink{background:var(--ink);color:#fff}.metric--lime{background:var(--lime)}
