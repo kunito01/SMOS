@@ -16,7 +16,7 @@ export function SectionHeader({ eyebrow, title, action, className, eyebrowClassN
         {eyebrow ? <p className={cn("mb-2 text-sm font-bold text-muted", eyebrowClassName)}>{eyebrow}</p> : null}
         <h2 className={cn("text-2xl font-black leading-none text-ink sm:text-3xl", titleClassName)}>{title}</h2>
       </div>
-      {action ? <div className="shrink-0">{action}</div> : null}
+      {action ? <div className="min-w-0 max-w-full shrink-0">{action}</div> : null}
     </div>
   );
 }

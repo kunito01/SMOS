@@ -455,7 +455,7 @@ export function ProjectBudgetEditor({
 
   return (
     <div className="grid gap-4">
-      {showHeader ? <div className="rounded-studio bg-ink p-4 text-white">
+      {showHeader ? <div className="min-w-0 rounded-studio bg-ink p-4 text-white">
         <div className="flex items-start gap-3">
           <span className="grid size-10 shrink-0 place-items-center rounded-full bg-limepop text-ink">
             <ReceiptText size={18} />
@@ -484,7 +484,7 @@ export function ProjectBudgetEditor({
           <section
             key={phase.id}
             data-budget-phase-index={phaseIndex}
-            className="rounded-studio bg-[#12263A] p-4 text-[#97EECE] ring-1 ring-black/[0.08]"
+            className="min-w-0 rounded-studio bg-[#12263A] p-4 text-[#97EECE] ring-1 ring-black/[0.08]"
           >
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
@@ -502,7 +502,7 @@ export function ProjectBudgetEditor({
                     value=""
                     aria-label={t("budgetCopyFromPhase")}
                     onChange={(event) => copyPhaseBudget(phase.id, event.target.value)}
-                    className="h-10 min-w-[14rem] rounded-full border-0 bg-white/10 px-3 text-sm font-bold text-[#97EECE] outline-none ring-1 ring-white/15"
+                    className="h-10 min-w-[14rem] rounded-full border-0 bg-white px-3 text-sm font-bold text-ink outline-none ring-1 ring-black/[0.06]"
                   >
                     <option value="">{t("budgetCopyFromPhase")}</option>
                     {otherPhases.map((candidate) => (
@@ -536,8 +536,8 @@ export function ProjectBudgetEditor({
               </p>
             ) : null}
 
-            <div className={isCollapsed ? "hidden" : "mt-4 grid gap-4"}>
-              <div className="rounded-studio bg-white p-4 text-black">
+            <div className={isCollapsed ? "hidden" : "mt-4 grid min-w-0 gap-4"}>
+              <div className="min-w-0 rounded-studio bg-white p-4 text-black">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="flex items-center gap-2">
                     <UsersRound size={18} />
@@ -738,8 +738,8 @@ export function ProjectBudgetEditor({
                 </div>
               </div>
 
-              <div className="grid gap-4 lg:grid-cols-2">
-                <div className="rounded-studio bg-white p-4 text-black">
+              <div className="grid min-w-0 gap-4 lg:grid-cols-2">
+                <div className="min-w-0 rounded-studio bg-white p-4 text-black">
                   <div className="flex items-center gap-2">
                     <BusFront size={18} />
                     <h5 className="font-black">{t("budgetTravel")}</h5>
@@ -808,7 +808,7 @@ export function ProjectBudgetEditor({
                   </div>
                 </div>
 
-                <div className="rounded-studio bg-white p-4 text-black">
+                <div className="min-w-0 rounded-studio bg-white p-4 text-black">
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div className="flex items-center gap-2">
                       <ReceiptText size={18} />
@@ -925,7 +925,7 @@ export function ProjectBudgetEditor({
                 </div>
               </div>
 
-              <div data-budget-outsourcing-panel className="rounded-studio bg-[#dff478] p-4 text-black">
+              <div data-budget-outsourcing-panel className="min-w-0 rounded-studio bg-[#dff478] p-4 text-black">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="flex items-center gap-2">
                     <BriefcaseBusiness size={18} />
@@ -1052,7 +1052,7 @@ export function ProjectBudgetEditor({
                 </div>
               </div>
 
-              <div className="rounded-studio bg-ink p-4 text-white">
+              <div className="min-w-0 rounded-studio bg-ink p-4 text-white">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="flex items-center gap-2">
                     <Wrench size={18} />
@@ -1299,7 +1299,7 @@ export function ProjectBudgetEditor({
             </div>
             <span className="mt-2 block text-lg font-black">{formatAmount(calculation.tax, displayCurrency)}</span>
           </label>
-          <div className="rounded-studio bg-ink p-4 text-white">
+          <div className="min-w-0 rounded-studio bg-ink p-4 text-white">
             <p className="text-xs font-black text-white/55">{t("projectBudgetTotal")}</p>
             <p className="mt-2 text-3xl font-black">{formatAmount(calculation.total, displayCurrency)}</p>
           </div>

@@ -625,7 +625,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
                       className="shrink-0 text-white"
                     />
                   </div>
-                  <div className="mt-5 grid min-w-0 grid-cols-6 gap-3">
+                  <div className="mt-5 grid min-w-0 grid-cols-2 gap-3 min-[520px]:grid-cols-6">
                     {[
                       {
                         label: t("averageProgressShort"),
@@ -659,7 +659,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
                           key={item.label}
                           className={cn(
                             "min-w-0 rounded-studio p-3 shadow-soft ring-1 ring-white/[0.38]",
-                            index < 6 ? "col-span-2" : "col-span-3"
+                            index < 6 ? "col-span-1 min-[520px]:col-span-2" : "col-span-1 min-[520px]:col-span-3"
                           )}
                           style={{ backgroundColor: item.backgroundColor }}
                         >
@@ -667,7 +667,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
                             <span className="grid size-8 shrink-0 place-items-center rounded-full bg-limepop text-ink">
                               <Icon className="size-4" />
                             </span>
-                            <span className="min-w-0 break-words text-xs font-black uppercase leading-tight text-ink/58 [overflow-wrap:anywhere]">
+                            <span className="min-w-0 break-words text-[11px] font-black uppercase leading-tight text-ink/58 min-[520px]:text-xs">
                               {item.label}
                             </span>
                           </div>
@@ -676,7 +676,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
                               "mt-3 min-w-0 font-black leading-tight",
                               isAtomicValue
                                 ? "max-w-full whitespace-nowrap text-[clamp(0.72rem,2.1vw,1.5rem)] tabular-nums tracking-[-0.025em]"
-                                : "break-words text-2xl [overflow-wrap:anywhere]"
+                                : "break-words text-[clamp(0.95rem,3.8vw,1.5rem)]"
                             )}
                           >
                             {item.value}

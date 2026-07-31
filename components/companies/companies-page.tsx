@@ -274,6 +274,7 @@ export function CompaniesPage() {
             <SectionHeader
               eyebrow={t("projectGroupsCount")}
               title={t("groupTypes")}
+              className="flex-wrap"
               action={(
                 <div className="flex flex-wrap justify-end gap-2">
                   <Button
