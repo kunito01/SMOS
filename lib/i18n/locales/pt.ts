@@ -637,7 +637,7 @@ export const ptTranslations = {
   billingTypeDaily: "Por dia",
   actual: "Real",
   estimated: "Estimado",
-  projectCostItems: "Itens de custo",
+  projectCostItems: "Custos do projeto",
   globalCostsTitle: "Painel de custos de todos os projetos",
   globalCostsBody: "Analise o custo real, as estimativas futuras e os acessos aos custos privados de cada projeto.",
   librariesTitle: "Bibliotecas de pessoas, softwares e custos.",

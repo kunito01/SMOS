@@ -579,12 +579,19 @@ export function VisualDashboardShell() {
                 <div className="rounded-full bg-white/[0.88] p-1">
                   <ProgressBar value={project.progress} barClassName={index === 1 ? "bg-limepop" : "bg-coral"} />
                 </div>
-                <Pill
-                  tone={projectStatusTone[project.status]}
-                  className="mt-3 min-h-7 px-3 text-xs font-black"
-                >
-                  {t(statusKeys[project.status])}
-                </Pill>
+                <span className="mt-3 flex min-w-0 flex-wrap items-center gap-2">
+                  <Pill
+                    tone={projectStatusTone[project.status]}
+                    className="min-h-7 px-3 text-xs font-black"
+                  >
+                    {t(statusKeys[project.status])}
+                  </Pill>
+                  {project.codingDevice ? (
+                    <span className="inline-flex min-h-7 max-w-36 items-center rounded-full bg-[#112f45] px-3 text-xs font-black text-white">
+                      <span className="truncate">{project.codingDevice}</span>
+                    </span>
+                  ) : null}
+                </span>
               </ImageCard>
               </motion.div>
             </Link>

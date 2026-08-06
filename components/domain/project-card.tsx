@@ -5,6 +5,7 @@ import { ArrowRight } from "lucide-react";
 import { ImageCard } from "@/components/cards/image-card";
 import { useI18n } from "@/components/providers/app-providers";
 import { ProjectReleaseBadges } from "@/components/projects/project-release-badges";
+import { Pill } from "@/components/ui/pill";
 import { ProgressBar } from "@/components/ui/progress-bar";
 import {
   formatDemoEntityName,
@@ -23,6 +24,14 @@ type ProjectCardProps = {
   t: (key: TranslationKey) => string;
   href?: string;
   actionLabel?: string;
+};
+
+const projectStatusTone: Record<Project["status"], "aqua" | "lime" | "coral" | "dark" | "cloud"> = {
+  planning: "cloud",
+  active: "coral",
+  paused: "dark",
+  terminated: "cloud",
+  completed: "lime"
 };
 
 export function ProjectCard({ project, groups, t, href = projectPath(project.id), actionLabel }: ProjectCardProps) {
@@ -48,8 +57,15 @@ export function ProjectCard({ project, groups, t, href = projectPath(project.id)
           <ProgressBar value={project.progress} />
         </div>
         <div className="mt-3 flex items-center justify-between gap-3">
-          <span className="rounded-full bg-white/85 px-3 py-1 text-xs font-black text-ink">
-            {t(statusKeys[project.status])}
+          <span className="flex min-w-0 flex-wrap items-center gap-2">
+            <Pill tone={projectStatusTone[project.status]} className="min-h-7 px-3 text-xs font-black">
+              {t(statusKeys[project.status])}
+            </Pill>
+            {project.codingDevice ? (
+              <span className="inline-flex min-h-7 max-w-36 items-center rounded-full bg-[#112f45] px-3 text-xs font-black text-white">
+                <span className="truncate">{project.codingDevice}</span>
+              </span>
+            ) : null}
           </span>
           <span className="inline-flex h-10 items-center justify-center gap-2 rounded-full bg-limepop px-4 text-sm font-semibold text-ink">
             {actionLabel ?? t("viewProject")}

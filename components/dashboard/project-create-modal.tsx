@@ -45,6 +45,7 @@ const createInitialForm = (companies: Company[], groups: ProjectGroup[]): Create
   companyId: companies[0]?.id ?? "",
   groupId: groups[0]?.id ?? "",
   status: "planning",
+  codingDevice: "",
   startDate: defaultProjectStartDate,
   endDate: defaultProjectEndDate,
   toolIds: [],
@@ -56,6 +57,7 @@ export function ProjectCreateModal({ companies, groups, open, onClose, onCreated
   const { language, t } = useI18n();
   const [people, setPeople] = useState<Person[]>([]);
   const [tools, setTools] = useState<Tool[]>([]);
+  const [deviceOptions, setDeviceOptions] = useState<string[]>([]);
   const [form, setForm] = useState<CreateProjectInput>(() => createInitialForm(companies, groups));
 
   useEffect(() => {
@@ -68,14 +70,18 @@ export function ProjectCreateModal({ companies, groups, open, onClose, onCreated
     let isMounted = true;
 
     async function loadLibraries() {
-      const [nextPeople, nextTools] = await Promise.all([
+      const [nextPeople, nextTools, projects] = await Promise.all([
         librariesApi.listPeople(),
-        librariesApi.listTools()
+        librariesApi.listTools(),
+        projectsApi.listProjects()
       ]);
 
       if (isMounted) {
         setPeople(nextPeople);
         setTools(nextTools);
+        setDeviceOptions(
+          [...new Set(projects.map((item) => item.codingDevice?.trim()).filter((device): device is string => Boolean(device)))].sort()
+        );
       }
     }
 
@@ -122,6 +128,7 @@ export function ProjectCreateModal({ companies, groups, open, onClose, onCreated
     const project = await projectsApi.createProject({
       ...form,
       name,
+      codingDevice: form.codingDevice?.trim() ?? "",
       endDate: form.endDate >= form.startDate ? form.endDate : form.startDate,
       costTemplateIds: []
     });
@@ -210,6 +217,36 @@ export function ProjectCreateModal({ companies, groups, open, onClose, onCreated
                         ))}
                       </Select>
                     </label>
+                    <div className="grid gap-2 sm:col-span-2">
+                      <label className="grid gap-2">
+                        <span className="text-sm font-black text-muted">{t("codingDevice")}</span>
+                        <input
+                          value={form.codingDevice ?? ""}
+                          onChange={(event) => setForm((current) => ({ ...current, codingDevice: event.target.value }))}
+                          placeholder={t("codingDevicePlaceholder")}
+                          className="h-12 rounded-full border-0 bg-white px-4 text-sm font-bold text-ink outline-none ring-1 ring-black/[0.06] focus:ring-coral"
+                        />
+                      </label>
+                      {deviceOptions.length > 0 ? (
+                        <div className="flex flex-wrap gap-2">
+                          {deviceOptions.map((device) => (
+                            <button
+                              key={device}
+                              type="button"
+                              onClick={() => setForm((current) => ({ ...current, codingDevice: device }))}
+                              className={cn(
+                                "min-h-7 rounded-full px-3 text-xs font-black transition",
+                                (form.codingDevice ?? "").trim() === device
+                                  ? "bg-[#112f45] text-white"
+                                  : "bg-white text-ink ring-1 ring-black/[0.08] hover:bg-[#112f45] hover:text-white"
+                              )}
+                            >
+                              {device}
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
                   </div>
                 </section>
 

@@ -637,7 +637,7 @@ export const deTranslations = {
   billingTypeDaily: "Täglich",
   actual: "Ist",
   estimated: "Geschätzt",
-  projectCostItems: "Kostenposten",
+  projectCostItems: "Projektkosten",
   globalCostsTitle: "Kostenbereich aller Projekte",
   globalCostsBody: "Prüfe Ist-Kosten, künftige Schätzungen und private Kostenbereiche nach Projekt.",
   librariesTitle: "Bibliotheken für Personen, Software und Kosten.",

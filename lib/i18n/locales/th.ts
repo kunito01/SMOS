@@ -637,7 +637,7 @@ export const thTranslations = {
   billingTypeDaily: "รายวัน",
   actual: "จริง",
   estimated: "ประมาณการ",
-  projectCostItems: "รายการค่าใช้จ่าย",
+  projectCostItems: "ต้นทุนโครงการ",
   globalCostsTitle: "ค่าใช้จ่ายของทุกโปรเจกต์",
   globalCostsBody: "ตรวจสอบค่าใช้จ่ายจริง ประมาณการในอนาคต และทางเข้าค่าใช้จ่ายส่วนตัวของแต่ละโปรเจกต์",
   librariesTitle: "คลังบุคลากร ซอฟต์แวร์ และค่าใช้จ่าย",

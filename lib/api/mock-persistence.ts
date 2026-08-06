@@ -315,6 +315,7 @@ const isProject = (value: unknown) =>
   (value.isExample === undefined || typeof value.isExample === "boolean") &&
   (value.importPlaceholder === undefined || typeof value.importPlaceholder === "boolean") &&
   (value.timelineConfigured === undefined || typeof value.timelineConfigured === "boolean") &&
+  (value.codingDevice === undefined || typeof value.codingDevice === "string") &&
   (value.timelineRows === undefined || isEntityArray(value.timelineRows)) &&
   (value.workflowIds === undefined || isProjectWorkflowIds(value.workflowIds)) &&
   (value.workflows === undefined || isProjectWorkflows(value.workflows)) &&

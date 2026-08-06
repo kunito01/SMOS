@@ -79,6 +79,8 @@ export type ProjectBasicsInput = {
   description: string;
   coverImage?: string;
   groupId: string;
+  /** Empty string clears the stored device. */
+  codingDevice?: string;
 };
 
 export type ProjectReleaseInput = {
@@ -270,6 +272,10 @@ export async function createProject(input: CreateProjectInput) {
   project.startDate = input.startDate;
   project.endDate = input.endDate;
   project.description = "";
+  const codingDevice = input.codingDevice?.trim() ?? "";
+  if (codingDevice) {
+    project.codingDevice = codingDevice;
+  }
   project.timelineTitle = "";
   project.timelineConfigured = false;
   project.timelineRows = [];
@@ -593,6 +599,16 @@ export async function updateProjectBasics(projectId: string, input: ProjectBasic
   project.name = input.name.trim() || project.name;
   project.description = input.description.trim() || project.description;
   project.groupId = groupId;
+
+  if (input.codingDevice !== undefined) {
+    const codingDevice = input.codingDevice.trim();
+
+    if (codingDevice) {
+      project.codingDevice = codingDevice;
+    } else {
+      delete project.codingDevice;
+    }
+  }
 
   if (input.coverImage) {
     assertUploadedImageWithinLimit(input.coverImage);

@@ -346,6 +346,8 @@ export type Project = {
   startDate: string;
   endDate: string;
   timelineTitle?: string;
+  /** Free-form name of the machine this project is coded on. */
+  codingDevice?: string;
   /** False only for newly-created projects until the timeline is explicitly saved. */
   timelineConfigured?: boolean;
   timelineRows?: TimelineCustomRow[];
@@ -607,6 +609,7 @@ export type CreateProjectInput = {
   companyId: string;
   groupId: string;
   status: ProjectStatus;
+  codingDevice?: string;
   startDate: string;
   endDate: string;
   toolIds: string[];

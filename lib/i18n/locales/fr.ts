@@ -637,7 +637,7 @@ export const frTranslations = {
   billingTypeDaily: "Journalier",
   actual: "Réel",
   estimated: "Estimé",
-  projectCostItems: "Postes de coûts",
+  projectCostItems: "Coûts des projets",
   globalCostsTitle: "Coûts de tous les projets",
   globalCostsBody: "Consultez les coûts réels, les estimations futures et l’accès aux coûts privés de chaque projet.",
   librariesTitle: "Bibliothèques de personnes, logiciels et coûts.",

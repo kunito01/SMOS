@@ -16,6 +16,7 @@ import {
 } from "@/lib/i18n/domain-labels";
 import type { TranslationKey } from "@/lib/i18n/translations";
 import type { Project, ProjectGroup } from "@/lib/types";
+import { cn } from "@/lib/utils/cn";
 import { MAX_UPLOAD_IMAGE_BYTES } from "@/lib/utils/image-upload";
 
 type ProjectBasicsEditModalProps = {
@@ -46,6 +47,8 @@ export function ProjectBasicsEditModal({
   const [description, setDescription] = useState(project.description);
   const [coverImage, setCoverImage] = useState(project.coverImage);
   const [groupId, setGroupId] = useState(project.groupId);
+  const [codingDevice, setCodingDevice] = useState(project.codingDevice ?? "");
+  const [deviceOptions, setDeviceOptions] = useState<string[]>([]);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -58,8 +61,24 @@ export function ProjectBasicsEditModal({
     setDescription(project.description);
     setCoverImage(project.coverImage);
     setGroupId(groups.some((group) => group.id === project.groupId) ? project.groupId : "");
+    setCodingDevice(project.codingDevice ?? "");
     setError("");
     setSaving(false);
+
+    // Devices already used by other projects become pickable suggestions.
+    let cancelled = false;
+    void projectsApi.listProjects().then((projects) => {
+      if (cancelled) {
+        return;
+      }
+      setDeviceOptions(
+        [...new Set(projects.map((item) => item.codingDevice?.trim()).filter((device): device is string => Boolean(device)))].sort()
+      );
+    });
+
+    return () => {
+      cancelled = true;
+    };
   }, [groups, open, project]);
 
   if (!open) {
@@ -108,7 +127,8 @@ export function ProjectBasicsEditModal({
       name: name.replace(/\s*\n\s*/g, "\n").trim(),
       description,
       coverImage,
-      groupId
+      groupId,
+      codingDevice: codingDevice.trim()
     };
     try {
       const nextProject = await projectsApi.updateProjectBasics(project.id, payload);
@@ -163,6 +183,37 @@ export function ProjectBasicsEditModal({
                   placeholder={t("projectNamePlaceholder")}
                 />
               </label>
+
+              <div className="grid gap-2">
+                <label className="grid gap-2">
+                  <span className={fieldLabelClass}>{t("codingDevice")}</span>
+                  <input
+                    className={inputClass}
+                    value={codingDevice}
+                    onChange={(event) => setCodingDevice(event.target.value)}
+                    placeholder={t("codingDevicePlaceholder")}
+                  />
+                </label>
+                {deviceOptions.length > 0 ? (
+                  <div className="flex flex-wrap gap-2">
+                    {deviceOptions.map((device) => (
+                      <button
+                        key={device}
+                        type="button"
+                        onClick={() => setCodingDevice(device)}
+                        className={cn(
+                          "min-h-7 rounded-full px-3 text-xs font-black transition",
+                          codingDevice.trim() === device
+                            ? "bg-[#112f45] text-white"
+                            : "bg-white text-ink ring-1 ring-black/[0.08] hover:bg-[#112f45] hover:text-white"
+                        )}
+                      >
+                        {device}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
 
               <label className="grid gap-2">
                 <span className={fieldLabelClass}>{t("chooseGroup")}</span>

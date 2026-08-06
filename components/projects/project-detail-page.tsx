@@ -14,6 +14,7 @@ import {
   CircleDollarSign,
   FileStack,
   GitBranch,
+  MonitorSmartphone,
   Pencil,
   RotateCcw,
   Save,
@@ -616,6 +617,12 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
                       <h2 className="mt-2 whitespace-pre-line break-words text-3xl font-black leading-[1.05] text-white">
                         {projectDisplayName}
                       </h2>
+                      {data.project.codingDevice ? (
+                        <span className="mt-3 inline-flex min-h-7 max-w-full items-center gap-1.5 rounded-full bg-limepop px-3 text-xs font-black text-ink">
+                          <MonitorSmartphone size={13} className="shrink-0" />
+                          <span className="truncate">{data.project.codingDevice}</span>
+                        </span>
+                      ) : null}
                     </div>
                     <ProgressRing
                       value={data.project.progress}

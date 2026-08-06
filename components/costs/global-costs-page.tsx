@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowRight, Banknote, Calculator, CircleDollarSign, ReceiptText, TrendingUp } from "lucide-react";
+import { ArrowRight, Banknote, Calculator, ChevronDown, ChevronUp, CircleDollarSign, ReceiptText, TrendingUp } from "lucide-react";
 import { CostCurrencySelector } from "@/components/costs/cost-currency-selector";
 import { PixelUnderseaScene } from "@/components/costs/pixel-undersea-scene";
 import { useCostDisplayCurrency } from "@/components/costs/use-cost-display-currency";
@@ -12,7 +12,7 @@ import { Card } from "@/components/ui/card";
 import { LoadingState } from "@/components/ui/loading-state";
 import { ProgressBar } from "@/components/ui/progress-bar";
 import { SectionHeader } from "@/components/ui/section-header";
-import { costsApi, groupsApi, projectsApi } from "@/lib/api";
+import { companiesApi, costsApi, groupsApi, projectsApi } from "@/lib/api";
 import type { CostSummary, ProjectCostSummary } from "@/lib/api/costs";
 import {
   budgetCostCategoryKeys,
@@ -22,10 +22,11 @@ import {
   projectNameKeys,
   translateDomainLabel
 } from "@/lib/i18n/domain-labels";
-import type { CostItem, Project, ProjectGroup } from "@/lib/types";
+import type { Company, CostItem, Project, ProjectGroup } from "@/lib/types";
 import { projectCostsPath } from "@/lib/utils/app-routes";
 
 type GlobalCostsData = {
+  companies: Company[];
   projects: Project[];
   groups: ProjectGroup[];
   globalSummary: CostSummary;
@@ -49,6 +50,7 @@ export function GlobalCostsPage() {
     setDisplayCurrency
   } = useCostDisplayCurrency();
   const [data, setData] = useState<GlobalCostsData | null>(null);
+  const [collapsedCompanyIds, setCollapsedCompanyIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (!isCurrencyReady) {
@@ -58,7 +60,8 @@ export function GlobalCostsPage() {
     let isMounted = true;
 
     async function load() {
-      const [projects, groups, globalSummary] = await Promise.all([
+      const [companies, projects, groups, globalSummary] = await Promise.all([
+        companiesApi.listCompanies(),
         projectsApi.listProjects(),
         groupsApi.listGroups(),
         costsApi.getGlobalCostSummary(displayCurrency, exchangeRateSnapshot)
@@ -70,7 +73,7 @@ export function GlobalCostsPage() {
       );
 
       if (isMounted) {
-        setData({ projects, groups, globalSummary, projectSummaries });
+        setData({ companies, projects, groups, globalSummary, projectSummaries });
       }
     }
 
@@ -85,6 +88,31 @@ export function GlobalCostsPage() {
     () => new Map((data?.projectSummaries ?? []).map((summary) => [summary.projectId, summary])),
     [data?.projectSummaries]
   );
+  const groupById = useMemo(
+    () => new Map((data?.groups ?? []).map((group) => [group.id, group])),
+    [data?.groups]
+  );
+  const companyBuckets = useMemo(() => {
+    const projects = data?.projects ?? [];
+    const buckets = (data?.companies ?? [])
+      .map((company) => ({
+        id: company.id,
+        name: formatDemoEntityName(company.name, company.id, "company", t),
+        logoImage: company.logoImage,
+        projects: projects.filter((project) => project.companyId === company.id)
+      }))
+      .filter((bucket) => bucket.projects.length > 0);
+    const knownCompanyIds = new Set((data?.companies ?? []).map((company) => company.id));
+    const unassigned = projects.filter(
+      (project) => !project.companyId || !knownCompanyIds.has(project.companyId)
+    );
+
+    if (unassigned.length) {
+      buckets.push({ id: "unassigned", name: t("unassignedGroup"), logoImage: undefined, projects: unassigned });
+    }
+
+    return buckets;
+  }, [data?.companies, data?.projects, t]);
   const maxCategory = Math.max(1, ...Object.values(data?.globalSummary.byCategory ?? {}));
 
   return (
@@ -178,48 +206,85 @@ export function GlobalCostsPage() {
             <section className="mt-6 grid gap-4 xl:grid-cols-[minmax(0,0.72fr)_minmax(320px,0.42fr)]">
               <Card tone="white" className="p-5 sm:p-6">
                 <SectionHeader eyebrow={t("projectCostItems")} title={t("creativeProjects")} />
-                <div className="mt-5 grid gap-3">
-                  {data.projects.map((project) => {
-                    const summary = projectSummaryById.get(project.id);
-                    const group = data.groups.find((item) => item.id === project.groupId);
+                <div className="mt-5 grid gap-4">
+                  {companyBuckets.map((bucket) => {
+                    const isCollapsed = collapsedCompanyIds.has(bucket.id);
 
                     return (
-                      <Link key={project.id} href={projectCostsPath(project.id)} prefetch={false}>
-                        <div
-                          className={`rounded-studio p-4 transition duration-200 hover:-translate-y-1 ${
-                            groupCostCardToneClasses[group?.colorTheme ?? ""] ?? "bg-cloud/70 text-ink"
-                          }`}
+                      <div key={bucket.id} className="min-w-0 rounded-studio bg-cloud/45 p-3 ring-1 ring-black/[0.04]">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setCollapsedCompanyIds((current) => {
+                              const next = new Set(current);
+                              if (next.has(bucket.id)) {
+                                next.delete(bucket.id);
+                              } else {
+                                next.add(bucket.id);
+                              }
+                              return next;
+                            })
+                          }
+                          aria-expanded={!isCollapsed}
+                          className="flex w-full min-w-0 items-center justify-between gap-3 rounded-2xl px-1 py-1 text-left"
                         >
-                          <div className="flex flex-wrap items-start justify-between gap-3">
-                            <div>
-                              <p className="text-sm font-bold text-muted">
-                                {group ? getProjectGroupDisplayName(group, language, t) : ""}
-                              </p>
-                              <h3 className="mt-1 text-xl font-black">
-                                {formatDemoEntityName(
-                                  translateDomainLabel(project.name, projectNameKeys, t),
-                                  project.id,
-                                  "project",
-                                  t,
-                                  project.isExample
-                                )}
-                              </h3>
-                            </div>
-                            <div className="text-right">
-                              <p className="text-2xl font-black">
-                                {formatAmount(summary?.budgetCostTotal ?? 0, summary?.currency ?? displayCurrency)}
-                              </p>
-                              <p className="mt-1 text-sm font-bold text-muted">
-                                {t("currentProfit")}: {formatAmount(summary?.actualProfit ?? 0, summary?.currency ?? displayCurrency)}
-                              </p>
-                              <span className="mt-2 inline-flex h-10 items-center justify-center gap-2 rounded-full bg-limepop px-4 text-sm font-semibold text-ink">
-                                {t("openCosts")}
-                                <ArrowRight size={16} />
-                              </span>
-                            </div>
-                          </div>
+                          <span className="flex min-w-0 items-center gap-2.5">
+                            {bucket.logoImage ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img src={bucket.logoImage} alt="" className="h-7 w-auto max-w-24 shrink-0 object-contain" />
+                            ) : null}
+                            <span className="truncate text-lg font-black">{bucket.name}</span>
+                            <span className="shrink-0 rounded-full bg-white px-2.5 py-0.5 text-xs font-black text-muted ring-1 ring-black/[0.05]">
+                              {bucket.projects.length}
+                            </span>
+                          </span>
+                          <span className="grid size-9 shrink-0 place-items-center rounded-full bg-white text-ink shadow-sm ring-1 ring-black/[0.05]">
+                            {isCollapsed ? <ChevronDown size={17} /> : <ChevronUp size={17} />}
+                          </span>
+                        </button>
+                        <div className={isCollapsed ? "hidden" : "mt-3 grid gap-3 sm:grid-cols-2"}>
+                          {bucket.projects.map((project) => (
+                            <Link key={project.id} href={projectCostsPath(project.id)} prefetch={false}>
+                              <div
+                                className={`h-full rounded-studio p-4 transition duration-200 hover:-translate-y-1 ${
+                                  groupCostCardToneClasses[groupById.get(project.groupId)?.colorTheme ?? ""] ?? "bg-cloud/70 text-ink"
+                                }`}
+                              >
+                                <p className="text-sm font-bold text-muted">
+                                  {groupById.get(project.groupId)
+                                    ? getProjectGroupDisplayName(groupById.get(project.groupId)!, language, t)
+                                    : ""}
+                                </p>
+                                <h3 className="mt-1 break-words text-xl font-black">
+                                  {formatDemoEntityName(
+                                    translateDomainLabel(project.name, projectNameKeys, t),
+                                    project.id,
+                                    "project",
+                                    t,
+                                    project.isExample
+                                  )}
+                                </h3>
+                                <p className="mt-3 text-2xl font-black tabular-nums">
+                                  {formatAmount(
+                                    projectSummaryById.get(project.id)?.budgetCostTotal ?? 0,
+                                    projectSummaryById.get(project.id)?.currency ?? displayCurrency
+                                  )}
+                                </p>
+                                <p className="mt-1 text-sm font-bold text-muted">
+                                  {t("currentProfit")}: {formatAmount(
+                                    projectSummaryById.get(project.id)?.actualProfit ?? 0,
+                                    projectSummaryById.get(project.id)?.currency ?? displayCurrency
+                                  )}
+                                </p>
+                                <span className="mt-3 inline-flex h-10 items-center justify-center gap-2 rounded-full bg-limepop px-4 text-sm font-semibold text-ink">
+                                  {t("openCosts")}
+                                  <ArrowRight size={16} />
+                                </span>
+                              </div>
+                            </Link>
+                          ))}
                         </div>
-                      </Link>
+                      </div>
                     );
                   })}
                 </div>
