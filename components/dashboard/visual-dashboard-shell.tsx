@@ -13,11 +13,14 @@ import {
   CheckCircle2,
   CircleDollarSign,
   FolderKanban,
+  Heart,
   Layers3,
   Network,
+  Plus,
   Rocket,
   Share2,
-  Users
+  Users,
+  X
 } from "lucide-react";
 import { ImageCard } from "@/components/cards/image-card";
 import { PixelHeroScene } from "@/components/auth/pixel-hero-scene";
@@ -40,7 +43,7 @@ import {
   translateDomainLabel
 } from "@/lib/i18n/domain-labels";
 import type { TranslationKey } from "@/lib/i18n/translations";
-import type { Company, DashboardOverview, DashboardScope, Project, ProjectGroup } from "@/lib/types";
+import type { Company, DashboardOverview, DashboardScope, Project, ProjectGroup, Tool, WishlistItem } from "@/lib/types";
 import { projectPath } from "@/lib/utils/app-routes";
 import { cn } from "@/lib/utils/cn";
 import { fixedNumericLocale } from "@/lib/utils/money";
@@ -111,21 +114,27 @@ export function VisualDashboardShell() {
   const [reportPreview, setReportPreview] = useState<{ html: string; fileName: string; eyebrow: string } | null>(null);
   const [summarySharing, setSummarySharing] = useState(false);
   const [creditsRefreshReminders, setCreditsRefreshReminders] = useState<CreditsRefreshReminder[]>([]);
+  const [tools, setTools] = useState<Tool[]>([]);
+  const [wishlist, setWishlist] = useState<WishlistItem[]>([]);
+  const [wishlistDraft, setWishlistDraft] = useState("");
 
   useEffect(() => {
     let isMounted = true;
 
     async function loadScopeData() {
-      const [companies, groups, projects, tools] = await Promise.all([
+      const [companies, groups, projects, nextTools, wishlistItems] = await Promise.all([
         companiesApi.listCompanies(),
         groupsApi.listGroups(),
         projectsApi.listProjects(),
-        librariesApi.listTools()
+        librariesApi.listTools(),
+        librariesApi.listWishlist()
       ]);
 
       if (isMounted) {
         setData({ companies, groups, projects });
-        setCreditsRefreshReminders(listCreditsRefreshReminders(tools));
+        setTools(nextTools);
+        setWishlist(wishlistItems);
+        setCreditsRefreshReminders(listCreditsRefreshReminders(nextTools));
       }
     }
 
@@ -169,6 +178,24 @@ export function VisualDashboardShell() {
   );
   const spotlightProjects = overview?.spotlightProjects ?? [];
   const atlasProject = spotlightProjects[0];
+  const featuredSubscriptions = tools.filter((tool) => tool.subscription?.showOnDashboard);
+
+  const submitWishlistItem = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const name = wishlistDraft.trim();
+    if (!name) {
+      return;
+    }
+
+    const item = await librariesApi.addWishlistItem(name);
+    setWishlist((current) => [...current, item]);
+    setWishlistDraft("");
+  };
+
+  const removeWishlistEntry = async (itemId: string) => {
+    await librariesApi.removeWishlistItem(itemId);
+    setWishlist((current) => current.filter((item) => item.id !== itemId));
+  };
 
   const scopedProjects = useMemo(() => {
     const projects = data?.projects ?? [];
@@ -543,6 +570,100 @@ export function VisualDashboardShell() {
             </div>
           </section>
         ) : null}
+
+        <section className="mt-6 grid gap-4 lg:grid-cols-2">
+          <div className="min-w-0 rounded-studio-lg bg-[#112f45] p-5 text-white shadow-soft sm:p-6">
+            <div className="flex items-center gap-2">
+              <CircleDollarSign size={18} />
+              <h2 className="text-lg font-black">{t("dashboardSubscriptionsTitle")}</h2>
+            </div>
+            {featuredSubscriptions.length ? (
+              <ul className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-3">
+                {featuredSubscriptions.map((tool) => {
+                  const subscription = tool.subscription;
+                  if (!subscription) {
+                    return null;
+                  }
+
+                  return (
+                    <li key={tool.id} className="min-w-0 rounded-studio bg-white/[0.07] p-3">
+                      <p className="flex min-w-0 items-baseline gap-1.5">
+                        <span className="min-w-0 truncate font-black">{tool.name}</span>
+                        {subscription.level ? (
+                          <span className="shrink-0 text-[10px] font-normal text-white/40">{subscription.level}</span>
+                        ) : null}
+                      </p>
+                      <p className="mt-2 truncate text-sm font-medium tabular-nums text-white/80">
+                        {new Intl.NumberFormat(fixedNumericLocale, {
+                          currency: subscription.currency,
+                          maximumFractionDigits: 2,
+                          style: "currency"
+                        }).format(subscription.amount)}
+                        {" · "}
+                        {t(subscription.billingCycle === "monthly" ? "billingTypeMonthly" : "billingTypeYearly")}
+                      </p>
+                      {subscription.accountEmail.trim() ? (
+                        <p className="mt-1.5 truncate text-[10px] font-light leading-4 text-white/50">
+                          {subscription.accountEmail.trim()}
+                        </p>
+                      ) : null}
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : (
+              <p className="mt-4 text-sm font-semibold leading-6 text-white/65">
+                {t("dashboardSubscriptionsEmpty")}
+              </p>
+            )}
+          </div>
+
+          <div className="min-w-0 rounded-studio-lg bg-[#e7e4df] p-5 text-ink shadow-soft ring-1 ring-black/[0.04] sm:p-6">
+            <div className="flex items-center gap-2">
+              <Heart size={18} />
+              <h2 className="text-lg font-black">{t("wishListTitle")}</h2>
+            </div>
+            {wishlist.length ? (
+              <ul className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-3">
+                {wishlist.map((item) => (
+                  <li
+                    key={item.id}
+                    className="flex min-w-0 items-start justify-between gap-2 rounded-studio bg-white/75 p-3"
+                  >
+                    <p className="min-w-0 truncate font-black">{item.name}</p>
+                    <button
+                      type="button"
+                      onClick={() => removeWishlistEntry(item.id)}
+                      className="grid size-6 shrink-0 place-items-center rounded-full bg-ink/[0.06] text-ink transition hover:bg-coral hover:text-white"
+                      aria-label={`${t("wishListRemove")} · ${item.name}`}
+                    >
+                      <X size={12} />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-4 text-sm font-semibold leading-6 text-ink/60">{t("wishListEmpty")}</p>
+            )}
+            <form onSubmit={submitWishlistItem} className="mt-4 flex items-center gap-2">
+              <input
+                value={wishlistDraft}
+                onChange={(event) => setWishlistDraft(event.target.value)}
+                placeholder={t("wishListPlaceholder")}
+                className="h-11 min-w-0 flex-1 rounded-full border-0 bg-white px-4 text-sm font-bold text-ink outline-none ring-1 ring-[#e65535] focus:ring-2 focus:ring-[#e65535]"
+              />
+              <Button
+                type="submit"
+                size="sm"
+                disabled={!wishlistDraft.trim()}
+                className="bg-[#e65535] hover:bg-[#e65535]/90"
+              >
+                <Plus size={16} />
+                {t("wishListAdd")}
+              </Button>
+            </form>
+          </div>
+        </section>
 
         <section className="mt-8 grid gap-4 overflow-visible min-[560px]:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             <SectionHeader

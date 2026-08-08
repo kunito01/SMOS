@@ -8,9 +8,11 @@ import type {
   PricingTemplate,
   Project,
   Tool,
-  ToolSubscription
+  ToolSubscription,
+  WishlistItem
 } from "@/lib/types";
 import { normalizePricingTemplate } from "@/lib/utils/pricing-templates";
+import { isSubscriptionLevel } from "@/lib/utils/subscription-levels";
 import {
   applyPeopleTemplate,
   applySoftwareTemplate,
@@ -279,7 +281,9 @@ const normalizeSubscription = (subscription?: ToolSubscriptionInput): ToolSubscr
     nextPaymentAt: subscription.nextPaymentAt?.trim() || undefined,
     creditsRefreshDay:
       Number.isInteger(refreshDay) && refreshDay >= 1 && refreshDay <= 31 ? refreshDay : undefined,
-    accountEmail: accountEmail ?? ""
+    accountEmail: accountEmail ?? "",
+    showOnDashboard: subscription.showOnDashboard === true ? true : undefined,
+    level: isSubscriptionLevel(subscription.level) ? subscription.level : undefined
   };
 };
 
@@ -402,3 +406,25 @@ const projectHasPerson = (project: Project, personId: string) => {
     );
   });
 };
+
+export async function listWishlist() {
+  await hydrateMockDatabase();
+  return mockApi(mockDatabase.wishlist);
+}
+
+export async function addWishlistItem(name: string) {
+  await hydrateMockDatabase();
+  const item: WishlistItem = { id: createLibraryId("wishlist"), name: name.trim() };
+  mockDatabase.wishlist.push(item);
+  await persistMockDatabase();
+
+  return mockApi(structuredClone(item));
+}
+
+export async function removeWishlistItem(itemId: string) {
+  await hydrateMockDatabase();
+  mockDatabase.wishlist = mockDatabase.wishlist.filter((item) => item.id !== itemId);
+  await persistMockDatabase();
+
+  return mockApi({ id: itemId });
+}

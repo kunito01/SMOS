@@ -39,6 +39,8 @@ export type Tool = {
   subscription?: ToolSubscription;
 };
 
+export type SubscriptionLevel = "Plus" | "Pro" | "Max 5x" | "Max 20x" | "Heavy";
+
 export type ToolSubscription = {
   amount: number;
   currency: CostItem["currency"];
@@ -49,6 +51,15 @@ export type ToolSubscription = {
   /** Optional day of month (1–31) that usage credits refresh; drives the homepage reminder. */
   creditsRefreshDay?: number;
   accountEmail: string;
+  /** Featured on the dashboard subscriptions card. */
+  showOnDashboard?: boolean;
+  /** Plan tier shown next to the name on the AI Agent card. */
+  level?: SubscriptionLevel;
+};
+
+export type WishlistItem = {
+  id: string;
+  name: string;
 };
 
 export type Person = {
@@ -632,4 +643,6 @@ export type MockDatabase = {
   /** Global workflow originals. Projects only keep IDs that point here. */
   workflows: ProjectWorkflow[];
   shareLinks: ShareLink[];
+  /** Future purchases and subscriptions shown on the dashboard wish list. */
+  wishlist: WishlistItem[];
 };

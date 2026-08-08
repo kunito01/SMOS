@@ -42,7 +42,8 @@ import type {
   Quote,
   ShareLink,
   Tool,
-  User
+  User,
+  WishlistItem
 } from "@/lib/types";
 import { synchronizeCostTemplateLinks } from "@/lib/utils/cost-template-links";
 import {
@@ -94,6 +95,7 @@ export type PersistedMockDatabase = {
   quotes: Quote[];
   workflows: ProjectWorkflow[];
   shareLinks: ShareLink[];
+  wishlist: WishlistItem[];
 };
 
 export const mockDatabaseBackupSchema = "studio-map-os.database-backup" as const;
@@ -177,6 +179,15 @@ const isShareLink = (value: unknown) =>
   hasStrings(value, ["id", "projectId", "token", "createdAt"]) &&
   typeof value.allowCostPreview === "boolean" &&
   (value.displayCurrency === undefined || isMoneyCurrency(value.displayCurrency));
+
+const isWishlistItem = (value: unknown): value is WishlistItem =>
+  isRecord(value) && hasStrings(value, ["id", "name"]);
+
+// Workspaces saved before the wish list shipped simply have no collection yet.
+const normalizeWishlist = (value: unknown): WishlistItem[] =>
+  Array.isArray(value)
+    ? value.filter(isWishlistItem).map((item) => ({ id: item.id, name: item.name }))
+    : [];
 
 const isFiniteNonNegativeNumber = (value: unknown): value is number =>
   typeof value === "number" && Number.isFinite(value) && value >= 0;
@@ -333,7 +344,8 @@ const createPersistedDatabaseSnapshot = (): PersistedMockDatabase => ({
   pricingTemplates: mockDatabase.pricingTemplates,
   quotes: mockDatabase.quotes,
   workflows: mockDatabase.workflows,
-  shareLinks: mockDatabase.shareLinks
+  shareLinks: mockDatabase.shareLinks,
+  wishlist: mockDatabase.wishlist
 });
 
 const validatePersistedDatabase = (value: unknown): PersistedMockDatabase => {
@@ -363,7 +375,9 @@ const validatePersistedDatabase = (value: unknown): PersistedMockDatabase => {
     Array.isArray(value.workflows) &&
     isWorkflowLibrary(value.workflows) &&
     Array.isArray(value.shareLinks) &&
-    value.shareLinks.every(isShareLink);
+    value.shareLinks.every(isShareLink) &&
+    (value.wishlist === undefined ||
+      (Array.isArray(value.wishlist) && value.wishlist.every(isWishlistItem)));
 
   if (!isValid) {
     throw new Error("Invalid database backup");
@@ -649,11 +663,12 @@ const normalizePersistedDatabase = (
   }
 
   const persisted = retainBundledExampleProjects({
-    ...(value as unknown as Omit<PersistedMockDatabase, "pricingTemplates" | "quotes" | "workflows">),
+    ...(value as unknown as Omit<PersistedMockDatabase, "pricingTemplates" | "quotes" | "workflows" | "wishlist">),
     // Workspaces saved before quoting shipped simply have no collection yet.
     pricingTemplates: normalizePricingTemplateLibrary(value.pricingTemplates),
     quotes: normalizeQuoteLibrary(value.quotes),
-    workflows: normalizeWorkflowLibrary(value.workflows)
+    workflows: normalizeWorkflowLibrary(value.workflows),
+    wishlist: normalizeWishlist(value.wishlist)
   });
   const seedDatabase = createMockDatabase();
   const seededGroupsById = new Map(seedDatabase.groups.map((group) => [group.id, group]));
@@ -683,7 +698,8 @@ const normalizePersistedDatabase = (
     pricingTemplates: persisted.pricingTemplates,
     quotes: retainReachableQuotes(persisted.quotes, persisted.companies, migratedWorkflows.projects),
     workflows: migratedWorkflows.workflows,
-    shareLinks: persisted.shareLinks
+    shareLinks: persisted.shareLinks,
+    wishlist: persisted.wishlist
   };
 
   synchronizeCostTemplateLinks(hydratedDatabase);

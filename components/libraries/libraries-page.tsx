@@ -59,6 +59,7 @@ import type {
 import { projectPath } from "@/lib/utils/app-routes";
 import { peopleTemplateDailyRate } from "@/lib/utils/cost-template-links";
 import { formatNumber, type MoneyCurrency } from "@/lib/utils/money";
+import { isSubscriptionLevel, subscriptionLevels } from "@/lib/utils/subscription-levels";
 import { getNextActiveSubscriptionPaymentDate } from "@/lib/utils/subscription-reminders";
 
 const billingTypeLabelKeys = {
@@ -97,6 +98,8 @@ type ToolForm = Pick<Tool, "name" | "category"> & {
   subscriptionNextPaymentAt: string;
   subscriptionCreditsRefreshDay: string;
   subscriptionAccountEmail: string;
+  subscriptionShowOnDashboard: boolean;
+  subscriptionLevel: string;
 };
 
 type PendingLibraryDelete =
@@ -149,7 +152,9 @@ const defaultTool: ToolForm = {
   subscriptionExpiresAt: "2026-12-31",
   subscriptionNextPaymentAt: "",
   subscriptionCreditsRefreshDay: "",
-  subscriptionAccountEmail: ""
+  subscriptionAccountEmail: "",
+  subscriptionShowOnDashboard: false,
+  subscriptionLevel: ""
 };
 
 const defaultCost: Omit<CostLibraryItem, "id"> = {
@@ -298,7 +303,9 @@ export function LibrariesPage() {
     subscriptionCreditsRefreshDay: tool.subscription?.creditsRefreshDay
       ? String(tool.subscription.creditsRefreshDay)
       : "",
-    subscriptionAccountEmail: tool.subscription?.accountEmail ?? ""
+    subscriptionAccountEmail: tool.subscription?.accountEmail ?? "",
+    subscriptionShowOnDashboard: tool.subscription?.showOnDashboard === true,
+    subscriptionLevel: tool.subscription?.level ?? ""
   });
 
   const toolPayload = (form: ToolForm) => {
@@ -324,7 +331,9 @@ export function LibrariesPage() {
                 refreshDay <= 31
                   ? refreshDay
                   : undefined,
-              accountEmail: form.subscriptionAccountEmail.trim()
+              accountEmail: form.subscriptionAccountEmail.trim(),
+              showOnDashboard: form.subscriptionShowOnDashboard || undefined,
+              level: isSubscriptionLevel(form.subscriptionLevel) ? form.subscriptionLevel : undefined
             }
           : undefined
     };
@@ -1070,6 +1079,21 @@ export function LibrariesPage() {
                       className="h-11 w-full rounded-full border-0 bg-white/90 px-4 text-sm font-bold text-ink outline-none"
                     />
                   </label>
+                  <label className="grid min-w-0 gap-1.5 text-xs font-black text-white/70">
+                    <span className="break-words [overflow-wrap:anywhere]">{t("subscriptionLevel")}</span>
+                    <Select
+                      value={toolForm.subscriptionLevel}
+                      onChange={(event) =>
+                        setToolForm((current) => ({ ...current, subscriptionLevel: event.target.value }))
+                      }
+                      className="h-11 rounded-full border-0 bg-white/90 px-4 text-sm font-bold text-ink outline-none"
+                    >
+                      <option value="">{t("subscriptionLevelNone")}</option>
+                      {subscriptionLevels.map((level) => (
+                        <option key={level} value={level}>{level}</option>
+                      ))}
+                    </Select>
+                  </label>
                   <input
                     type="email"
                     value={toolForm.subscriptionAccountEmail}
@@ -1079,6 +1103,20 @@ export function LibrariesPage() {
                     placeholder={t("subscriptionAccountEmail")}
                     className="h-11 rounded-full border-0 bg-white/90 px-4 text-sm font-bold text-ink outline-none"
                   />
+                  <label className="flex cursor-pointer items-center gap-2.5 px-1 text-xs font-black text-white/70">
+                    <input
+                      type="checkbox"
+                      checked={toolForm.subscriptionShowOnDashboard}
+                      onChange={(event) =>
+                        setToolForm((current) => ({
+                          ...current,
+                          subscriptionShowOnDashboard: event.target.checked
+                        }))
+                      }
+                      className="size-5 accent-coral"
+                    />
+                    {t("subscriptionShowOnDashboard")}
+                  </label>
                   {toolForm.costTemplateId ? (
                     <p className="inline-flex items-start gap-2 rounded-2xl bg-white/10 px-3 py-2 text-xs font-black leading-5 text-white/70">
                       <Link2 size={14} className="mt-0.5 shrink-0" />
@@ -1235,6 +1273,21 @@ export function LibrariesPage() {
                             className="h-11 w-full rounded-full border-0 bg-cloud/75 px-4 text-sm font-bold text-ink outline-none ring-1 ring-black/[0.06]"
                           />
                         </label>
+                        <label className="grid min-w-0 gap-1.5 text-xs font-black text-ink/58">
+                          <span className="break-words [overflow-wrap:anywhere]">{t("subscriptionLevel")}</span>
+                          <Select
+                            value={editingToolForm.subscriptionLevel}
+                            onChange={(event) =>
+                              setEditingToolForm((current) => ({ ...current, subscriptionLevel: event.target.value }))
+                            }
+                            className="h-11 rounded-full border-0 bg-cloud/75 px-4 text-sm font-bold text-ink outline-none ring-1 ring-black/[0.06]"
+                          >
+                            <option value="">{t("subscriptionLevelNone")}</option>
+                            {subscriptionLevels.map((level) => (
+                              <option key={level} value={level}>{level}</option>
+                            ))}
+                          </Select>
+                        </label>
                         <input
                           type="email"
                           value={editingToolForm.subscriptionAccountEmail}
@@ -1247,6 +1300,20 @@ export function LibrariesPage() {
                           placeholder={t("subscriptionAccountEmail")}
                           className="h-11 rounded-full border-0 bg-cloud/75 px-4 text-sm font-bold outline-none ring-1 ring-black/[0.06]"
                         />
+                        <label className="flex cursor-pointer items-center gap-2.5 px-1 text-xs font-black text-ink/62">
+                          <input
+                            type="checkbox"
+                            checked={editingToolForm.subscriptionShowOnDashboard}
+                            onChange={(event) =>
+                              setEditingToolForm((current) => ({
+                                ...current,
+                                subscriptionShowOnDashboard: event.target.checked
+                              }))
+                            }
+                            className="size-5 accent-coral"
+                          />
+                          {t("subscriptionShowOnDashboard")}
+                        </label>
                         {editingToolForm.costTemplateId ? (
                           <p className="inline-flex items-start gap-2 rounded-2xl bg-limepop/20 px-3 py-2 text-xs font-black leading-5 text-ink/62">
                             <Link2 size={14} className="mt-0.5 shrink-0" />
