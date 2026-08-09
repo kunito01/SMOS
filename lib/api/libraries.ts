@@ -12,7 +12,6 @@ import type {
   WishlistItem
 } from "@/lib/types";
 import { normalizePricingTemplate } from "@/lib/utils/pricing-templates";
-import { isSubscriptionLevel } from "@/lib/utils/subscription-levels";
 import {
   applyPeopleTemplate,
   applySoftwareTemplate,
@@ -283,7 +282,7 @@ const normalizeSubscription = (subscription?: ToolSubscriptionInput): ToolSubscr
       Number.isInteger(refreshDay) && refreshDay >= 1 && refreshDay <= 31 ? refreshDay : undefined,
     accountEmail: accountEmail ?? "",
     showOnDashboard: subscription.showOnDashboard === true ? true : undefined,
-    level: isSubscriptionLevel(subscription.level) ? subscription.level : undefined
+    level: subscription.level?.trim() || undefined
   };
 };
 

@@ -59,7 +59,7 @@ import type {
 import { projectPath } from "@/lib/utils/app-routes";
 import { peopleTemplateDailyRate } from "@/lib/utils/cost-template-links";
 import { formatNumber, type MoneyCurrency } from "@/lib/utils/money";
-import { isSubscriptionLevel, subscriptionLevels } from "@/lib/utils/subscription-levels";
+import { subscriptionLevels } from "@/lib/utils/subscription-levels";
 import { getNextActiveSubscriptionPaymentDate } from "@/lib/utils/subscription-reminders";
 
 const billingTypeLabelKeys = {
@@ -100,6 +100,7 @@ type ToolForm = Pick<Tool, "name" | "category"> & {
   subscriptionAccountEmail: string;
   subscriptionShowOnDashboard: boolean;
   subscriptionLevel: string;
+  subscriptionLevelIsCustom: boolean;
 };
 
 type PendingLibraryDelete =
@@ -154,7 +155,8 @@ const defaultTool: ToolForm = {
   subscriptionCreditsRefreshDay: "",
   subscriptionAccountEmail: "",
   subscriptionShowOnDashboard: false,
-  subscriptionLevel: ""
+  subscriptionLevel: "",
+  subscriptionLevelIsCustom: false
 };
 
 const defaultCost: Omit<CostLibraryItem, "id"> = {
@@ -291,6 +293,17 @@ export function LibrariesPage() {
     };
   };
 
+  const customSubscriptionLevels = useMemo(() => {
+    const presets = new Set(subscriptionLevels);
+    return [
+      ...new Set(
+        (data?.tools ?? [])
+          .map((tool) => tool.subscription?.level?.trim())
+          .filter((level): level is string => typeof level === "string" && level.length > 0 && !presets.has(level))
+      )
+    ].sort();
+  }, [data?.tools]);
+
   const toolToForm = (tool: Tool): ToolForm => ({
     name: tool.name,
     category: tool.category,
@@ -305,7 +318,8 @@ export function LibrariesPage() {
       : "",
     subscriptionAccountEmail: tool.subscription?.accountEmail ?? "",
     subscriptionShowOnDashboard: tool.subscription?.showOnDashboard === true,
-    subscriptionLevel: tool.subscription?.level ?? ""
+    subscriptionLevel: tool.subscription?.level ?? "",
+    subscriptionLevelIsCustom: false
   });
 
   const toolPayload = (form: ToolForm) => {
@@ -333,7 +347,7 @@ export function LibrariesPage() {
                   : undefined,
               accountEmail: form.subscriptionAccountEmail.trim(),
               showOnDashboard: form.subscriptionShowOnDashboard || undefined,
-              level: isSubscriptionLevel(form.subscriptionLevel) ? form.subscriptionLevel : undefined
+              level: form.subscriptionLevel.trim() || undefined
             }
           : undefined
     };
@@ -1082,17 +1096,36 @@ export function LibrariesPage() {
                   <label className="grid min-w-0 gap-1.5 text-xs font-black text-white/70">
                     <span className="break-words [overflow-wrap:anywhere]">{t("subscriptionLevel")}</span>
                     <Select
-                      value={toolForm.subscriptionLevel}
-                      onChange={(event) =>
-                        setToolForm((current) => ({ ...current, subscriptionLevel: event.target.value }))
-                      }
+                      value={toolForm.subscriptionLevelIsCustom ? "__custom__" : toolForm.subscriptionLevel}
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        setToolForm((current) =>
+                          value === "__custom__"
+                            ? { ...current, subscriptionLevel: "", subscriptionLevelIsCustom: true }
+                            : { ...current, subscriptionLevel: value, subscriptionLevelIsCustom: false }
+                        );
+                      }}
                       className="h-11 rounded-full border-0 bg-white/90 px-4 text-sm font-bold text-ink outline-none"
                     >
                       <option value="">{t("subscriptionLevelNone")}</option>
                       {subscriptionLevels.map((level) => (
                         <option key={level} value={level}>{level}</option>
                       ))}
+                      {customSubscriptionLevels.map((level) => (
+                        <option key={level} value={level}>{level}</option>
+                      ))}
+                      <option value="__custom__">{t("subscriptionLevelCustom")}</option>
                     </Select>
+                    {toolForm.subscriptionLevelIsCustom ? (
+                      <input
+                        value={toolForm.subscriptionLevel}
+                        onChange={(event) =>
+                          setToolForm((current) => ({ ...current, subscriptionLevel: event.target.value }))
+                        }
+                        placeholder={t("subscriptionLevelCustom")}
+                        className="h-11 rounded-full border-0 bg-white/90 px-4 text-sm font-bold text-ink outline-none"
+                      />
+                    ) : null}
                   </label>
                   <input
                     type="email"
@@ -1276,17 +1309,36 @@ export function LibrariesPage() {
                         <label className="grid min-w-0 gap-1.5 text-xs font-black text-ink/58">
                           <span className="break-words [overflow-wrap:anywhere]">{t("subscriptionLevel")}</span>
                           <Select
-                            value={editingToolForm.subscriptionLevel}
-                            onChange={(event) =>
-                              setEditingToolForm((current) => ({ ...current, subscriptionLevel: event.target.value }))
-                            }
+                            value={editingToolForm.subscriptionLevelIsCustom ? "__custom__" : editingToolForm.subscriptionLevel}
+                            onChange={(event) => {
+                              const value = event.target.value;
+                              setEditingToolForm((current) =>
+                                value === "__custom__"
+                                  ? { ...current, subscriptionLevel: "", subscriptionLevelIsCustom: true }
+                                  : { ...current, subscriptionLevel: value, subscriptionLevelIsCustom: false }
+                              );
+                            }}
                             className="h-11 rounded-full border-0 bg-cloud/75 px-4 text-sm font-bold text-ink outline-none ring-1 ring-black/[0.06]"
                           >
                             <option value="">{t("subscriptionLevelNone")}</option>
                             {subscriptionLevels.map((level) => (
                               <option key={level} value={level}>{level}</option>
                             ))}
+                            {customSubscriptionLevels.map((level) => (
+                              <option key={level} value={level}>{level}</option>
+                            ))}
+                            <option value="__custom__">{t("subscriptionLevelCustom")}</option>
                           </Select>
+                          {editingToolForm.subscriptionLevelIsCustom ? (
+                            <input
+                              value={editingToolForm.subscriptionLevel}
+                              onChange={(event) =>
+                                setEditingToolForm((current) => ({ ...current, subscriptionLevel: event.target.value }))
+                              }
+                              placeholder={t("subscriptionLevelCustom")}
+                              className="h-11 rounded-full border-0 bg-cloud/75 px-4 text-sm font-bold text-ink outline-none ring-1 ring-black/[0.06]"
+                            />
+                          ) : null}
                         </label>
                         <input
                           type="email"

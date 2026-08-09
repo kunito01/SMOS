@@ -39,8 +39,6 @@ export type Tool = {
   subscription?: ToolSubscription;
 };
 
-export type SubscriptionLevel = "Plus" | "Pro" | "Max 5x" | "Max 20x" | "Heavy";
-
 export type ToolSubscription = {
   amount: number;
   currency: CostItem["currency"];
@@ -53,8 +51,8 @@ export type ToolSubscription = {
   accountEmail: string;
   /** Featured on the dashboard subscriptions card. */
   showOnDashboard?: boolean;
-  /** Plan tier shown next to the name on the AI Agent card. */
-  level?: SubscriptionLevel;
+  /** Plan tier shown next to the name on the AI Agent card; presets plus custom values. */
+  level?: string;
 };
 
 export type WishlistItem = {
