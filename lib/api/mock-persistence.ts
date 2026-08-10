@@ -186,7 +186,10 @@ const isWishlistItem = (value: unknown): value is WishlistItem =>
   isRecord(value) && hasStrings(value, ["id", "name"]);
 
 const isComfyWorkflow = (value: unknown): value is ComfyUiWorkflow =>
-  isRecord(value) && hasStrings(value, ["id", "name", "host", "content", "createdAt", "updatedAt"]);
+  isRecord(value) &&
+  hasStrings(value, ["id", "name", "host", "content", "createdAt", "updatedAt"]) &&
+  (value.strengths === undefined || typeof value.strengths === "string") &&
+  (value.weaknesses === undefined || typeof value.weaknesses === "string");
 
 // Workspaces saved before ComfyUI workflows shipped simply have no collection yet.
 const normalizeComfyWorkflows = (value: unknown): ComfyUiWorkflow[] =>
@@ -196,6 +199,8 @@ const normalizeComfyWorkflows = (value: unknown): ComfyUiWorkflow[] =>
         name: item.name,
         host: item.host,
         content: item.content,
+        ...(item.strengths ? { strengths: item.strengths } : {}),
+        ...(item.weaknesses ? { weaknesses: item.weaknesses } : {}),
         createdAt: item.createdAt,
         updatedAt: item.updatedAt
       }))

@@ -781,6 +781,8 @@ export const trTranslations = {
   comfyHostPlaceholder: "Bir cihaz yazın veya seçin",
   comfyNameLabel: "Ad",
   comfyNamePlaceholder: "İş akışı adı",
+  comfyStrengthsLabel: "Güçlü yönler",
+  comfyWeaknessesLabel: "Zayıf yönler",
   comfyContentLabel: "İçerik",
   comfyContentPlaceholder: "İş akışı içeriğini yapıştırın veya not edin",
   comfyCreate: "İş akışı ekle",

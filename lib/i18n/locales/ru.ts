@@ -781,6 +781,8 @@ export const ruTranslations = {
   comfyHostPlaceholder: "Введите или выберите устройство",
   comfyNameLabel: "Название",
   comfyNamePlaceholder: "Название процесса",
+  comfyStrengthsLabel: "Сильные стороны",
+  comfyWeaknessesLabel: "Слабые стороны",
   comfyContentLabel: "Содержимое",
   comfyContentPlaceholder: "Вставьте или опишите содержимое процесса",
   comfyCreate: "Добавить процесс",

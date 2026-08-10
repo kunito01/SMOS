@@ -17,6 +17,8 @@ export function ComfyWorkflowLibrary() {
   const [hostDraft, setHostDraft] = useState("");
   const [nameDraft, setNameDraft] = useState("");
   const [contentDraft, setContentDraft] = useState("");
+  const [strengthsDraft, setStrengthsDraft] = useState("");
+  const [weaknessesDraft, setWeaknessesDraft] = useState("");
   const [editingId, setEditingId] = useState("");
   const [pendingDelete, setPendingDelete] = useState<ComfyUiWorkflow | null>(null);
   const [busy, setBusy] = useState(false);
@@ -54,6 +56,8 @@ export function ComfyWorkflowLibrary() {
     setHostDraft("");
     setNameDraft("");
     setContentDraft("");
+    setStrengthsDraft("");
+    setWeaknessesDraft("");
   };
 
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -64,7 +68,13 @@ export function ComfyWorkflowLibrary() {
 
     setBusy(true);
     try {
-      const input = { content: contentDraft, host: hostDraft, name: nameDraft };
+      const input = {
+        content: contentDraft,
+        host: hostDraft,
+        name: nameDraft,
+        strengths: strengthsDraft,
+        weaknesses: weaknessesDraft
+      };
       if (editingId) {
         await workflowsApi.updateComfyWorkflow(editingId, input);
       } else {
@@ -82,6 +92,8 @@ export function ComfyWorkflowLibrary() {
     setHostDraft(workflow.host);
     setNameDraft(workflow.name);
     setContentDraft(workflow.content);
+    setStrengthsDraft(workflow.strengths ?? "");
+    setWeaknessesDraft(workflow.weaknesses ?? "");
   };
 
   const confirmDelete = async () => {
@@ -165,6 +177,24 @@ export function ComfyWorkflowLibrary() {
               />
             </label>
           </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="grid content-start gap-2">
+              <span className={fieldLabelClass}>{t("comfyStrengthsLabel")}</span>
+              <input
+                value={strengthsDraft}
+                onChange={(event) => setStrengthsDraft(event.target.value)}
+                className={inputClass}
+              />
+            </label>
+            <label className="grid content-start gap-2">
+              <span className={fieldLabelClass}>{t("comfyWeaknessesLabel")}</span>
+              <input
+                value={weaknessesDraft}
+                onChange={(event) => setWeaknessesDraft(event.target.value)}
+                className={inputClass}
+              />
+            </label>
+          </div>
           <label className="grid gap-2">
             <span className={fieldLabelClass}>{t("comfyContentLabel")}</span>
             <textarea
@@ -219,6 +249,19 @@ export function ComfyWorkflowLibrary() {
                     </button>
                   </span>
                 </div>
+                {workflow.strengths?.trim() || workflow.weaknesses?.trim() ? (
+                  <p className="mt-2 break-words text-xs leading-5">
+                    {workflow.strengths?.trim() ? (
+                      <span className="font-black text-ink">{workflow.strengths}</span>
+                    ) : null}
+                    {workflow.strengths?.trim() && workflow.weaknesses?.trim() ? (
+                      <span className="text-ink/30"> · </span>
+                    ) : null}
+                    {workflow.weaknesses?.trim() ? (
+                      <span className="font-medium text-coral">{workflow.weaknesses}</span>
+                    ) : null}
+                  </p>
+                ) : null}
                 {workflow.content.trim() ? (
                   <p className="mt-2 line-clamp-2 break-all text-xs font-medium leading-5 text-ink/60">
                     {workflow.content}

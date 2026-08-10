@@ -251,6 +251,10 @@ export type ComfyUiWorkflow = {
   name: string;
   host: string;
   content: string;
+  /** Rendered bold on workflow tiles. */
+  strengths?: string;
+  /** Rendered in red on workflow tiles. */
+  weaknesses?: string;
   createdAt: string;
   updatedAt: string;
 };

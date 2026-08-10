@@ -136,6 +136,19 @@ export function ProjectComfySection({ project, t }: ProjectComfySectionProps) {
                   <X size={12} />
                 </button>
               </div>
+              {workflow.strengths?.trim() || workflow.weaknesses?.trim() ? (
+                <p className="mt-2 break-words text-xs leading-5">
+                  {workflow.strengths?.trim() ? (
+                    <span className="font-black text-ink">{workflow.strengths}</span>
+                  ) : null}
+                  {workflow.strengths?.trim() && workflow.weaknesses?.trim() ? (
+                    <span className="text-ink/30"> · </span>
+                  ) : null}
+                  {workflow.weaknesses?.trim() ? (
+                    <span className="font-medium text-coral">{workflow.weaknesses}</span>
+                  ) : null}
+                </p>
+              ) : null}
               {workflow.content.trim() ? (
                 <p className="mt-2 line-clamp-2 break-all text-xs font-medium leading-5 text-ink/60">
                   {workflow.content}

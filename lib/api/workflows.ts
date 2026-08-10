@@ -120,6 +120,8 @@ export type ComfyWorkflowInput = {
   name: string;
   host: string;
   content: string;
+  strengths?: string;
+  weaknesses?: string;
 };
 
 const createComfyWorkflowId = () => {
@@ -143,6 +145,8 @@ export async function createComfyWorkflow(input: ComfyWorkflowInput) {
     name: input.name.trim(),
     host: input.host.trim(),
     content: input.content,
+    ...(input.strengths?.trim() ? { strengths: input.strengths.trim() } : {}),
+    ...(input.weaknesses?.trim() ? { weaknesses: input.weaknesses.trim() } : {}),
     createdAt: now,
     updatedAt: now
   };
@@ -167,10 +171,13 @@ export async function updateComfyWorkflow(comfyWorkflowId: string, input: ComfyW
     `ComfyUI workflow not found: ${comfyWorkflowId}`
   );
   const nextWorkflow: ComfyUiWorkflow = {
-    ...currentWorkflow,
+    id: currentWorkflow.id,
+    createdAt: currentWorkflow.createdAt,
     name: input.name.trim(),
     host: input.host.trim(),
     content: input.content,
+    ...(input.strengths?.trim() ? { strengths: input.strengths.trim() } : {}),
+    ...(input.weaknesses?.trim() ? { weaknesses: input.weaknesses.trim() } : {}),
     updatedAt: new Date().toISOString()
   };
   const previousWorkflows = structuredClone(mockDatabase.comfyWorkflows);
