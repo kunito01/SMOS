@@ -189,7 +189,8 @@ const isComfyWorkflow = (value: unknown): value is ComfyUiWorkflow =>
   isRecord(value) &&
   hasStrings(value, ["id", "name", "host", "content", "createdAt", "updatedAt"]) &&
   (value.strengths === undefined || typeof value.strengths === "string") &&
-  (value.weaknesses === undefined || typeof value.weaknesses === "string");
+  (value.weaknesses === undefined || typeof value.weaknesses === "string") &&
+  (value.rating === undefined || value.rating === "nsfw" || value.rating === "sfw");
 
 // Workspaces saved before ComfyUI workflows shipped simply have no collection yet.
 const normalizeComfyWorkflows = (value: unknown): ComfyUiWorkflow[] =>
@@ -201,6 +202,7 @@ const normalizeComfyWorkflows = (value: unknown): ComfyUiWorkflow[] =>
         content: item.content,
         ...(item.strengths ? { strengths: item.strengths } : {}),
         ...(item.weaknesses ? { weaknesses: item.weaknesses } : {}),
+        ...(item.rating ? { rating: item.rating } : {}),
         createdAt: item.createdAt,
         updatedAt: item.updatedAt
       }))

@@ -255,6 +255,8 @@ export type ComfyUiWorkflow = {
   strengths?: string;
   /** Rendered in red on workflow tiles. */
   weaknesses?: string;
+  /** NSFW renders bold red, SFW bold yellow on workflow tiles. */
+  rating?: "nsfw" | "sfw";
   createdAt: string;
   updatedAt: string;
 };

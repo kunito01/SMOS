@@ -122,6 +122,7 @@ export type ComfyWorkflowInput = {
   content: string;
   strengths?: string;
   weaknesses?: string;
+  rating?: ComfyUiWorkflow["rating"] | "";
 };
 
 const createComfyWorkflowId = () => {
@@ -147,6 +148,7 @@ export async function createComfyWorkflow(input: ComfyWorkflowInput) {
     content: input.content,
     ...(input.strengths?.trim() ? { strengths: input.strengths.trim() } : {}),
     ...(input.weaknesses?.trim() ? { weaknesses: input.weaknesses.trim() } : {}),
+    ...(input.rating ? { rating: input.rating } : {}),
     createdAt: now,
     updatedAt: now
   };
@@ -178,6 +180,7 @@ export async function updateComfyWorkflow(comfyWorkflowId: string, input: ComfyW
     content: input.content,
     ...(input.strengths?.trim() ? { strengths: input.strengths.trim() } : {}),
     ...(input.weaknesses?.trim() ? { weaknesses: input.weaknesses.trim() } : {}),
+    ...(input.rating ? { rating: input.rating } : {}),
     updatedAt: new Date().toISOString()
   };
   const previousWorkflows = structuredClone(mockDatabase.comfyWorkflows);

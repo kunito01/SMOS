@@ -783,6 +783,7 @@ export const trTranslations = {
   comfyNamePlaceholder: "İş akışı adı",
   comfyStrengthsLabel: "Güçlü yönler",
   comfyWeaknessesLabel: "Zayıf yönler",
+  comfyRatingLabel: "Derecelendirme",
   comfyContentLabel: "İçerik",
   comfyContentPlaceholder: "İş akışı içeriğini yapıştırın veya not edin",
   comfyCreate: "İş akışı ekle",

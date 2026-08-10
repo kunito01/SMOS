@@ -126,6 +126,15 @@ export function ProjectComfySection({ project, t }: ProjectComfySectionProps) {
                   {workflow.host ? (
                     <span className="shrink-0 text-[10px] font-normal text-ink/40">{workflow.host}</span>
                   ) : null}
+                  {workflow.rating ? (
+                    <span
+                      className={`shrink-0 text-[10px] font-black ${
+                        workflow.rating === "nsfw" ? "text-coral" : "text-[#eab308]"
+                      }`}
+                    >
+                      {workflow.rating.toUpperCase()}
+                    </span>
+                  ) : null}
                 </p>
                 <button
                   type="button"
