@@ -65,15 +65,13 @@ export function ProjectBasicsEditModal({
     setError("");
     setSaving(false);
 
-    // Devices already used by other projects become pickable suggestions.
+    // One shared pool: devices used by projects plus ComfyUI workflow hosts.
     let cancelled = false;
-    void projectsApi.listProjects().then((projects) => {
+    void projectsApi.listKnownCodingDevices().then((devices) => {
       if (cancelled) {
         return;
       }
-      setDeviceOptions(
-        [...new Set(projects.map((item) => item.codingDevice?.trim()).filter((device): device is string => Boolean(device)))].sort()
-      );
+      setDeviceOptions(devices);
     });
 
     return () => {

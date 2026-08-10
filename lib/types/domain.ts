@@ -245,6 +245,16 @@ export type ProjectWorkflow = {
   updatedAt: string;
 };
 
+/** A ComfyUI workflow definition tied to the host machine that runs it. */
+export type ComfyUiWorkflow = {
+  id: string;
+  name: string;
+  host: string;
+  content: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type CostItem = {
   id: string;
   projectId: string;
@@ -362,6 +372,8 @@ export type Project = {
   timelineRows?: TimelineCustomRow[];
   /** IDs of global workflow templates linked to this project. */
   workflowIds?: string[];
+  /** ComfyUI workflows linked from the global library. */
+  comfyWorkflowIds?: string[];
   /** @deprecated Legacy embedded workflows are migrated into the global library on load/import. */
   workflows?: ProjectWorkflow[];
   currentPhaseId: string;
@@ -640,6 +652,8 @@ export type MockDatabase = {
   quotes: Quote[];
   /** Global workflow originals. Projects only keep IDs that point here. */
   workflows: ProjectWorkflow[];
+  /** ComfyUI workflow library shown in the workflow section. */
+  comfyWorkflows: ComfyUiWorkflow[];
   shareLinks: ShareLink[];
   /** Future purchases and subscriptions shown on the dashboard wish list. */
   wishlist: WishlistItem[];

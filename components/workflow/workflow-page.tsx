@@ -16,6 +16,7 @@ import {
   Workflow as WorkflowIcon
 } from "lucide-react";
 import { AppShell } from "@/components/layout/app-shell";
+import { ComfyWorkflowLibrary } from "@/components/workflow/comfy-workflow-library";
 import { useI18n } from "@/components/providers/app-providers";
 import { ActionConfirmDialog } from "@/components/ui/action-confirm-dialog";
 import { Button } from "@/components/ui/button";
@@ -518,6 +519,8 @@ export function WorkflowPage() {
             ) : null}
           </>
         )}
+
+        <ComfyWorkflowLibrary />
       </div>
       <DeleteConfirmDialog
         open={Boolean(pendingDeleteWorkflow)}

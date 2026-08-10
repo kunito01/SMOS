@@ -691,6 +691,7 @@ export const createMockDatabase = (): MockDatabase => {
     pricingTemplates: pricingTemplateSeed,
     quotes: [],
     workflows: [],
+    comfyWorkflows: [],
     shareLinks,
     wishlist: []
   });
@@ -708,6 +709,7 @@ export const createEmptyMockDatabase = (): MockDatabase => ({
   pricingTemplates: [],
   quotes: [],
   workflows: [],
+  comfyWorkflows: [],
   shareLinks: [],
   wishlist: []
 });

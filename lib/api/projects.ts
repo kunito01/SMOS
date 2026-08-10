@@ -712,6 +712,92 @@ export async function linkProjectWorkflow(projectId: string, workflowId: string)
   );
 }
 
+/** One shared pool: coding devices on projects plus ComfyUI hosts. */
+export async function listKnownCodingDevices() {
+  await hydrateMockDatabase();
+  const devices = new Set<string>();
+  mockDatabase.projects.forEach((project) => {
+    const device = project.codingDevice?.trim();
+    if (device) {
+      devices.add(device);
+    }
+  });
+  mockDatabase.comfyWorkflows.forEach((workflow) => {
+    const host = workflow.host.trim();
+    if (host) {
+      devices.add(host);
+    }
+  });
+
+  return mockApi([...devices].sort());
+}
+
+export async function listProjectComfyWorkflows(projectId: string) {
+  await hydrateMockDatabase();
+  const project = requireEntity(
+    mockDatabase.projects.find((item) => item.id === projectId),
+    `Project not found: ${projectId}`
+  );
+  const workflowsById = new Map(
+    mockDatabase.comfyWorkflows.map((workflow) => [workflow.id, workflow])
+  );
+
+  return mockApi(
+    (project.comfyWorkflowIds ?? [])
+      .map((comfyWorkflowId) => workflowsById.get(comfyWorkflowId))
+      .filter((workflow): workflow is NonNullable<typeof workflow> => Boolean(workflow))
+  );
+}
+
+const setProjectComfyWorkflowIds = async (projectId: string, comfyWorkflowIds: string[]) => {
+  const projectIndex = mockDatabase.projects.findIndex((item) => item.id === projectId);
+  const project = requireEntity(
+    projectIndex >= 0 ? mockDatabase.projects[projectIndex] : undefined,
+    `Project not found: ${projectId}`
+  );
+  const knownIds = new Set(mockDatabase.comfyWorkflows.map((workflow) => workflow.id));
+  const nextIds = [...new Set(comfyWorkflowIds)].filter((id) => knownIds.has(id));
+  const previousProject = structuredClone(project);
+
+  if (nextIds.length > 0) {
+    project.comfyWorkflowIds = nextIds;
+  } else {
+    delete project.comfyWorkflowIds;
+  }
+
+  try {
+    await persistMockDatabase();
+  } catch (error) {
+    mockDatabase.projects[projectIndex] = previousProject;
+    throw error;
+  }
+
+  return mockApi(structuredClone(project));
+};
+
+export async function linkProjectComfyWorkflow(projectId: string, comfyWorkflowId: string) {
+  await hydrateMockDatabase();
+  const project = requireEntity(
+    mockDatabase.projects.find((item) => item.id === projectId),
+    `Project not found: ${projectId}`
+  );
+
+  return setProjectComfyWorkflowIds(projectId, [...(project.comfyWorkflowIds ?? []), comfyWorkflowId]);
+}
+
+export async function unlinkProjectComfyWorkflow(projectId: string, comfyWorkflowId: string) {
+  await hydrateMockDatabase();
+  const project = requireEntity(
+    mockDatabase.projects.find((item) => item.id === projectId),
+    `Project not found: ${projectId}`
+  );
+
+  return setProjectComfyWorkflowIds(
+    projectId,
+    (project.comfyWorkflowIds ?? []).filter((id) => id !== comfyWorkflowId)
+  );
+}
+
 export async function unlinkProjectWorkflow(projectId: string, workflowId: string) {
   await hydrateMockDatabase();
   const project = requireEntity(

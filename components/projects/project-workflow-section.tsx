@@ -10,6 +10,7 @@ import {
   Workflow as WorkflowIcon,
   X
 } from "lucide-react";
+import { ProjectComfySection } from "@/components/projects/project-comfy-section";
 import { WorkflowCanvas } from "@/components/workflow/workflow-canvas";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -384,6 +385,7 @@ export function ProjectWorkflowSection({ project, t }: ProjectWorkflowSectionPro
           </div>
         </ModalPortal>
       ) : null}
+      <ProjectComfySection project={project} t={t} />
       <DeleteConfirmDialog
         open={Boolean(pendingUnlinkWorkflow)}
         busy={Boolean(pendingWorkflowId)}

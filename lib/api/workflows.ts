@@ -1,7 +1,7 @@
 import { mockApi, requireEntity } from "@/lib/api/mock-client";
 import { hydrateMockDatabase, persistMockDatabase } from "@/lib/api/mock-persistence";
 import { mockDatabase } from "@/lib/mock";
-import type { ProjectWorkflow } from "@/lib/types";
+import type { ComfyUiWorkflow, ProjectWorkflow } from "@/lib/types";
 import {
   createEmptyProjectWorkflow,
   normalizeProjectWorkflow,
@@ -109,6 +109,106 @@ export async function deleteWorkflow(workflowId: string) {
     await persistMockDatabase();
   } catch (error) {
     mockDatabase.workflows = previousWorkflows;
+    mockDatabase.projects = previousProjects;
+    throw error;
+  }
+
+  return mockApi(workflow);
+}
+
+export type ComfyWorkflowInput = {
+  name: string;
+  host: string;
+  content: string;
+};
+
+const createComfyWorkflowId = () => {
+  if (!globalThis.crypto?.randomUUID) {
+    throw new Error("Secure workflow identity generation is unavailable");
+  }
+
+  return `comfy_${globalThis.crypto.randomUUID().replace(/-/g, "")}`;
+};
+
+export async function listComfyWorkflows() {
+  await hydrateMockDatabase();
+  return mockApi(mockDatabase.comfyWorkflows);
+}
+
+export async function createComfyWorkflow(input: ComfyWorkflowInput) {
+  await hydrateMockDatabase();
+  const now = new Date().toISOString();
+  const workflow: ComfyUiWorkflow = {
+    id: createComfyWorkflowId(),
+    name: input.name.trim(),
+    host: input.host.trim(),
+    content: input.content,
+    createdAt: now,
+    updatedAt: now
+  };
+  const previousWorkflows = structuredClone(mockDatabase.comfyWorkflows);
+  mockDatabase.comfyWorkflows = [workflow, ...mockDatabase.comfyWorkflows];
+
+  try {
+    await persistMockDatabase();
+  } catch (error) {
+    mockDatabase.comfyWorkflows = previousWorkflows;
+    throw error;
+  }
+
+  return mockApi(workflow);
+}
+
+export async function updateComfyWorkflow(comfyWorkflowId: string, input: ComfyWorkflowInput) {
+  await hydrateMockDatabase();
+  const workflowIndex = mockDatabase.comfyWorkflows.findIndex((item) => item.id === comfyWorkflowId);
+  const currentWorkflow = requireEntity(
+    workflowIndex >= 0 ? mockDatabase.comfyWorkflows[workflowIndex] : undefined,
+    `ComfyUI workflow not found: ${comfyWorkflowId}`
+  );
+  const nextWorkflow: ComfyUiWorkflow = {
+    ...currentWorkflow,
+    name: input.name.trim(),
+    host: input.host.trim(),
+    content: input.content,
+    updatedAt: new Date().toISOString()
+  };
+  const previousWorkflows = structuredClone(mockDatabase.comfyWorkflows);
+  mockDatabase.comfyWorkflows[workflowIndex] = nextWorkflow;
+
+  try {
+    await persistMockDatabase();
+  } catch (error) {
+    mockDatabase.comfyWorkflows = previousWorkflows;
+    throw error;
+  }
+
+  return mockApi(nextWorkflow);
+}
+
+export async function deleteComfyWorkflow(comfyWorkflowId: string) {
+  await hydrateMockDatabase();
+  const workflow = requireEntity(
+    mockDatabase.comfyWorkflows.find((item) => item.id === comfyWorkflowId),
+    `ComfyUI workflow not found: ${comfyWorkflowId}`
+  );
+  const previousWorkflows = structuredClone(mockDatabase.comfyWorkflows);
+  const previousProjects = structuredClone(mockDatabase.projects);
+
+  mockDatabase.comfyWorkflows = mockDatabase.comfyWorkflows.filter((item) => item.id !== comfyWorkflowId);
+  mockDatabase.projects = mockDatabase.projects.map((project) =>
+    project.comfyWorkflowIds?.includes(comfyWorkflowId)
+      ? {
+          ...project,
+          comfyWorkflowIds: project.comfyWorkflowIds.filter((id) => id !== comfyWorkflowId)
+        }
+      : project
+  );
+
+  try {
+    await persistMockDatabase();
+  } catch (error) {
+    mockDatabase.comfyWorkflows = previousWorkflows;
     mockDatabase.projects = previousProjects;
     throw error;
   }

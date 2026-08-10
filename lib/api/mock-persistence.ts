@@ -31,6 +31,7 @@ import {
   withWorkspaceMutationLock
 } from "@/lib/storage/workspace-mutation-lock";
 import type {
+  ComfyUiWorkflow,
   Company,
   CostLibraryItem,
   Person,
@@ -94,6 +95,7 @@ export type PersistedMockDatabase = {
   pricingTemplates: PricingTemplate[];
   quotes: Quote[];
   workflows: ProjectWorkflow[];
+  comfyWorkflows: ComfyUiWorkflow[];
   shareLinks: ShareLink[];
   wishlist: WishlistItem[];
 };
@@ -182,6 +184,22 @@ const isShareLink = (value: unknown) =>
 
 const isWishlistItem = (value: unknown): value is WishlistItem =>
   isRecord(value) && hasStrings(value, ["id", "name"]);
+
+const isComfyWorkflow = (value: unknown): value is ComfyUiWorkflow =>
+  isRecord(value) && hasStrings(value, ["id", "name", "host", "content", "createdAt", "updatedAt"]);
+
+// Workspaces saved before ComfyUI workflows shipped simply have no collection yet.
+const normalizeComfyWorkflows = (value: unknown): ComfyUiWorkflow[] =>
+  Array.isArray(value)
+    ? value.filter(isComfyWorkflow).map((item) => ({
+        id: item.id,
+        name: item.name,
+        host: item.host,
+        content: item.content,
+        createdAt: item.createdAt,
+        updatedAt: item.updatedAt
+      }))
+    : [];
 
 // Workspaces saved before the wish list shipped simply have no collection yet.
 const normalizeWishlist = (value: unknown): WishlistItem[] =>
@@ -329,6 +347,8 @@ const isProject = (value: unknown) =>
   (value.codingDevice === undefined || typeof value.codingDevice === "string") &&
   (value.timelineRows === undefined || isEntityArray(value.timelineRows)) &&
   (value.workflowIds === undefined || isProjectWorkflowIds(value.workflowIds)) &&
+  (value.comfyWorkflowIds === undefined ||
+    (Array.isArray(value.comfyWorkflowIds) && value.comfyWorkflowIds.every((id) => typeof id === "string"))) &&
   (value.workflows === undefined || isProjectWorkflows(value.workflows)) &&
   (value.budget === undefined || isProjectBudget(value.budget)) &&
   isShareSettings(value.shareSettings);
@@ -344,6 +364,7 @@ const createPersistedDatabaseSnapshot = (): PersistedMockDatabase => ({
   pricingTemplates: mockDatabase.pricingTemplates,
   quotes: mockDatabase.quotes,
   workflows: mockDatabase.workflows,
+  comfyWorkflows: mockDatabase.comfyWorkflows,
   shareLinks: mockDatabase.shareLinks,
   wishlist: mockDatabase.wishlist
 });
@@ -377,7 +398,9 @@ const validatePersistedDatabase = (value: unknown): PersistedMockDatabase => {
     Array.isArray(value.shareLinks) &&
     value.shareLinks.every(isShareLink) &&
     (value.wishlist === undefined ||
-      (Array.isArray(value.wishlist) && value.wishlist.every(isWishlistItem)));
+      (Array.isArray(value.wishlist) && value.wishlist.every(isWishlistItem))) &&
+    (value.comfyWorkflows === undefined ||
+      (Array.isArray(value.comfyWorkflows) && value.comfyWorkflows.every(isComfyWorkflow)));
 
   if (!isValid) {
     throw new Error("Invalid database backup");
@@ -663,11 +686,12 @@ const normalizePersistedDatabase = (
   }
 
   const persisted = retainBundledExampleProjects({
-    ...(value as unknown as Omit<PersistedMockDatabase, "pricingTemplates" | "quotes" | "workflows" | "wishlist">),
+    ...(value as unknown as Omit<PersistedMockDatabase, "pricingTemplates" | "quotes" | "workflows" | "wishlist" | "comfyWorkflows">),
     // Workspaces saved before quoting shipped simply have no collection yet.
     pricingTemplates: normalizePricingTemplateLibrary(value.pricingTemplates),
     quotes: normalizeQuoteLibrary(value.quotes),
     workflows: normalizeWorkflowLibrary(value.workflows),
+    comfyWorkflows: normalizeComfyWorkflows(value.comfyWorkflows),
     wishlist: normalizeWishlist(value.wishlist)
   });
   const seedDatabase = createMockDatabase();
@@ -698,6 +722,7 @@ const normalizePersistedDatabase = (
     pricingTemplates: persisted.pricingTemplates,
     quotes: retainReachableQuotes(persisted.quotes, persisted.companies, migratedWorkflows.projects),
     workflows: migratedWorkflows.workflows,
+    comfyWorkflows: persisted.comfyWorkflows,
     shareLinks: persisted.shareLinks,
     wishlist: persisted.wishlist
   };
