@@ -35,6 +35,7 @@ import { Pill } from "@/components/ui/pill";
 import { ProgressBar } from "@/components/ui/progress-bar";
 import { SectionHeader } from "@/components/ui/section-header";
 import { companiesApi, groupsApi, librariesApi, projectsApi } from "@/lib/api";
+import { getToolMonthlySubscriptionCost } from "@/lib/mock";
 import {
   formatDemoEntityName,
   getProjectGroupDisplayName,
@@ -179,6 +180,10 @@ export function VisualDashboardShell() {
   const spotlightProjects = overview?.spotlightProjects ?? [];
   const atlasProject = spotlightProjects[0];
   const featuredSubscriptions = tools.filter((tool) => tool.subscription?.showOnDashboard);
+  const featuredMonthlyTotal = featuredSubscriptions.reduce(
+    (total, tool) => total + getToolMonthlySubscriptionCost(tool, displayCurrency, exchangeRateSnapshot),
+    0
+  );
 
   const submitWishlistItem = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -573,9 +578,16 @@ export function VisualDashboardShell() {
 
         <section className="mt-6 grid gap-4 lg:grid-cols-2">
           <div className="min-w-0 rounded-studio-lg bg-[#112f45] p-5 text-white shadow-soft sm:p-6">
-            <div className="flex items-center gap-2">
-              <CircleDollarSign size={18} />
-              <h2 className="text-lg font-black">{t("dashboardSubscriptionsTitle")}</h2>
+            <div className="flex min-w-0 flex-wrap items-baseline gap-x-2.5 gap-y-1">
+              <span className="flex items-center gap-2">
+                <CircleDollarSign size={18} />
+                <h2 className="text-lg font-black">{t("dashboardSubscriptionsTitle")}</h2>
+              </span>
+              {featuredSubscriptions.length ? (
+                <span className="text-sm font-black tabular-nums text-white/75">
+                  {t("dashboardSubscriptionsSalary").replace("{amount}", formatAmount(featuredMonthlyTotal))}
+                </span>
+              ) : null}
             </div>
             {featuredSubscriptions.length ? (
               <ul className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-3">
