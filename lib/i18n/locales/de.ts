@@ -638,6 +638,8 @@ export const deTranslations = {
   actual: "Ist",
   estimated: "Geschätzt",
   projectCostItems: "Projektkosten",
+  dashboardSubscriptionsTitle: "AI-Mitarbeiter",
+  dashboardSubscriptionsSalary: "Monatsgehalt: {amount}",
   globalCostsTitle: "Kostenbereich aller Projekte",
   globalCostsBody: "Prüfe Ist-Kosten, künftige Schätzungen und private Kostenbereiche nach Projekt.",
   librariesTitle: "Bibliotheken für Personen, Software und Kosten.",

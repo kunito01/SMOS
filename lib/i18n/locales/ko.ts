@@ -638,6 +638,8 @@ export const koTranslations = {
   actual: "실제",
   estimated: "예상",
   projectCostItems: "프로젝트 비용",
+  dashboardSubscriptionsTitle: "AI 직원",
+  dashboardSubscriptionsSalary: "월급: {amount}",
   globalCostsTitle: "전체 프로젝트 비용 관리",
   globalCostsBody: "프로젝트별 실제 비용, 향후 예상, 비공개 비용 진입점을 확인하세요.",
   librariesTitle: "사람, 소프트웨어, 비용 라이브러리.",

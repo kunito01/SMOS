@@ -768,7 +768,7 @@ export const trTranslations = {
   subscriptionLevel: "Abonelik",
   subscriptionLevelNone: "Yok",
   subscriptionLevelCustom: "Özel",
-  dashboardSubscriptionsTitle: "AI Agent Employ",
+  dashboardSubscriptionsTitle: "AI Çalışanı",
   dashboardSubscriptionsSalary: "Aylık maaş: {amount}",
   dashboardSubscriptionsEmpty: "Bir yazılım aboneliğinde \"Ana sayfada göster\" seçeneğini işaretleyin; burada fiyatıyla birlikte görünsün.",
   wishListTitle: "Wish List",

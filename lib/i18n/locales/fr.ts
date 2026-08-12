@@ -638,6 +638,8 @@ export const frTranslations = {
   actual: "Réel",
   estimated: "Estimé",
   projectCostItems: "Coûts des projets",
+  dashboardSubscriptionsTitle: "Employé AI",
+  dashboardSubscriptionsSalary: "Salaire mensuel : {amount}",
   globalCostsTitle: "Coûts de tous les projets",
   globalCostsBody: "Consultez les coûts réels, les estimations futures et l’accès aux coûts privés de chaque projet.",
   librariesTitle: "Bibliothèques de personnes, logiciels et coûts.",

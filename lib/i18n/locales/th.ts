@@ -638,6 +638,8 @@ export const thTranslations = {
   actual: "จริง",
   estimated: "ประมาณการ",
   projectCostItems: "ต้นทุนโครงการ",
+  dashboardSubscriptionsTitle: "พนักงาน AI",
+  dashboardSubscriptionsSalary: "เงินเดือน: {amount}",
   globalCostsTitle: "ค่าใช้จ่ายของทุกโปรเจกต์",
   globalCostsBody: "ตรวจสอบค่าใช้จ่ายจริง ประมาณการในอนาคต และทางเข้าค่าใช้จ่ายส่วนตัวของแต่ละโปรเจกต์",
   librariesTitle: "คลังบุคลากร ซอฟต์แวร์ และค่าใช้จ่าย",

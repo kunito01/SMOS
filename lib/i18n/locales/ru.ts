@@ -768,7 +768,7 @@ export const ruTranslations = {
   subscriptionLevel: "Подписка",
   subscriptionLevelNone: "Не указан",
   subscriptionLevelCustom: "Свой вариант",
-  dashboardSubscriptionsTitle: "AI Agent Employ",
+  dashboardSubscriptionsTitle: "AI-сотрудник",
   dashboardSubscriptionsSalary: "Зарплата в месяц: {amount}",
   dashboardSubscriptionsEmpty: "Отметьте «Показывать на главной» у подписки, и она появится здесь вместе с ценой.",
   wishListTitle: "Wish List",
