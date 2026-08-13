@@ -58,6 +58,8 @@ export type ToolSubscription = {
 export type WishlistItem = {
   id: string;
   name: string;
+  /** Set when the wish is fulfilled; fulfilled wishes scroll in the card's marquee. */
+  fulfilledAt?: string;
 };
 
 export type Person = {

@@ -776,6 +776,7 @@ export const ruTranslations = {
   wishListPlaceholder: "Добавьте, что планируете купить или оформить",
   wishListAdd: "Добавить",
   wishListRemove: "Убрать",
+  wishListFulfill: "Исполнить желание",
   comfyLibraryTitle: "Рабочие процессы ComfyUI",
   comfyLibraryBody: "Храните рабочие процессы ComfyUI вместе с хостом, на котором они выполняются, и связывайте их с проектами.",
   comfyHostLabel: "Хост",

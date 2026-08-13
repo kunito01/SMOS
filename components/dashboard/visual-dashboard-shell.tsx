@@ -118,6 +118,7 @@ export function VisualDashboardShell() {
   const [tools, setTools] = useState<Tool[]>([]);
   const [wishlist, setWishlist] = useState<WishlistItem[]>([]);
   const [wishlistDraft, setWishlistDraft] = useState("");
+  const [fulfillingWishId, setFulfillingWishId] = useState("");
 
   useEffect(() => {
     let isMounted = true;
@@ -200,6 +201,30 @@ export function VisualDashboardShell() {
   const removeWishlistEntry = async (itemId: string) => {
     await librariesApi.removeWishlistItem(itemId);
     setWishlist((current) => current.filter((item) => item.id !== itemId));
+  };
+
+  const activeWishes = wishlist.filter((item) => !item.fulfilledAt);
+  const fulfilledWishes = [...wishlist]
+    .filter((item) => item.fulfilledAt)
+    .sort((a, b) => (b.fulfilledAt ?? "").localeCompare(a.fulfilledAt ?? ""))
+    .slice(0, 6);
+
+  const fulfillWishlistEntry = async (itemId: string) => {
+    if (fulfillingWishId) {
+      return;
+    }
+
+    setFulfillingWishId(itemId);
+    try {
+      const fulfilled = await librariesApi.fulfillWishlistItem(itemId);
+      // Let the heart fill and jump before the wish moves into the marquee.
+      window.setTimeout(() => {
+        setWishlist((current) => current.map((item) => (item.id === itemId ? fulfilled : item)));
+        setFulfillingWishId("");
+      }, 700);
+    } catch {
+      setFulfillingWishId("");
+    }
   };
 
   const scopedProjects = useMemo(() => {
@@ -633,22 +658,41 @@ export function VisualDashboardShell() {
               <Heart size={18} />
               <h2 className="text-lg font-black">{t("wishListTitle")}</h2>
             </div>
-            {wishlist.length ? (
+            {activeWishes.length ? (
               <ul className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-3">
-                {wishlist.map((item) => (
+                {activeWishes.map((item) => (
                   <li
                     key={item.id}
                     className="flex min-w-0 items-start justify-between gap-2 rounded-studio bg-white/75 p-3"
                   >
-                    <p className="min-w-0 truncate font-black">{item.name}</p>
-                    <button
-                      type="button"
-                      onClick={() => removeWishlistEntry(item.id)}
-                      className="grid size-6 shrink-0 place-items-center rounded-full bg-ink/[0.06] text-ink transition hover:bg-coral hover:text-white"
-                      aria-label={`${t("wishListRemove")} · ${item.name}`}
-                    >
-                      <X size={12} />
-                    </button>
+                    <p className="min-w-0 break-words text-xs font-normal leading-5 text-ink [overflow-wrap:anywhere]">
+                      {item.name}
+                    </p>
+                    <span className="flex shrink-0 items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => void fulfillWishlistEntry(item.id)}
+                        className="grid size-6 place-items-center rounded-full bg-ink/[0.06] transition hover:bg-white"
+                        aria-label={`${t("wishListFulfill")} · ${item.name}`}
+                      >
+                        <Heart
+                          size={13}
+                          className={
+                            fulfillingWishId === item.id
+                              ? "animate-bounce fill-[#e65535] text-[#e65535]"
+                              : "fill-none text-ink/60"
+                          }
+                        />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => removeWishlistEntry(item.id)}
+                        className="grid size-6 place-items-center rounded-full bg-ink/[0.06] text-ink transition hover:bg-coral hover:text-white"
+                        aria-label={`${t("wishListRemove")} · ${item.name}`}
+                      >
+                        <X size={12} />
+                      </button>
+                    </span>
                   </li>
                 ))}
               </ul>
@@ -672,6 +716,22 @@ export function VisualDashboardShell() {
                 {t("wishListAdd")}
               </Button>
             </form>
+            {fulfilledWishes.length ? (
+              <div className="mt-3 overflow-hidden">
+                <div className="flex w-max animate-[wish-marquee_18s_linear_infinite] gap-10 whitespace-nowrap text-[10px] font-light leading-4 text-ink/45">
+                  {[0, 1].map((pass) => (
+                    <span key={pass} aria-hidden={pass === 1} className="flex gap-10">
+                      {fulfilledWishes.map((item) => (
+                        <span key={`${pass}-${item.id}`} className="flex items-center gap-1.5">
+                          <Heart size={9} className="fill-[#e65535] text-[#e65535]" />
+                          {item.name}
+                        </span>
+                      ))}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ) : null}
           </div>
         </section>
 

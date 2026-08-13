@@ -183,7 +183,9 @@ const isShareLink = (value: unknown) =>
   (value.displayCurrency === undefined || isMoneyCurrency(value.displayCurrency));
 
 const isWishlistItem = (value: unknown): value is WishlistItem =>
-  isRecord(value) && hasStrings(value, ["id", "name"]);
+  isRecord(value) &&
+  hasStrings(value, ["id", "name"]) &&
+  (value.fulfilledAt === undefined || typeof value.fulfilledAt === "string");
 
 const isComfyWorkflow = (value: unknown): value is ComfyUiWorkflow =>
   isRecord(value) &&
@@ -211,7 +213,11 @@ const normalizeComfyWorkflows = (value: unknown): ComfyUiWorkflow[] =>
 // Workspaces saved before the wish list shipped simply have no collection yet.
 const normalizeWishlist = (value: unknown): WishlistItem[] =>
   Array.isArray(value)
-    ? value.filter(isWishlistItem).map((item) => ({ id: item.id, name: item.name }))
+    ? value.filter(isWishlistItem).map((item) => ({
+        id: item.id,
+        name: item.name,
+        ...(item.fulfilledAt ? { fulfilledAt: item.fulfilledAt } : {})
+      }))
     : [];
 
 const isFiniteNonNegativeNumber = (value: unknown): value is number =>

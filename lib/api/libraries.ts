@@ -420,6 +420,20 @@ export async function addWishlistItem(name: string) {
   return mockApi(structuredClone(item));
 }
 
+export async function fulfillWishlistItem(itemId: string) {
+  await hydrateMockDatabase();
+  const item = mockDatabase.wishlist.find((entry) => entry.id === itemId);
+
+  if (!item) {
+    throw new Error(`Wishlist item not found: ${itemId}`);
+  }
+
+  item.fulfilledAt = new Date().toISOString();
+  await persistMockDatabase();
+
+  return mockApi(structuredClone(item));
+}
+
 export async function removeWishlistItem(itemId: string) {
   await hydrateMockDatabase();
   mockDatabase.wishlist = mockDatabase.wishlist.filter((item) => item.id !== itemId);
