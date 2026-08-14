@@ -289,6 +289,7 @@ export const ruTranslations = {
   budgetDailyExpensesNone: "Повседневные или непредвиденные расходы ещё не добавлены.",
   budgetLineSave: "Сохранить",
   budgetLineSaved: "Сохранено",
+  budgetSyncPhaseDates: "Синхронизировать с датами этапа",
   budgetExtraCosts: "Аутсорсинг и дополнительные услуги",
   addBudgetExtraCost: "Добавить аутсорсинг / расход вручную",
   importOutsourcingFromLibrary: "Импортировать из библиотеки аутсорсинга",

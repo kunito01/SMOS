@@ -289,6 +289,7 @@ export const trTranslations = {
   budgetDailyExpensesNone: "Henüz günlük veya arızi gider eklenmedi.",
   budgetLineSave: "Kaydet",
   budgetLineSaved: "Kaydedildi",
+  budgetSyncPhaseDates: "Aşama tarihleriyle eşitle",
   budgetExtraCosts: "Dış kaynak ve ek hizmetler",
   addBudgetExtraCost: "Elle dış kaynak / maliyet ekle",
   importOutsourcingFromLibrary: "Dış kaynak kitaplığından içe aktar",

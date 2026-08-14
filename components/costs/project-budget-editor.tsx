@@ -10,6 +10,7 @@ import {
   CirclePlus,
   Percent,
   ReceiptText,
+  RefreshCw,
   Save,
   Trash2,
   UsersRound,
@@ -723,6 +724,21 @@ export function ProjectBudgetEditor({
                             <Trash2 size={16} />
                             {t("delete")}
                           </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            disabled={line.startDate === phase.startDate && line.endDate === phase.endDate}
+                            onClick={() =>
+                              updatePersonnel(phase.id, line.id, {
+                                startDate: phase.startDate,
+                                endDate: phase.endDate
+                              })
+                            }
+                          >
+                            <RefreshCw size={16} />
+                            {t("budgetSyncPhaseDates")}
+                          </Button>
                           {saveControl(
                             valuesMatch(
                               line,
@@ -1232,6 +1248,22 @@ export function ProjectBudgetEditor({
                             >
                               <Trash2 size={16} />
                               {t("delete")}
+                            </Button>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              className="bg-white/10 text-white hover:bg-white hover:text-ink"
+                              disabled={line.startDate === phase.startDate && line.endDate === phase.endDate}
+                              onClick={() =>
+                                updateSoftwareCost(phase.id, line.id, {
+                                  startDate: phase.startDate,
+                                  endDate: phase.endDate
+                                })
+                              }
+                            >
+                              <RefreshCw size={16} />
+                              {t("budgetSyncPhaseDates")}
                             </Button>
                             {saveControl(
                               valuesMatch(
