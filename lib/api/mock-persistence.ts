@@ -185,6 +185,8 @@ const isShareLink = (value: unknown) =>
 const isWishlistItem = (value: unknown): value is WishlistItem =>
   isRecord(value) &&
   hasStrings(value, ["id", "name"]) &&
+  (value.amount === undefined || typeof value.amount === "number") &&
+  (value.currency === undefined || isMoneyCurrency(value.currency)) &&
   (value.fulfilledAt === undefined || typeof value.fulfilledAt === "string");
 
 const isComfyWorkflow = (value: unknown): value is ComfyUiWorkflow =>
@@ -216,6 +218,8 @@ const normalizeWishlist = (value: unknown): WishlistItem[] =>
     ? value.filter(isWishlistItem).map((item) => ({
         id: item.id,
         name: item.name,
+        ...(item.amount && item.amount > 0 ? { amount: item.amount } : {}),
+        ...(item.currency ? { currency: item.currency } : {}),
         ...(item.fulfilledAt ? { fulfilledAt: item.fulfilledAt } : {})
       }))
     : [];

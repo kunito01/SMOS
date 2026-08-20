@@ -33,6 +33,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Pill } from "@/components/ui/pill";
 import { ProgressBar } from "@/components/ui/progress-bar";
+import { Select } from "@/components/ui/select";
 import { SectionHeader } from "@/components/ui/section-header";
 import { companiesApi, groupsApi, librariesApi, projectsApi } from "@/lib/api";
 import { getToolMonthlySubscriptionCost } from "@/lib/mock";
@@ -47,7 +48,7 @@ import type { TranslationKey } from "@/lib/i18n/translations";
 import type { Company, DashboardOverview, DashboardScope, Project, ProjectGroup, Tool, WishlistItem } from "@/lib/types";
 import { projectPath } from "@/lib/utils/app-routes";
 import { cn } from "@/lib/utils/cn";
-import { fixedNumericLocale } from "@/lib/utils/money";
+import { fixedNumericLocale, supportedCurrencies } from "@/lib/utils/money";
 import {
   listCreditsRefreshReminders,
   type CreditsRefreshReminder
@@ -107,7 +108,8 @@ export function VisualDashboardShell() {
     displayCurrency,
     exchangeRateSnapshot,
     formatAmount,
-    isReady: isCurrencyReady
+    isReady: isCurrencyReady,
+    sumInDisplayCurrency
   } = useCostDisplayCurrency();
   const [data, setData] = useState<DashboardData | null>(null);
   const [overview, setOverview] = useState<DashboardOverview | null>(null);
@@ -118,6 +120,8 @@ export function VisualDashboardShell() {
   const [tools, setTools] = useState<Tool[]>([]);
   const [wishlist, setWishlist] = useState<WishlistItem[]>([]);
   const [wishlistDraft, setWishlistDraft] = useState("");
+  const [wishlistAmountDraft, setWishlistAmountDraft] = useState("");
+  const [wishlistCurrencyDraft, setWishlistCurrencyDraft] = useState<WishlistItem["currency"]>("CNY");
   const [fulfillingWishId, setFulfillingWishId] = useState("");
 
   useEffect(() => {
@@ -193,9 +197,16 @@ export function VisualDashboardShell() {
       return;
     }
 
-    const item = await librariesApi.addWishlistItem(name);
+    const amount = Number(wishlistAmountDraft);
+    const item = await librariesApi.addWishlistItem({
+      name,
+      ...(Number.isFinite(amount) && amount > 0
+        ? { amount, currency: wishlistCurrencyDraft }
+        : {})
+    });
     setWishlist((current) => [...current, item]);
     setWishlistDraft("");
+    setWishlistAmountDraft("");
   };
 
   const removeWishlistEntry = async (itemId: string) => {
@@ -204,6 +215,11 @@ export function VisualDashboardShell() {
   };
 
   const activeWishes = wishlist.filter((item) => !item.fulfilledAt);
+  const wishListTotal = sumInDisplayCurrency(
+    activeWishes
+      .filter((item) => (item.amount ?? 0) > 0)
+      .map((item) => ({ amount: item.amount ?? 0, currency: item.currency ?? "CNY" }))
+  );
   const fulfilledWishes = [...wishlist]
     .filter((item) => item.fulfilledAt)
     .sort((a, b) => (b.fulfilledAt ?? "").localeCompare(a.fulfilledAt ?? ""))
@@ -658,6 +674,11 @@ export function VisualDashboardShell() {
               <Heart size={18} />
               <h2 className="text-lg font-black">{t("wishListTitle")}</h2>
             </div>
+            {wishListTotal > 0 ? (
+              <p className="mt-1 text-xs font-light tabular-nums leading-4 text-ink/55">
+                {t("wishListTotal").replace("{amount}", formatAmount(wishListTotal))}
+              </p>
+            ) : null}
             {activeWishes.length ? (
               <ul className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-3">
                 {activeWishes.map((item) => (
@@ -665,9 +686,20 @@ export function VisualDashboardShell() {
                     key={item.id}
                     className="flex min-w-0 items-start justify-between gap-2 rounded-studio bg-white/75 p-3"
                   >
-                    <p className="min-w-0 break-words text-xs font-normal leading-5 text-ink [overflow-wrap:anywhere]">
-                      {item.name}
-                    </p>
+                    <div className="min-w-0">
+                      <p className="break-words text-xs font-normal leading-5 text-ink [overflow-wrap:anywhere]">
+                        {item.name}
+                      </p>
+                      {(item.amount ?? 0) > 0 ? (
+                        <p className="mt-1 text-[10px] font-normal tabular-nums leading-4 text-ink/45">
+                          {new Intl.NumberFormat(fixedNumericLocale, {
+                            currency: item.currency ?? "CNY",
+                            maximumFractionDigits: 2,
+                            style: "currency"
+                          }).format(item.amount ?? 0)}
+                        </p>
+                      ) : null}
+                    </div>
                     <span className="flex shrink-0 items-center gap-1">
                       <button
                         type="button"
@@ -704,13 +736,33 @@ export function VisualDashboardShell() {
                 value={wishlistDraft}
                 onChange={(event) => setWishlistDraft(event.target.value)}
                 placeholder={t("wishListPlaceholder")}
-                className="h-11 min-w-0 flex-1 rounded-full border-0 bg-white px-4 text-sm font-bold text-ink outline-none ring-1 ring-[#e65535] focus:ring-2 focus:ring-[#e65535]"
+                className="h-11 w-full min-w-0 flex-1 rounded-full border-0 bg-white px-3 text-sm font-bold text-ink outline-none ring-1 ring-[#e65535] focus:ring-2 focus:ring-[#e65535]"
               />
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={wishlistAmountDraft}
+                onChange={(event) => setWishlistAmountDraft(event.target.value)}
+                placeholder={t("wishListPricePlaceholder")}
+                className="h-11 w-24 shrink-0 rounded-full border-0 bg-white px-3 text-sm font-bold text-ink outline-none ring-1 ring-[#e65535] focus:ring-2 focus:ring-[#e65535]"
+              />
+              <div className="w-20 shrink-0">
+                <Select
+                  value={wishlistCurrencyDraft}
+                  onChange={(event) => setWishlistCurrencyDraft(event.target.value as WishlistItem["currency"])}
+                  className="h-11 rounded-full border-0 bg-white px-3 text-sm font-bold text-ink outline-none ring-1 ring-[#e65535]"
+                >
+                  {supportedCurrencies.map((currency) => (
+                    <option key={currency} value={currency}>{currency}</option>
+                  ))}
+                </Select>
+              </div>
               <Button
                 type="submit"
                 size="sm"
                 disabled={!wishlistDraft.trim()}
-                className="bg-[#e65535] hover:bg-[#e65535]/90"
+                className="shrink-0 bg-[#e65535] hover:bg-[#e65535]/90"
               >
                 <Plus size={16} />
                 {t("wishListAdd")}

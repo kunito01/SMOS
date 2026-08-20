@@ -411,9 +411,22 @@ export async function listWishlist() {
   return mockApi(mockDatabase.wishlist);
 }
 
-export async function addWishlistItem(name: string) {
+export type AddWishlistItemInput = {
+  name: string;
+  amount?: number;
+  currency?: WishlistItem["currency"];
+};
+
+export async function addWishlistItem(input: AddWishlistItemInput) {
   await hydrateMockDatabase();
-  const item: WishlistItem = { id: createLibraryId("wishlist"), name: name.trim() };
+  const amount = Number(input.amount);
+  const item: WishlistItem = {
+    id: createLibraryId("wishlist"),
+    name: input.name.trim(),
+    ...(Number.isFinite(amount) && amount > 0
+      ? { amount, currency: input.currency ?? "CNY" }
+      : {})
+  };
   mockDatabase.wishlist.push(item);
   await persistMockDatabase();
 

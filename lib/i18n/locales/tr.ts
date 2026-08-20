@@ -778,6 +778,8 @@ export const trTranslations = {
   wishListAdd: "Ekle",
   wishListRemove: "Kaldır",
   wishListFulfill: "Dileği gerçekleştir",
+  wishListTotal: "Toplam: {amount}",
+  wishListPricePlaceholder: "Fiyat (isteğe bağlı)",
   comfyLibraryTitle: "ComfyUI İş Akışları",
   comfyLibraryBody: "ComfyUI iş akışlarını çalıştıkları ana makineyle birlikte kaydedin; projelerden doğrudan bağlanabilir.",
   comfyHostLabel: "Ana makine",

@@ -58,6 +58,9 @@ export type ToolSubscription = {
 export type WishlistItem = {
   id: string;
   name: string;
+  /** Optional expected price shown on the tile and summed under the card title. */
+  amount?: number;
+  currency?: CostItem["currency"];
   /** Set when the wish is fulfilled; fulfilled wishes scroll in the card's marquee. */
   fulfilledAt?: string;
 };
