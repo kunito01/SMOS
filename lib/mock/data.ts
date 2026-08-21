@@ -969,7 +969,8 @@ export const createDashboardOverview = (
     ).length,
     upcomingDeliverableCount: deliverables.filter((deliverable) => !deliverable.completed).length,
     overdueTaskCount: tasks.filter((task) => !task.completed && task.priority === "high").length,
-    actualCostSoFar: operationalProjects.reduce(
+    // Archived projects already spent this money; the total keeps it.
+    actualCostSoFar: projects.reduce(
       (sum, project) => sum + getProjectActualCost(project, currency, snapshot),
       0
     ),

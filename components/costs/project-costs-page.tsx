@@ -3,7 +3,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Banknote, Calculator, ChevronDown, ChevronUp, CircleDollarSign, ReceiptText, Save, TrendingUp } from "lucide-react";
+import {
+  ArrowLeft,
+  Banknote,
+  Calculator,
+  ChevronDown,
+  ChevronUp,
+  CircleDollarSign,
+  Lock,
+  ReceiptText,
+  Save,
+  TrendingUp
+} from "lucide-react";
 import { CostCurrencySelector } from "@/components/costs/cost-currency-selector";
 import {
   ProjectBudgetEditor,
@@ -264,7 +275,8 @@ export function ProjectCostsPage({ projectId }: { projectId: string }) {
         return true;
       }
 
-      if (!isBudgetDirty) {
+      // A locked (archived) budget cannot hold unsaved edits, so never hold the user back.
+      if (!isBudgetDirty || data?.project.archivedAt) {
         return true;
       }
 
@@ -274,7 +286,7 @@ export function ProjectCostsPage({ projectId }: { projectId: string }) {
       setLeaveConfirmOpen(true);
       return false;
     },
-    [isBudgetDirty]
+    [data?.project.archivedAt, isBudgetDirty]
   );
 
   const toggleBudgetChecklist = () => {
@@ -314,7 +326,7 @@ export function ProjectCostsPage({ projectId }: { projectId: string }) {
   };
 
   const saveBudget = async (target?: ProjectBudgetSaveTarget) => {
-    if (!data || !budgetDraft || isSavingBudget) {
+    if (!data || !budgetDraft || isSavingBudget || data.project.archivedAt) {
       return false;
     }
 
@@ -512,11 +524,13 @@ export function ProjectCostsPage({ projectId }: { projectId: string }) {
                       isBudgetDirty ? "bg-coral text-white" : "bg-cloud text-muted"
                     )}
                   >
-                    {isBudgetDirty
-                      ? t("projectBudgetUnsaved")
-                      : data.project.budget
-                        ? t("projectBudgetSavedState")
-                        : t("noProjectBudget")}
+                    {data.project.archivedAt
+                      ? t("budgetLockedBadge")
+                      : isBudgetDirty
+                        ? t("projectBudgetUnsaved")
+                        : data.project.budget
+                          ? t("projectBudgetSavedState")
+                          : t("noProjectBudget")}
                   </span>
                   <span className="grid size-10 place-items-center rounded-full bg-ink text-white">
                     <ChevronDown
@@ -540,10 +554,17 @@ export function ProjectCostsPage({ projectId }: { projectId: string }) {
                     savedValue={data.project.budget ? budgetBaseline : null}
                     onSave={saveBudget}
                     isSaving={isSavingBudget}
+                    readOnly={Boolean(data.project.archivedAt)}
                     displayCurrency={displayCurrency}
                     exchangeRateSnapshot={exchangeRateSnapshot}
                     formatAmount={formatAmount}
                   />
+                  {data.project.archivedAt ? (
+                    <div className="mt-5 flex items-start gap-3 rounded-studio bg-[#e7e4df] p-4">
+                      <Lock size={18} className="mt-0.5 shrink-0 text-ink" />
+                      <p className="text-sm font-bold leading-6 text-ink/75">{t("budgetLockedArchived")}</p>
+                    </div>
+                  ) : (
                   <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-studio bg-[#26cbd1] p-4">
                     <p className="max-w-2xl text-sm font-bold leading-6 text-[#62717a]">
                       {t("projectBudgetSaveReminder")}
@@ -558,6 +579,7 @@ export function ProjectCostsPage({ projectId }: { projectId: string }) {
                       </Button>
                     </div>
                   </div>
+                  )}
                 </div>
               ) : null}
             </section>

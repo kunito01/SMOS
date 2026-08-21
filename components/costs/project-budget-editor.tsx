@@ -71,6 +71,8 @@ type ProjectBudgetEditorProps = {
   savedValue?: ProjectBudget | null;
   onSave?: (target?: ProjectBudgetSaveTarget) => Promise<boolean>;
   isSaving?: boolean;
+  /** Archived projects: the checklist stays readable but every edit and save is ignored. */
+  readOnly?: boolean;
 };
 
 const numberValue = (value: string) => {
@@ -99,7 +101,8 @@ export function ProjectBudgetEditor({
   showHeader = true,
   savedValue = null,
   onSave,
-  isSaving = false
+  isSaving,
+  readOnly = false
 }: ProjectBudgetEditorProps) {
   const { t } = useI18n();
   const [collapsedPhaseIds, setCollapsedPhaseIds] = useState<Set<string>>(new Set());
@@ -136,7 +139,7 @@ export function ProjectBudgetEditor({
     label: string,
     target: ProjectBudgetSaveTarget
   ) => {
-    if (!onSave) {
+    if (!onSave || readOnly) {
       return null;
     }
 
@@ -163,6 +166,9 @@ export function ProjectBudgetEditor({
   };
 
   const updatePhase = (phaseId: string, update: (phase: ProjectPhaseBudget) => ProjectPhaseBudget) => {
+    if (readOnly) {
+      return;
+    }
     onChange({
       ...value,
       phases: value.phases.map((phase) => (phase.phaseId === phaseId ? update(phase) : phase))

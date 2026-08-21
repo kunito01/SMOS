@@ -12,8 +12,11 @@ import { Card } from "@/components/ui/card";
 import { LoadingState } from "@/components/ui/loading-state";
 import { ProgressBar } from "@/components/ui/progress-bar";
 import { SectionHeader } from "@/components/ui/section-header";
+import { Select } from "@/components/ui/select";
 import { companiesApi, costsApi, groupsApi, projectsApi } from "@/lib/api";
-import type { CostSummary, ProjectCostSummary } from "@/lib/api/costs";
+import type { CostSummary, FiscalYearReport, FiscalYearTotals, ProjectCostSummary } from "@/lib/api/costs";
+import { getCurrentFiscalYear } from "@/lib/api/costs";
+import { cn } from "@/lib/utils/cn";
 import {
   budgetCostCategoryKeys,
   costCategoryKeys,
@@ -31,7 +34,10 @@ type GlobalCostsData = {
   groups: ProjectGroup[];
   globalSummary: CostSummary;
   projectSummaries: ProjectCostSummary[];
+  fiscalReports: FiscalYearReport[];
 };
+
+const formatMargin = (margin: number | null) => (margin === null ? "—" : `${(margin * 100).toFixed(1)}%`);
 
 const groupCostCardToneClasses: Record<string, string> = {
   aqua: "bg-aqua/70 text-ink",
@@ -51,6 +57,7 @@ export function GlobalCostsPage() {
   } = useCostDisplayCurrency();
   const [data, setData] = useState<GlobalCostsData | null>(null);
   const [collapsedCompanyIds, setCollapsedCompanyIds] = useState<Set<string>>(new Set());
+  const [fiscalYear, setFiscalYear] = useState<number>(() => getCurrentFiscalYear());
 
   useEffect(() => {
     if (!isCurrencyReady) {
@@ -60,12 +67,16 @@ export function GlobalCostsPage() {
     let isMounted = true;
 
     async function load() {
-      const [companies, projects, groups, globalSummary] = await Promise.all([
+      const [companies, activeProjects, archivedProjects, groups, globalSummary, fiscalReports] = await Promise.all([
         companiesApi.listCompanies(),
         projectsApi.listProjects(),
+        projectsApi.listArchivedProjects(),
         groupsApi.listGroups(),
-        costsApi.getGlobalCostSummary(displayCurrency, exchangeRateSnapshot)
+        costsApi.getGlobalCostSummary(displayCurrency, exchangeRateSnapshot),
+        costsApi.getFiscalYearReports(displayCurrency, exchangeRateSnapshot)
       ]);
+      // Archived projects stay visible here; their budgets are locked on their own page.
+      const projects = [...activeProjects, ...archivedProjects];
       const projectSummaries = await Promise.all(
         projects.map((project) =>
           costsApi.getProjectCostSummary(project.id, displayCurrency, exchangeRateSnapshot)
@@ -73,7 +84,7 @@ export function GlobalCostsPage() {
       );
 
       if (isMounted) {
-        setData({ companies, projects, groups, globalSummary, projectSummaries });
+        setData({ companies, projects, groups, globalSummary, projectSummaries, fiscalReports });
       }
     }
 
@@ -114,6 +125,28 @@ export function GlobalCostsPage() {
     return buckets;
   }, [data?.companies, data?.projects, t]);
   const maxCategory = Math.max(1, ...Object.values(data?.globalSummary.byCategory ?? {}));
+  const companyById = useMemo(
+    () => new Map((data?.companies ?? []).map((company) => [company.id, company])),
+    [data?.companies]
+  );
+  const selectedFiscalReport =
+    data?.fiscalReports.find((report) => report.fiscalYear === fiscalYear) ?? data?.fiscalReports[0] ?? null;
+  const fiscalMetrics = (totals: FiscalYearTotals, currency: CostSummary["currency"]) => [
+    { key: "cost", label: t("fiscalCost"), value: formatAmount(totals.cost, currency), tone: "text-ink" },
+    { key: "revenue", label: t("fiscalRevenue"), value: formatAmount(totals.revenue, currency), tone: "text-ink" },
+    {
+      key: "profit",
+      label: t("fiscalProfit"),
+      value: formatAmount(totals.profit, currency),
+      tone: totals.profit < 0 ? "text-coral" : "text-[#1f7a4d]"
+    },
+    {
+      key: "margin",
+      label: t("fiscalMargin"),
+      value: formatMargin(totals.margin),
+      tone: totals.margin !== null && totals.margin < 0 ? "text-coral" : "text-ink"
+    }
+  ];
 
   return (
     <AppShell>
@@ -203,6 +236,103 @@ export function GlobalCostsPage() {
               </Card>
             </section>
 
+            <section className="mt-6">
+              <Card tone="glass" className="bg-[#e7e4df] p-5 sm:p-6">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <SectionHeader eyebrow={t("fiscalYearEyebrow")} title={t("fiscalYearTitle")} />
+                  <div className="w-full sm:w-40">
+                    <Select
+                      value={String(selectedFiscalReport?.fiscalYear ?? fiscalYear)}
+                      onChange={(event) => setFiscalYear(Number(event.target.value))}
+                      aria-label={t("fiscalYearTitle")}
+                      className="h-11 rounded-full border-0 bg-ink px-4 text-sm font-black text-white outline-none ring-0 hover:bg-ink/90"
+                    >
+                      {(data.fiscalReports ?? []).map((report) => (
+                        <option key={report.fiscalYear} value={String(report.fiscalYear)}>
+                          FY{report.fiscalYear}
+                        </option>
+                      ))}
+                    </Select>
+                  </div>
+                </div>
+                {selectedFiscalReport ? (
+                  <>
+                    <p className="mt-2 text-xs font-bold text-muted">
+                      {t("fiscalYearRange")
+                        .replace("{start}", String(selectedFiscalReport.fiscalYear))
+                        .replace("{end}", String(selectedFiscalReport.fiscalYear + 1))}
+                    </p>
+                    <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
+                      {fiscalMetrics(selectedFiscalReport.totals, selectedFiscalReport.currency).map((metric) => (
+                        <div key={metric.key} className="rounded-studio bg-white/75 p-4 ring-1 ring-black/[0.04]">
+                          <p className="text-xs font-black uppercase tracking-[0.08em] text-muted">{metric.label}</p>
+                          <p className={cn("mt-2 break-words text-2xl font-black tabular-nums", metric.tone)}>{metric.value}</p>
+                        </div>
+                      ))}
+                    </div>
+                    {selectedFiscalReport.companies.length ? (
+                      <div className="mt-6 grid gap-3">
+                        <p className="text-xs font-black uppercase tracking-[0.08em] text-muted">{t("fiscalByBrand")}</p>
+                        {selectedFiscalReport.companies.map((companyReport) => {
+                          const company = companyById.get(companyReport.companyId);
+                          const companyName = company
+                            ? formatDemoEntityName(company.name, company.id, "company", t)
+                            : t("unassignedGroup");
+                          return (
+                            <div key={companyReport.companyId} className="min-w-0 rounded-studio bg-white/55 p-4 ring-1 ring-black/[0.04]">
+                              <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
+                                <span className="flex min-w-0 items-center gap-2.5">
+                                  {company?.logoImage ? (
+                                    // eslint-disable-next-line @next/next/no-img-element
+                                    <img src={company.logoImage} alt="" className="h-6 w-auto max-w-20 shrink-0 object-contain" />
+                                  ) : null}
+                                  <span className="truncate text-lg font-black">{companyName}</span>
+                                </span>
+                                <span className="flex flex-wrap gap-x-5 gap-y-1">
+                                  {fiscalMetrics(companyReport.totals, selectedFiscalReport.currency).map((metric) => (
+                                    <span key={metric.key} className="text-sm font-bold text-muted">
+                                      {metric.label}{" "}
+                                      <span className={cn("font-black tabular-nums", metric.tone)}>{metric.value}</span>
+                                    </span>
+                                  ))}
+                                </span>
+                              </div>
+                              <div className="mt-3 grid gap-2">
+                                <p className="text-[11px] font-black uppercase tracking-[0.08em] text-muted">{t("fiscalByGroup")}</p>
+                                {companyReport.groups.map((groupReport) => {
+                                  const group = groupById.get(groupReport.groupId);
+                                  return (
+                                    <div
+                                      key={groupReport.groupId}
+                                      className="flex min-w-0 flex-wrap items-center justify-between gap-3 rounded-2xl bg-white/85 px-4 py-3"
+                                    >
+                                      <span className="truncate text-sm font-black">
+                                        {group ? getProjectGroupDisplayName(group, language, t) : t("unassignedGroup")}
+                                      </span>
+                                      <span className="flex flex-wrap gap-x-5 gap-y-1">
+                                        {fiscalMetrics(groupReport.totals, selectedFiscalReport.currency).map((metric) => (
+                                          <span key={metric.key} className="text-xs font-bold text-muted">
+                                            {metric.label}{" "}
+                                            <span className={cn("font-black tabular-nums", metric.tone)}>{metric.value}</span>
+                                          </span>
+                                        ))}
+                                      </span>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <p className="mt-5 text-sm font-semibold leading-6 text-muted">{t("fiscalEmpty")}</p>
+                    )}
+                  </>
+                ) : null}
+              </Card>
+            </section>
+
             <section className="mt-6 grid gap-4 xl:grid-cols-[minmax(0,0.72fr)_minmax(320px,0.42fr)]">
               <Card tone="white" className="p-5 sm:p-6">
                 <SectionHeader eyebrow={t("projectCostItems")} title={t("creativeProjects")} />
@@ -264,6 +394,11 @@ export function GlobalCostsPage() {
                                     project.isExample
                                   )}
                                 </h3>
+                                {project.archivedAt ? (
+                                  <span className="mt-2 inline-flex min-h-6 items-center rounded-full bg-ink/[0.08] px-2.5 text-[11px] font-black text-ink/70">
+                                    {t("archiveArchivedStatus")}
+                                  </span>
+                                ) : null}
                                 <p className="mt-3 text-2xl font-black tabular-nums">
                                   {formatAmount(
                                     projectSummaryById.get(project.id)?.budgetCostTotal ?? 0,
