@@ -36,7 +36,7 @@ import { ProgressBar } from "@/components/ui/progress-bar";
 import { Select } from "@/components/ui/select";
 import { SectionHeader } from "@/components/ui/section-header";
 import { companiesApi, groupsApi, librariesApi, projectsApi } from "@/lib/api";
-import { getToolMonthlySubscriptionCost } from "@/lib/mock";
+import { getToolMonthlySubscriptionCost, getToolMonthlySubscriptionMoney } from "@/lib/mock";
 import {
   formatDemoEntityName,
   getProjectGroupDisplayName,
@@ -649,9 +649,9 @@ export function VisualDashboardShell() {
                           currency: subscription.currency,
                           maximumFractionDigits: 2,
                           style: "currency"
-                        }).format(subscription.amount)}
+                        }).format(getToolMonthlySubscriptionMoney(tool)?.amount ?? subscription.amount)}
                         {" · "}
-                        {t(subscription.billingCycle === "monthly" ? "billingTypeMonthly" : "billingTypeYearly")}
+                        {t("billingTypeMonthly")}
                       </p>
                       {subscription.accountEmail.trim() ? (
                         <p className="mt-1.5 truncate text-[10px] font-light leading-4 text-white/50">
