@@ -668,4 +668,16 @@ export type MockDatabase = {
   shareLinks: ShareLink[];
   /** Future purchases and subscriptions shown on the dashboard wish list. */
   wishlist: WishlistItem[];
+  /** Bindings to outside services; travels with the workspace so every device reuses them. */
+  integrations?: WorkspaceIntegrations;
+};
+
+export type GoogleCalendarLink = {
+  calendarId: string;
+  connectedAt: string;
+};
+
+export type WorkspaceIntegrations = {
+  /** Google calendars SMOS created, keyed by OAuth client id. */
+  googleCalendars?: Record<string, GoogleCalendarLink>;
 };

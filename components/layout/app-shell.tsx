@@ -36,6 +36,7 @@ import {
 import { formatLocalizedDate } from "@/lib/i18n/formatters";
 import { languageLocales } from "@/lib/i18n/translations";
 import { projectPath } from "@/lib/utils/app-routes";
+import { GoogleCalendarAutoSync } from "@/components/layout/google-calendar-auto-sync";
 import { cn } from "@/lib/utils/cn";
 import {
   getSystemNotificationPermission,
@@ -639,6 +640,7 @@ export function AppShell({ beforeNavigate, children }: AppShellProps) {
             </button>
           </div>
 
+          <GoogleCalendarAutoSync />
           {children}
           <SiteFooter dockSafe />
         </main>

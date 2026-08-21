@@ -34,6 +34,7 @@ import type {
   ComfyUiWorkflow,
   Company,
   CostLibraryItem,
+  GoogleCalendarLink,
   Person,
   PricingTemplate,
   Project,
@@ -44,7 +45,8 @@ import type {
   ShareLink,
   Tool,
   User,
-  WishlistItem
+  WishlistItem,
+  WorkspaceIntegrations
 } from "@/lib/types";
 import { synchronizeCostTemplateLinks } from "@/lib/utils/cost-template-links";
 import {
@@ -98,6 +100,7 @@ export type PersistedMockDatabase = {
   comfyWorkflows: ComfyUiWorkflow[];
   shareLinks: ShareLink[];
   wishlist: WishlistItem[];
+  integrations?: WorkspaceIntegrations;
 };
 
 export const mockDatabaseBackupSchema = "studio-map-os.database-backup" as const;
@@ -195,6 +198,28 @@ const isComfyWorkflow = (value: unknown): value is ComfyUiWorkflow =>
   (value.strengths === undefined || typeof value.strengths === "string") &&
   (value.weaknesses === undefined || typeof value.weaknesses === "string") &&
   (value.rating === undefined || value.rating === "nsfw" || value.rating === "sfw");
+
+const isGoogleCalendarLink = (value: unknown): value is GoogleCalendarLink =>
+  isRecord(value) && hasStrings(value, ["calendarId", "connectedAt"]);
+
+const isWorkspaceIntegrations = (value: unknown): value is WorkspaceIntegrations =>
+  isRecord(value) &&
+  (value.googleCalendars === undefined ||
+    (isRecord(value.googleCalendars) && Object.values(value.googleCalendars).every(isGoogleCalendarLink)));
+
+// Older workspaces have no integrations block; an invalid one is dropped rather than trusted.
+const normalizeIntegrations = (value: unknown): WorkspaceIntegrations | undefined => {
+  if (!isWorkspaceIntegrations(value)) {
+    return undefined;
+  }
+  const googleCalendars = Object.fromEntries(
+    Object.entries(value.googleCalendars ?? {}).map(([clientId, link]) => [
+      clientId,
+      { calendarId: link.calendarId, connectedAt: link.connectedAt }
+    ])
+  );
+  return Object.keys(googleCalendars).length ? { googleCalendars } : undefined;
+};
 
 // Workspaces saved before ComfyUI workflows shipped simply have no collection yet.
 const normalizeComfyWorkflows = (value: unknown): ComfyUiWorkflow[] =>
@@ -383,7 +408,8 @@ const createPersistedDatabaseSnapshot = (): PersistedMockDatabase => ({
   workflows: mockDatabase.workflows,
   comfyWorkflows: mockDatabase.comfyWorkflows,
   shareLinks: mockDatabase.shareLinks,
-  wishlist: mockDatabase.wishlist
+  wishlist: mockDatabase.wishlist,
+  ...(mockDatabase.integrations ? { integrations: mockDatabase.integrations } : {})
 });
 
 const validatePersistedDatabase = (value: unknown): PersistedMockDatabase => {
@@ -417,7 +443,8 @@ const validatePersistedDatabase = (value: unknown): PersistedMockDatabase => {
     (value.wishlist === undefined ||
       (Array.isArray(value.wishlist) && value.wishlist.every(isWishlistItem))) &&
     (value.comfyWorkflows === undefined ||
-      (Array.isArray(value.comfyWorkflows) && value.comfyWorkflows.every(isComfyWorkflow)));
+      (Array.isArray(value.comfyWorkflows) && value.comfyWorkflows.every(isComfyWorkflow))) &&
+    (value.integrations === undefined || isWorkspaceIntegrations(value.integrations));
 
   if (!isValid) {
     throw new Error("Invalid database backup");
@@ -703,13 +730,14 @@ const normalizePersistedDatabase = (
   }
 
   const persisted = retainBundledExampleProjects({
-    ...(value as unknown as Omit<PersistedMockDatabase, "pricingTemplates" | "quotes" | "workflows" | "wishlist" | "comfyWorkflows">),
+    ...(value as unknown as Omit<PersistedMockDatabase, "pricingTemplates" | "quotes" | "workflows" | "wishlist" | "comfyWorkflows" | "integrations">),
     // Workspaces saved before quoting shipped simply have no collection yet.
     pricingTemplates: normalizePricingTemplateLibrary(value.pricingTemplates),
     quotes: normalizeQuoteLibrary(value.quotes),
     workflows: normalizeWorkflowLibrary(value.workflows),
     comfyWorkflows: normalizeComfyWorkflows(value.comfyWorkflows),
-    wishlist: normalizeWishlist(value.wishlist)
+    wishlist: normalizeWishlist(value.wishlist),
+    ...(normalizeIntegrations(value.integrations) ? { integrations: normalizeIntegrations(value.integrations) } : {})
   });
   const seedDatabase = createMockDatabase();
   const seededGroupsById = new Map(seedDatabase.groups.map((group) => [group.id, group]));
@@ -741,7 +769,8 @@ const normalizePersistedDatabase = (
     workflows: migratedWorkflows.workflows,
     comfyWorkflows: persisted.comfyWorkflows,
     shareLinks: persisted.shareLinks,
-    wishlist: persisted.wishlist
+    wishlist: persisted.wishlist,
+    ...(persisted.integrations ? { integrations: persisted.integrations } : {})
   };
 
   synchronizeCostTemplateLinks(hydratedDatabase);
@@ -1254,6 +1283,11 @@ export async function persistMockDatabase(
 
   persistenceQueue = operation.catch(() => undefined);
   await operation;
+
+  if (typeof window !== "undefined") {
+    // Integrations (e.g. Google Calendar push) react to successful saves.
+    window.dispatchEvent(new CustomEvent("smos:database-persisted"));
+  }
 }
 
 export async function createMockDatabaseBackup(): Promise<MockDatabaseBackup> {

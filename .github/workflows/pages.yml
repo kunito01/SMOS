@@ -45,6 +45,8 @@ jobs:
           NEXT_PUBLIC_CLOUDKIT_API_TOKEN: ${{ secrets.CLOUDKIT_API_TOKEN }}
           NEXT_PUBLIC_CLOUDKIT_CONTAINER_ID: ${{ vars.CLOUDKIT_CONTAINER_ID }}
           NEXT_PUBLIC_CLOUDKIT_ENVIRONMENT: production
+          # Optional: bake the Google OAuth client id into the build so every device skips the paste step.
+          NEXT_PUBLIC_GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
         run: GITHUB_PAGES=1 npm run build
 
       - name: Verify exported PWA
