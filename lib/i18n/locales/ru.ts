@@ -628,6 +628,8 @@ export const ruTranslations = {
   timelineSettingsTitle: "Настройки временной шкалы",
   timelineSettingsBody: "Настройте этапы, периоды, цели, списки задач, заметки и пользовательские строки. Люди и программы для каждого этапа настраиваются в разделе расходов и отображаются здесь только для чтения.",
   timelineTitleLabel: "Название временной шкалы",
+  timelineShiftStartLabel: "Старт проекта (сдвинуть всё)",
+  timelineShiftStartHint: "При изменении даты старта все этапы и задачи сдвигаются на то же число дней, интервалы сохраняются.",
   currentTime: "Текущее время",
   timelineTarget: "Цель этапа",
   timelineLaneStrategy: "Стратегия",

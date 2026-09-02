@@ -628,6 +628,8 @@ export const trTranslations = {
   timelineSettingsTitle: "Zaman çizelgesi ayarları",
   timelineSettingsBody: "Bu proje için aşamaları, dönemleri, hedefleri, görev kontrol listelerini, notları ve özel satırları yapılandırın. Her aşamanın kişileri ve yazılımları maliyet alanında ayarlanır ve burada salt okunur gösterilir.",
   timelineTitleLabel: "Zaman çizelgesi adı",
+  timelineShiftStartLabel: "Proje başlangıcı (tümünü kaydır)",
+  timelineShiftStartHint: "Başlangıç tarihini değiştirmek tüm aşamaları ve görevleri aynı gün sayısı kadar kaydırır; aralıklar korunur.",
   currentTime: "Geçerli zaman",
   timelineTarget: "Aşama hedefi",
   timelineLaneStrategy: "Strateji",

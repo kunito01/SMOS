@@ -57,6 +57,16 @@ const phaseColors = ["#e3f596", "#f4e9d8", "#8edbe8", "#f94a22", "#1c2328", "#d4
 
 const makeDraftId = (prefix: string) => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 
+const isTimelineDateKey = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value);
+
+const shiftDateKey = (value: string, offsetDays: number) => {
+  if (!isTimelineDateKey(value)) {
+    return value;
+  }
+  const [year, month, day] = value.split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, day + offsetDays)).toISOString().slice(0, 10);
+};
+
 const createTaskDraft = (phase: Pick<PhaseDraft, "id" | "endDate" | "personIds">): TaskDraft => ({
   id: makeDraftId(`${phase.id}-task`),
   title: "",
@@ -149,6 +159,32 @@ export function ProjectTimelineSettingsModal({
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [pendingDelete, setPendingDelete] = useState<PendingTimelineDelete | null>(null);
+  const timelineStartDate = useMemo(() => {
+    const dates = phases.map((phase) => phase.startDate).filter(isTimelineDateKey);
+    return dates.length ? dates.reduce((earliest, date) => (date < earliest ? date : earliest)) : "";
+  }, [phases]);
+
+  /** Moves every phase and task by the same number of days, keeping all gaps intact. */
+  const shiftTimelineToStart = (nextStart: string) => {
+    if (!isTimelineDateKey(nextStart) || !timelineStartDate || nextStart === timelineStartDate) {
+      return;
+    }
+    const offsetDays = Math.round(
+      (Date.parse(`${nextStart}T00:00:00Z`) - Date.parse(`${timelineStartDate}T00:00:00Z`)) / 86_400_000
+    );
+    if (!offsetDays) {
+      return;
+    }
+    setPhases((current) =>
+      current.map((phase) => ({
+        ...phase,
+        startDate: shiftDateKey(phase.startDate, offsetDays),
+        endDate: shiftDateKey(phase.endDate, offsetDays),
+        tasks: phase.tasks.map((task) => ({ ...task, dueDate: shiftDateKey(task.dueDate, offsetDays) }))
+      }))
+    );
+  };
+
   const timelineIsValid = useMemo(
     () => phases.length > 0 && phases.every((phase) => (
       Boolean(phase.startDate) && Boolean(phase.endDate) && phase.endDate >= phase.startDate
@@ -341,15 +377,27 @@ export function ProjectTimelineSettingsModal({
 
         <div className="studio-scroll flex-1 overflow-y-auto p-4 sm:p-6">
           <div className="grid gap-3 rounded-studio bg-white p-4 shadow-soft">
-            <label className="grid gap-2">
-              <span className={fieldLabelClass}>{t("timelineTitleLabel")}</span>
-              <input
-                className={inputClass}
-                value={title}
-                placeholder={t("timelineBoard")}
-                onChange={(event) => setTitle(event.target.value)}
-              />
-            </label>
+            <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(200px,240px)]">
+              <label className="grid gap-2">
+                <span className={fieldLabelClass}>{t("timelineTitleLabel")}</span>
+                <input
+                  className={inputClass}
+                  value={title}
+                  placeholder={t("timelineBoard")}
+                  onChange={(event) => setTitle(event.target.value)}
+                />
+              </label>
+              <label className="grid gap-2">
+                <span className={fieldLabelClass}>{t("timelineShiftStartLabel")}</span>
+                <input
+                  type="date"
+                  className={inputClass}
+                  value={timelineStartDate}
+                  onChange={(event) => shiftTimelineToStart(event.target.value)}
+                />
+              </label>
+            </div>
+            <p className="text-xs font-bold leading-5 text-muted">{t("timelineShiftStartHint")}</p>
           </div>
 
           <div className="mt-5 flex items-center justify-between gap-3">
