@@ -2,6 +2,7 @@ import type {
   Phase,
   Project,
   ProjectBudget,
+  ProjectBudgetDailyExpenseLine,
   ProjectBudgetPersonnelLine,
   ProjectBudgetSoftwareCostLine,
   ProjectPhaseBudget,
@@ -301,6 +302,79 @@ export const getProjectBudgetBillingMonthKeys = (
 export const monthlySoftwareLineAmount = (line: Pick<ProjectBudgetSoftwareCostLine, "amount" | "billingCycle">) =>
   line.billingCycle === "yearly" ? line.amount / 12 : line.amount;
 
+const softwareClaimKey = (line: Pick<ProjectBudgetSoftwareCostLine, "toolId" | "name">) =>
+  line.toolId ?? `name:${line.name.trim().toLowerCase()}`;
+
+const dailyExpenseClaimKey = (line: Pick<ProjectBudgetDailyExpenseLine, "costTemplateId" | "name">) =>
+  `template:${line.costTemplateId ?? line.name.trim().toLowerCase()}`;
+
+/** Claims the given months in the ledger and returns only the not-yet-billed ones. */
+const claimUnbilledMonths = (
+  ledger: Map<string, Set<number>> | undefined,
+  key: string,
+  monthKeys: number[]
+) => {
+  if (!ledger) {
+    return monthKeys;
+  }
+  const claimed = ledger.get(key) ?? new Set<number>();
+  const unbilled = monthKeys.filter((monthKey) => !claimed.has(monthKey));
+  unbilled.forEach((monthKey) => claimed.add(monthKey));
+  ledger.set(key, claimed);
+  return unbilled;
+};
+
+/**
+ * Billed month count per recurring budget line (daily-expense and software),
+ * walking phases in order with the same project-wide dedupe ledger and claim
+ * keys as the real calculation — so the editor shows what actually bills:
+ * a month already claimed by an earlier phase never counts again.
+ */
+export const getBilledRecurringMonthsByLine = (
+  phases: ReadonlyArray<Pick<Phase, "id" | "startDate" | "endDate">>,
+  budget: Pick<ProjectBudget, "phases"> | null | undefined
+): Map<string, number> => {
+  const billed = new Map<string, number>();
+  if (!budget) {
+    return billed;
+  }
+  const ledger = new Map<string, Set<number>>();
+  const budgetsByPhaseId = new Map(budget.phases.map((phaseBudget) => [phaseBudget.phaseId, phaseBudget]));
+
+  phases.forEach((phase) => {
+    const phaseBudget = budgetsByPhaseId.get(phase.id);
+    if (!phaseBudget) {
+      return;
+    }
+    // Same order as calculateProjectPhaseBudget: daily expenses claim first.
+    (phaseBudget.dailyExpenseLines ?? []).forEach((line) => {
+      if (!line.billingCycle) {
+        return;
+      }
+      const monthKeys = claimUnbilledMonths(
+        ledger,
+        dailyExpenseClaimKey(line),
+        getProjectBudgetBillingMonthKeys({ startDate: phase.startDate, endDate: phase.endDate }, phase)
+      );
+      billed.set(line.id, monthKeys.length);
+    });
+    phaseBudget.softwareCosts.forEach((line) => {
+      if (line.periods !== undefined) {
+        billed.set(line.id, line.periods);
+        return;
+      }
+      const monthKeys = claimUnbilledMonths(
+        ledger,
+        softwareClaimKey(line),
+        getProjectBudgetBillingMonthKeys(line, phase)
+      );
+      billed.set(line.id, monthKeys.length);
+    });
+  });
+
+  return billed;
+};
+
 /**
  * Subscriptions bill once per calendar month the usage range touches: a
  * monthly/yearly tool never costs more than one monthly rate per month.
@@ -308,7 +382,8 @@ export const monthlySoftwareLineAmount = (line: Pick<ProjectBudgetSoftwareCostLi
  */
 export const calculateSoftwareLineNativeAmount = (
   line: ProjectBudgetSoftwareCostLine,
-  phase: Pick<Phase, "startDate" | "endDate">
+  phase: Pick<Phase, "startDate" | "endDate">,
+  billedMonthsOverride?: number
 ) => {
   const monthlyAmount = monthlySoftwareLineAmount(line);
 
@@ -316,7 +391,7 @@ export const calculateSoftwareLineNativeAmount = (
     return monthlyAmount * line.periods;
   }
 
-  const billedMonths = getProjectBudgetBillingMonthKeys(line, phase).length;
+  const billedMonths = billedMonthsOverride ?? getProjectBudgetBillingMonthKeys(line, phase).length;
   return monthlyAmount * billedMonths * getSafeAllocationFraction(line.allocationPercent);
 };
 
@@ -559,13 +634,7 @@ export const calculateProjectPhaseBudget = ({
           phase
         );
 
-        if (claimedSoftwareMonths) {
-          const claimKey = `template:${line.costTemplateId ?? line.name.trim().toLowerCase()}`;
-          const claimed = claimedSoftwareMonths.get(claimKey) ?? new Set<number>();
-          monthKeys = monthKeys.filter((monthKey) => !claimed.has(monthKey));
-          monthKeys.forEach((monthKey) => claimed.add(monthKey));
-          claimedSoftwareMonths.set(claimKey, claimed);
-        }
+        monthKeys = claimUnbilledMonths(claimedSoftwareMonths, dailyExpenseClaimKey(line), monthKeys);
 
         amount = monthlyAmount * monthKeys.length;
         quantity = monthKeys.length;
@@ -644,13 +713,7 @@ export const calculateProjectPhaseBudget = ({
     } else {
       let monthKeys = getProjectBudgetBillingMonthKeys(line, phase);
 
-      if (claimedSoftwareMonths) {
-        const claimKey = line.toolId ?? `name:${line.name.trim().toLowerCase()}`;
-        const claimed = claimedSoftwareMonths.get(claimKey) ?? new Set<number>();
-        monthKeys = monthKeys.filter((monthKey) => !claimed.has(monthKey));
-        monthKeys.forEach((monthKey) => claimed.add(monthKey));
-        claimedSoftwareMonths.set(claimKey, claimed);
-      }
+      monthKeys = claimUnbilledMonths(claimedSoftwareMonths, softwareClaimKey(line), monthKeys);
 
       billedMonths = monthKeys.length;
     }

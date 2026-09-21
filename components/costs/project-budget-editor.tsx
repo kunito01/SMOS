@@ -36,6 +36,7 @@ import {
   calculatePersonnelLineNativeAmount,
   calculateSoftwareLineNativeAmount,
   calculateStructuredBudget,
+  getBilledRecurringMonthsByLine,
   getProjectBudgetBillingMonthKeys,
   getProjectBudgetPersonnelUsageDays,
   PROJECT_BUDGET_HOURS_PER_DAY
@@ -113,6 +114,10 @@ export function ProjectBudgetEditor({
       snapshot: exchangeRateSnapshot
     }),
     [displayCurrency, exchangeRateSnapshot, phases, tools, value]
+  );
+  const billedRecurringMonths = useMemo(
+    () => getBilledRecurringMonthsByLine(phases, value),
+    [phases, value]
   );
   const phaseBreakdownById = useMemo(
     () => new Map(calculation.phaseBreakdowns.map((phase) => [phase.phaseId, phase])),
@@ -886,10 +891,11 @@ export function ProjectBudgetEditor({
                             {line.billingCycle ? (
                               <span className="text-[0.68rem] font-black text-muted">
                                 {t(line.billingCycle === "monthly" ? "billingTypeMonthly" : "billingTypeYearly")} · ×
-                                {getProjectBudgetBillingMonthKeys(
-                                  { startDate: phase.startDate, endDate: phase.endDate },
-                                  phase
-                                ).length}
+                                {billedRecurringMonths.get(line.id) ??
+                                  getProjectBudgetBillingMonthKeys(
+                                    { startDate: phase.startDate, endDate: phase.endDate },
+                                    phase
+                                  ).length}
                               </span>
                             ) : null}
                           </label>
@@ -1131,7 +1137,11 @@ export function ProjectBudgetEditor({
                 {phaseBudget.softwareCosts.length ? (
                   <div className="mt-3 grid gap-2">
                     {phaseBudget.softwareCosts.map((line) => {
-                      const nativeTotal = calculateSoftwareLineNativeAmount(line, phase);
+                      const nativeTotal = calculateSoftwareLineNativeAmount(
+                        line,
+                        phase,
+                        billedRecurringMonths.get(line.id)
+                      );
 
                       return (
                         <div
