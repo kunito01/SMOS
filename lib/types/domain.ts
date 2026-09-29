@@ -312,6 +312,8 @@ export type Material = {
   updatedAt: string;
 };
 
+export type ReleasePlatform = "mac" | "win" | "linux" | "android" | "ios" | "steam";
+
 export type ProjectVersion = {
   id: string;
   projectId: string;
@@ -322,6 +324,23 @@ export type ProjectVersion = {
   createdAt: string;
   versionNumber?: string;
   releaseDate?: string;
+  /** Distribution targets picked on the release node. */
+  platforms?: ReleasePlatform[];
+  /** TestFlight renewal dates (yyyy-mm-dd) recorded against this official release. */
+  testflightRenewals?: string[];
+};
+
+/** Dashboard countdown for a TestFlight build; linked entries mirror a project's official iOS release. */
+export type TestFlightReminder = {
+  id: string;
+  name: string;
+  versionNumber: string;
+  /** Start of the current 90-day window (release or latest renewal). */
+  releasedAt: string;
+  projectId?: string;
+  /** "release" entries mirror a project's official iOS release; "manual" ones were typed in. */
+  source?: "release" | "manual";
+  createdAt: string;
 };
 
 export type ActivityEvent = {
@@ -385,6 +404,8 @@ export type Project = {
   workflowIds?: string[];
   /** ComfyUI workflows linked from the global library. */
   comfyWorkflowIds?: string[];
+  /** Official version whose dashboard TestFlight reminder the user removed; a new version clears it. */
+  testflightDismissedVersion?: string;
   /** @deprecated Legacy embedded workflows are migrated into the global library on load/import. */
   workflows?: ProjectWorkflow[];
   currentPhaseId: string;
@@ -668,6 +689,8 @@ export type MockDatabase = {
   shareLinks: ShareLink[];
   /** Future purchases and subscriptions shown on the dashboard wish list. */
   wishlist: WishlistItem[];
+  /** iOS TestFlight 90-day countdowns shown on the dashboard. */
+  testflightReminders: TestFlightReminder[];
   /** Bindings to outside services; travels with the workspace so every device reuses them. */
   integrations?: WorkspaceIntegrations;
 };

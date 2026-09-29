@@ -19,6 +19,7 @@ import {
   Plus,
   Rocket,
   Share2,
+  Smartphone,
   Users,
   X
 } from "lucide-react";
@@ -35,7 +36,7 @@ import { Pill } from "@/components/ui/pill";
 import { ProgressBar } from "@/components/ui/progress-bar";
 import { Select } from "@/components/ui/select";
 import { SectionHeader } from "@/components/ui/section-header";
-import { companiesApi, groupsApi, librariesApi, projectsApi } from "@/lib/api";
+import { companiesApi, groupsApi, librariesApi, projectsApi, testflightApi } from "@/lib/api";
 import { getToolMonthlySubscriptionCost, getToolMonthlySubscriptionMoney } from "@/lib/mock";
 import {
   formatDemoEntityName,
@@ -45,9 +46,19 @@ import {
   translateDomainLabel
 } from "@/lib/i18n/domain-labels";
 import type { TranslationKey } from "@/lib/i18n/translations";
-import type { Company, DashboardOverview, DashboardScope, Project, ProjectGroup, Tool, WishlistItem } from "@/lib/types";
+import type {
+  Company,
+  DashboardOverview,
+  DashboardScope,
+  Project,
+  ProjectGroup,
+  TestFlightReminder,
+  Tool,
+  WishlistItem
+} from "@/lib/types";
 import { projectPath } from "@/lib/utils/app-routes";
 import { cn } from "@/lib/utils/cn";
+import { TESTFLIGHT_WARNING_DAYS, getTestflightDaysLeft, todayDateKey } from "@/lib/utils/testflight";
 import { fixedNumericLocale, supportedCurrencies } from "@/lib/utils/money";
 import {
   listCreditsRefreshReminders,
@@ -88,6 +99,8 @@ const metricIconToneStyles = {
   lime: "bg-limepop text-ink"
 } as const;
 
+const TESTFLIGHT_CUSTOM_PROJECT = "__custom__";
+
 const projectStatusTone: Record<Project["status"], "aqua" | "lime" | "coral" | "dark" | "cloud"> = {
   planning: "cloud",
   active: "coral",
@@ -119,6 +132,13 @@ export function VisualDashboardShell() {
   const [creditsRefreshReminders, setCreditsRefreshReminders] = useState<CreditsRefreshReminder[]>([]);
   const [tools, setTools] = useState<Tool[]>([]);
   const [wishlist, setWishlist] = useState<WishlistItem[]>([]);
+  const [testflightReminders, setTestflightReminders] = useState<TestFlightReminder[]>([]);
+  const [testflightProjectId, setTestflightProjectId] = useState(TESTFLIGHT_CUSTOM_PROJECT);
+  const [testflightName, setTestflightName] = useState("");
+  const [testflightVersion, setTestflightVersion] = useState("");
+  const [testflightDate, setTestflightDate] = useState("");
+  const [testflightBusy, setTestflightBusy] = useState(false);
+  const [today, setToday] = useState("");
   const [wishlistDraft, setWishlistDraft] = useState("");
   const [wishlistAmountDraft, setWishlistAmountDraft] = useState("");
   const [wishlistCurrencyDraft, setWishlistCurrencyDraft] = useState<WishlistItem["currency"]>("CNY");
@@ -128,18 +148,20 @@ export function VisualDashboardShell() {
     let isMounted = true;
 
     async function loadScopeData() {
-      const [companies, groups, projects, nextTools, wishlistItems] = await Promise.all([
+      const [companies, groups, projects, nextTools, wishlistItems, testflightItems] = await Promise.all([
         companiesApi.listCompanies(),
         groupsApi.listGroups(),
         projectsApi.listProjects(),
         librariesApi.listTools(),
-        librariesApi.listWishlist()
+        librariesApi.listWishlist(),
+        testflightApi.listTestflightReminders()
       ]);
 
       if (isMounted) {
         setData({ companies, groups, projects });
         setTools(nextTools);
         setWishlist(wishlistItems);
+        setTestflightReminders(testflightItems);
         setCreditsRefreshReminders(listCreditsRefreshReminders(nextTools));
       }
     }
@@ -212,6 +234,86 @@ export function VisualDashboardShell() {
   const removeWishlistEntry = async (itemId: string) => {
     await librariesApi.removeWishlistItem(itemId);
     setWishlist((current) => current.filter((item) => item.id !== itemId));
+  };
+
+  // The date comes from the device clock, so it is only known after mount.
+  useEffect(() => {
+    const current = todayDateKey();
+    setToday(current);
+    setTestflightDate((value) => value || current);
+  }, []);
+
+  const testflightTiles = testflightReminders
+    .map((reminder) => {
+      const linkedProject = reminder.projectId
+        ? data?.projects.find((project) => project.id === reminder.projectId)
+        : undefined;
+      return {
+        reminder,
+        daysLeft: today ? getTestflightDaysLeft(reminder.releasedAt, today) : null,
+        name: linkedProject
+          ? formatDemoEntityName(
+              translateDomainLabel(linkedProject.name, projectNameKeys, t),
+              linkedProject.id,
+              "project",
+              t,
+              linkedProject.isExample
+            )
+          : reminder.name
+      };
+    })
+    .sort((a, b) => (a.daysLeft ?? Number.MAX_SAFE_INTEGER) - (b.daysLeft ?? Number.MAX_SAFE_INTEGER));
+  const testflightLinkedProject =
+    testflightProjectId === TESTFLIGHT_CUSTOM_PROJECT
+      ? undefined
+      : data?.projects.find((project) => project.id === testflightProjectId);
+  const canAddTestflight = Boolean(
+    (testflightLinkedProject || testflightName.trim()) && testflightVersion.trim() && testflightDate
+  );
+
+  const selectTestflightProject = (projectId: string) => {
+    setTestflightProjectId(projectId);
+    const official = data?.projects
+      .find((project) => project.id === projectId)
+      ?.versions.find((version) => version.kind === "official");
+    if (official?.versionNumber) {
+      setTestflightVersion(official.versionNumber);
+    }
+    if (official?.releaseDate) {
+      setTestflightDate(official.releaseDate.slice(0, 10));
+    }
+  };
+
+  const runTestflightAction = async (action: () => Promise<unknown>) => {
+    if (testflightBusy) {
+      return;
+    }
+    setTestflightBusy(true);
+    try {
+      await action();
+      setTestflightReminders(await testflightApi.listTestflightReminders());
+    } finally {
+      setTestflightBusy(false);
+    }
+  };
+
+  const submitTestflightReminder = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!canAddTestflight) {
+      return;
+    }
+    void runTestflightAction(async () => {
+      await testflightApi.addTestflightReminder({
+        name: testflightLinkedProject?.name ?? testflightName,
+        versionNumber: testflightVersion,
+        releasedAt: testflightDate,
+        projectId: testflightLinkedProject?.id
+      });
+      setTestflightProjectId(TESTFLIGHT_CUSTOM_PROJECT);
+      setTestflightName("");
+      setTestflightVersion("");
+      setTestflightDate(todayDateKey());
+    });
   };
 
   const activeWishes = wishlist.filter((item) => !item.fulfilledAt);
@@ -616,6 +718,118 @@ export function VisualDashboardShell() {
             </div>
           </section>
         ) : null}
+
+        <section className="mt-6">
+          <div className="rounded-studio-lg bg-[#f8f9db] p-5 shadow-soft ring-1 ring-black/[0.04] sm:p-6">
+            <div className="flex items-center gap-2">
+              <Smartphone size={18} />
+              <h2 className="text-lg font-black">{t("testflightTitle")}</h2>
+            </div>
+            {testflightTiles.length ? (
+              <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+                {testflightTiles.map(({ reminder, daysLeft, name }) => {
+                  const urgent = daysLeft !== null && daysLeft <= TESTFLIGHT_WARNING_DAYS;
+                  return (
+                    <div key={reminder.id} data-testflight-tile className="min-w-0 rounded-studio bg-white/70 p-3">
+                      <div className="flex min-w-0 items-start justify-between gap-2">
+                        <p className="flex min-w-0 flex-wrap items-baseline gap-x-1.5">
+                          <span className="min-w-0 break-words font-black [overflow-wrap:anywhere]">{name}</span>
+                          <span className="shrink-0 text-[10px] font-normal text-ink/40">{reminder.versionNumber}</span>
+                        </p>
+                        <button
+                          type="button"
+                          disabled={testflightBusy}
+                          onClick={() =>
+                            void runTestflightAction(() => testflightApi.removeTestflightReminder(reminder.id))
+                          }
+                          className="grid size-6 shrink-0 place-items-center rounded-full bg-ink/[0.06] text-ink transition hover:bg-coral hover:text-white disabled:opacity-50"
+                          aria-label={`${t("wishListRemove")} · ${name}`}
+                        >
+                          <X size={12} />
+                        </button>
+                      </div>
+                      <p className={cn("mt-2 text-sm font-medium tabular-nums", urgent ? "text-coral" : "text-ink")}>
+                        {daysLeft === null
+                          ? reminder.releasedAt
+                          : daysLeft > 0
+                            ? t("creditsRefreshInDays").replace("{days}", String(daysLeft))
+                            : daysLeft === 0
+                              ? t("testflightExpiresToday")
+                              : t("testflightExpired").replace("{days}", String(Math.abs(daysLeft)))}
+                      </p>
+                      <button
+                        type="button"
+                        disabled={testflightBusy}
+                        onClick={() =>
+                          void runTestflightAction(() => testflightApi.renewTestflightReminder(reminder.id))
+                        }
+                        className="mt-2 inline-flex min-h-7 items-center rounded-full bg-ink px-3 text-[10px] font-black tracking-[0.08em] text-white transition hover:bg-[#e65535] disabled:opacity-50"
+                      >
+                        {t("testflightRenew")}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="mt-4 text-sm font-semibold leading-6 text-ink/60">{t("testflightEmpty")}</p>
+            )}
+            <form onSubmit={submitTestflightReminder} className="mt-4 flex flex-wrap items-center gap-2">
+              <div className="w-44 shrink-0">
+                <Select
+                  value={testflightProjectId}
+                  onChange={(event) => selectTestflightProject(event.target.value)}
+                  aria-label={t("projectName")}
+                  className="h-11 rounded-full border-0 bg-white px-3 text-sm font-bold text-ink outline-none ring-1 ring-black/[0.08]"
+                >
+                  <option value={TESTFLIGHT_CUSTOM_PROJECT}>{t("subscriptionLevelCustom")}</option>
+                  {(data?.projects ?? []).map((project) => (
+                    <option key={project.id} value={project.id}>
+                      {formatDemoEntityName(
+                        translateDomainLabel(project.name, projectNameKeys, t),
+                        project.id,
+                        "project",
+                        t,
+                        project.isExample
+                      )}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+              {testflightLinkedProject ? null : (
+                <input
+                  value={testflightName}
+                  onChange={(event) => setTestflightName(event.target.value)}
+                  placeholder={t("testflightCustomName")}
+                  className="h-11 min-w-0 flex-1 basis-44 rounded-full border-0 bg-white px-3 text-sm font-bold text-ink outline-none ring-1 ring-black/[0.08] focus:ring-2 focus:ring-[#e65535]"
+                />
+              )}
+              <input
+                value={testflightVersion}
+                onChange={(event) => setTestflightVersion(event.target.value)}
+                placeholder={t("versionNumber")}
+                aria-label={t("versionNumber")}
+                className="h-11 w-28 min-w-0 rounded-full border-0 bg-white px-3 text-sm font-bold text-ink outline-none ring-1 ring-black/[0.08] focus:ring-2 focus:ring-[#e65535]"
+              />
+              <input
+                type="date"
+                value={testflightDate}
+                onChange={(event) => setTestflightDate(event.target.value)}
+                aria-label={t("releaseDate")}
+                className="h-11 w-40 min-w-0 rounded-full border-0 bg-white px-3 text-sm font-bold text-ink outline-none ring-1 ring-black/[0.08] focus:ring-2 focus:ring-[#e65535]"
+              />
+              <Button
+                type="submit"
+                size="sm"
+                disabled={testflightBusy || !canAddTestflight}
+                className="shrink-0 bg-[#e65535] hover:bg-[#e65535]/90"
+              >
+                <Plus size={16} />
+                {t("wishListAdd")}
+              </Button>
+            </form>
+          </div>
+        </section>
 
         <section className="mt-6 grid gap-4 lg:grid-cols-2">
           <div className="min-w-0 rounded-studio-lg bg-[#112f45] p-5 text-white shadow-soft sm:p-6">

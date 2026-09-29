@@ -43,6 +43,7 @@ import type {
   ProjectWorkflow,
   Quote,
   ShareLink,
+  TestFlightReminder,
   Tool,
   User,
   WishlistItem,
@@ -100,6 +101,7 @@ export type PersistedMockDatabase = {
   comfyWorkflows: ComfyUiWorkflow[];
   shareLinks: ShareLink[];
   wishlist: WishlistItem[];
+  testflightReminders: TestFlightReminder[];
   integrations?: WorkspaceIntegrations;
 };
 
@@ -191,6 +193,26 @@ const isWishlistItem = (value: unknown): value is WishlistItem =>
   (value.amount === undefined || typeof value.amount === "number") &&
   (value.currency === undefined || isMoneyCurrency(value.currency)) &&
   (value.fulfilledAt === undefined || typeof value.fulfilledAt === "string");
+
+const isTestflightReminder = (value: unknown): value is TestFlightReminder =>
+  isRecord(value) &&
+  hasStrings(value, ["id", "name", "versionNumber", "releasedAt", "createdAt"]) &&
+  (value.projectId === undefined || typeof value.projectId === "string") &&
+  (value.source === undefined || value.source === "release" || value.source === "manual");
+
+// Workspaces saved before TestFlight reminders shipped simply have no collection yet.
+const normalizeTestflightReminders = (value: unknown): TestFlightReminder[] =>
+  Array.isArray(value)
+    ? value.filter(isTestflightReminder).map((item) => ({
+        id: item.id,
+        name: item.name,
+        versionNumber: item.versionNumber,
+        releasedAt: item.releasedAt,
+        createdAt: item.createdAt,
+        ...(item.projectId ? { projectId: item.projectId } : {}),
+        ...(item.source ? { source: item.source } : {})
+      }))
+    : [];
 
 const isComfyWorkflow = (value: unknown): value is ComfyUiWorkflow =>
   isRecord(value) &&
@@ -391,6 +413,7 @@ const isProject = (value: unknown) =>
   (value.workflowIds === undefined || isProjectWorkflowIds(value.workflowIds)) &&
   (value.comfyWorkflowIds === undefined ||
     (Array.isArray(value.comfyWorkflowIds) && value.comfyWorkflowIds.every((id) => typeof id === "string"))) &&
+  (value.testflightDismissedVersion === undefined || typeof value.testflightDismissedVersion === "string") &&
   (value.workflows === undefined || isProjectWorkflows(value.workflows)) &&
   (value.budget === undefined || isProjectBudget(value.budget)) &&
   isShareSettings(value.shareSettings);
@@ -409,6 +432,7 @@ const createPersistedDatabaseSnapshot = (): PersistedMockDatabase => ({
   comfyWorkflows: mockDatabase.comfyWorkflows,
   shareLinks: mockDatabase.shareLinks,
   wishlist: mockDatabase.wishlist,
+  testflightReminders: mockDatabase.testflightReminders,
   ...(mockDatabase.integrations ? { integrations: mockDatabase.integrations } : {})
 });
 
@@ -444,6 +468,8 @@ const validatePersistedDatabase = (value: unknown): PersistedMockDatabase => {
       (Array.isArray(value.wishlist) && value.wishlist.every(isWishlistItem))) &&
     (value.comfyWorkflows === undefined ||
       (Array.isArray(value.comfyWorkflows) && value.comfyWorkflows.every(isComfyWorkflow))) &&
+    (value.testflightReminders === undefined ||
+      (Array.isArray(value.testflightReminders) && value.testflightReminders.every(isTestflightReminder))) &&
     (value.integrations === undefined || isWorkspaceIntegrations(value.integrations));
 
   if (!isValid) {
@@ -730,13 +756,14 @@ const normalizePersistedDatabase = (
   }
 
   const persisted = retainBundledExampleProjects({
-    ...(value as unknown as Omit<PersistedMockDatabase, "pricingTemplates" | "quotes" | "workflows" | "wishlist" | "comfyWorkflows" | "integrations">),
+    ...(value as unknown as Omit<PersistedMockDatabase, "pricingTemplates" | "quotes" | "workflows" | "wishlist" | "comfyWorkflows" | "testflightReminders" | "integrations">),
     // Workspaces saved before quoting shipped simply have no collection yet.
     pricingTemplates: normalizePricingTemplateLibrary(value.pricingTemplates),
     quotes: normalizeQuoteLibrary(value.quotes),
     workflows: normalizeWorkflowLibrary(value.workflows),
     comfyWorkflows: normalizeComfyWorkflows(value.comfyWorkflows),
     wishlist: normalizeWishlist(value.wishlist),
+    testflightReminders: normalizeTestflightReminders(value.testflightReminders),
     ...(normalizeIntegrations(value.integrations) ? { integrations: normalizeIntegrations(value.integrations) } : {})
   });
   const seedDatabase = createMockDatabase();
@@ -770,6 +797,7 @@ const normalizePersistedDatabase = (
     comfyWorkflows: persisted.comfyWorkflows,
     shareLinks: persisted.shareLinks,
     wishlist: persisted.wishlist,
+    testflightReminders: persisted.testflightReminders,
     ...(persisted.integrations ? { integrations: persisted.integrations } : {})
   };
 

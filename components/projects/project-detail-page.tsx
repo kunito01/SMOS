@@ -43,7 +43,8 @@ import { ProjectBasicsEditModal } from "@/components/projects/project-basics-edi
 import { ProjectReleaseBadges } from "@/components/projects/project-release-badges";
 import { ProjectSaveControls } from "@/components/projects/project-save-controls";
 import { ProjectSummaryTimeline } from "@/components/projects/project-summary-timeline";
-import { companiesApi, costsApi, groupsApi, projectsApi } from "@/lib/api";
+import { companiesApi, costsApi, groupsApi, projectsApi, testflightApi } from "@/lib/api";
+import type { ProjectTestflightState } from "@/lib/api/testflight";
 import type { ProjectCostSummary } from "@/lib/api/costs";
 import {
   formatDemoEntityName,
@@ -57,9 +58,10 @@ import {
   translateDomainLabel
 } from "@/lib/i18n/domain-labels";
 import { formatLocalizedDate } from "@/lib/i18n/formatters";
-import type { Project, ProjectGroup, ProjectStatus, ProjectVersion } from "@/lib/types";
+import type { Project, ProjectGroup, ProjectStatus, ProjectVersion, ReleasePlatform } from "@/lib/types";
 import { projectCostsPath } from "@/lib/utils/app-routes";
 import { cn } from "@/lib/utils/cn";
+import { releasePlatformLabels, releasePlatforms } from "@/lib/utils/testflight";
 import { findProjectReleaseVersion } from "@/lib/utils/project-release";
 import { createProjectReportHtml, sanitizeProjectReportFileName } from "@/lib/utils/project-report-share";
 import { ReportExportModal } from "@/components/share/report-export-modal";
@@ -112,6 +114,11 @@ const emptyReleasePlan: ReleasePlanForm = {
   officialReleaseDate: ""
 };
 
+type ReleaseKind = "demo" | "official";
+type ReleasePlatformPlan = Record<ReleaseKind, ReleasePlatform[]>;
+
+const emptyReleasePlatformPlan: ReleasePlatformPlan = { demo: [], official: [] };
+
 const releaseDateValue = (version?: ProjectVersion) =>
   (version?.releaseDate ?? (version?.kind ? "" : version?.createdAt) ?? "").slice(0, 10);
 
@@ -130,6 +137,8 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
   const [basicsOpen, setBasicsOpen] = useState(false);
   const [archiveDialogOpen, setArchiveDialogOpen] = useState(false);
   const [releasePlan, setReleasePlan] = useState<ReleasePlanForm>(emptyReleasePlan);
+  const [releasePlatformPlan, setReleasePlatformPlan] = useState<ReleasePlatformPlan>(emptyReleasePlatformPlan);
+  const [testflightState, setTestflightState] = useState<ProjectTestflightState | null>(null);
   const [releaseSaving, setReleaseSaving] = useState(false);
   const [reportSharing, setReportSharing] = useState(false);
   const [statusSaving, setStatusSaving] = useState<ProjectStatus | null>(null);
@@ -193,9 +202,27 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
       officialVersion: officialVersion?.versionNumber ?? "",
       officialReleaseDate: releaseDateValue(officialVersion)
     });
+    setReleasePlatformPlan({
+      demo: demoVersion?.platforms ?? [],
+      official: officialVersion?.platforms ?? []
+    });
     setReleaseSaving(false);
+
+    let cancelled = false;
+    void testflightApi.getProjectTestflightState(data.project.id).then((state) => {
+      if (!cancelled) {
+        setTestflightState(state);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
   }, [data?.project]);
 
+  const officialTestflightRenewals = data?.project
+    ? findProjectReleaseVersion(data.project, "official")?.testflightRenewals ?? []
+    : [];
   const group = data?.groups.find((item) => item.id === data.project.groupId);
   const currentPhase = data?.project.phases.find((phase) => phase.id === data.project.currentPhaseId);
   const projectDeliverables = data?.project.phases.flatMap((phase) => phase.deliverables) ?? [];
@@ -266,6 +293,22 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
     setReleasePlan((current) => ({ ...current, [field]: value }));
   };
 
+  const toggleReleasePlatform = (kind: ReleaseKind, platform: ReleasePlatform) => {
+    setReleasePlatformPlan((current) => ({
+      ...current,
+      [kind]: current[kind].includes(platform)
+        ? current[kind].filter((item) => item !== platform)
+        : [...current[kind], platform]
+    }));
+  };
+
+  const handleTestflightResync = async () => {
+    if (!data?.project) {
+      return;
+    }
+    setTestflightState(await testflightApi.resyncProjectTestflightReminder(data.project.id));
+  };
+
   const handleReleasePlanSaved = async () => {
     if (!data?.project || releaseSaving) {
       return;
@@ -274,9 +317,14 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
     setReleaseSaving(true);
 
     try {
-      const project = await projectsApi.updateProjectReleasePlan(data.project.id, releasePlan);
+      const project = await projectsApi.updateProjectReleasePlan(data.project.id, {
+        ...releasePlan,
+        demoPlatforms: releasePlatformPlan.demo,
+        officialPlatforms: releasePlatformPlan.official
+      });
 
-      setData((current) => (current ? { ...current, project } : current));
+      // A fresh object so the release effect re-reads platforms and the TestFlight link.
+      setData((current) => (current ? { ...current, project: { ...project } } : current));
       setNotice(t("releasePlanUpdated"));
       window.setTimeout(() => setNotice(""), 1600);
     } finally {
@@ -297,14 +345,21 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
       [versionField]: "",
       [dateField]: ""
     };
+    const deletedKind: ReleaseKind = versionField === "demoVersion" ? "demo" : "official";
+    const nextPlatformPlan: ReleasePlatformPlan = { ...releasePlatformPlan, [deletedKind]: [] };
 
     setReleasePlan(nextReleasePlan);
+    setReleasePlatformPlan(nextPlatformPlan);
     setReleaseSaving(true);
 
     try {
-      const project = await projectsApi.updateProjectReleasePlan(data.project.id, nextReleasePlan);
+      const project = await projectsApi.updateProjectReleasePlan(data.project.id, {
+        ...nextReleasePlan,
+        demoPlatforms: nextPlatformPlan.demo,
+        officialPlatforms: nextPlatformPlan.official
+      });
 
-      setData((current) => (current ? { ...current, project } : current));
+      setData((current) => (current ? { ...current, project: { ...project } } : current));
       setNotice(t("releaseNodeDeleted"));
       window.setTimeout(() => setNotice(""), 1600);
     } finally {
@@ -881,13 +936,13 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
                     <div className="mt-5 grid min-w-0 gap-3 max-[560px]:mt-4 max-[560px]:gap-2">
                       {[
                         {
-                          key: "demo",
+                          key: "demo" as const,
                           title: t("demoRelease"),
                           versionField: "demoVersion" as const,
                           dateField: "demoReleaseDate" as const
                         },
                         {
-                          key: "official",
+                          key: "official" as const,
                           title: t("officialRelease"),
                           versionField: "officialVersion" as const,
                           dateField: "officialReleaseDate" as const
@@ -943,6 +998,52 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
                                 />
                               </label>
                             </div>
+                            <div className="mt-4 grid min-w-0 gap-2 max-[560px]:mt-3">
+                              <span className={releaseLabelClass}>{t("releasePlatformsLabel")}</span>
+                              <div className="flex min-w-0 flex-wrap gap-2">
+                                {releasePlatforms.map((platform) => {
+                                  const active = releasePlatformPlan[releaseNode.key].includes(platform);
+
+                                  return (
+                                    <button
+                                      key={platform}
+                                      type="button"
+                                      aria-pressed={active}
+                                      data-release-platform={`${releaseNode.key}-${platform}`}
+                                      onClick={() => toggleReleasePlatform(releaseNode.key, platform)}
+                                      className={cn(
+                                        "min-h-8 rounded-full px-3 text-xs font-black transition",
+                                        active ? "bg-limepop text-ink" : "bg-white/10 text-white hover:bg-white/20"
+                                      )}
+                                    >
+                                      {releasePlatformLabels[platform]}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                              {releaseNode.key === "official" ? (
+                                <p className="text-xs font-semibold leading-5 text-white/55">{t("releasePlatformsHint")}</p>
+                              ) : null}
+                            </div>
+                            {releaseNode.key === "official" && officialTestflightRenewals.length ? (
+                              <p className="mt-3 break-words text-xs font-semibold leading-5 text-white/70">
+                                {t("testflightRenewalsLabel")}: {officialTestflightRenewals.join(" · ")}
+                              </p>
+                            ) : null}
+                            {releaseNode.key === "official" && testflightState?.dismissed ? (
+                              <div className="mt-3 flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-2xl bg-coral/25 p-3">
+                                <p className="min-w-0 text-xs font-bold leading-5 text-white">{t("testflightDismissedPrompt")}</p>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    void handleTestflightResync();
+                                  }}
+                                  className="min-h-8 shrink-0 rounded-full bg-limepop px-3 text-xs font-black text-ink"
+                                >
+                                  {t("testflightResync")}
+                                </button>
+                              </div>
+                            ) : null}
                           </div>
                         );
                       })}

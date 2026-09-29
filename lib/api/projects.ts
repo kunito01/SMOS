@@ -1,5 +1,6 @@
 import { mockApi, requireEntity } from "@/lib/api/mock-client";
 import { hydrateMockDatabase, persistMockDatabase } from "@/lib/api/mock-persistence";
+import { syncProjectTestflightReminder } from "@/lib/api/testflight";
 import { createDashboardOverview, createMockProject, mockDatabase } from "@/lib/mock";
 import type {
   CostItem,
@@ -9,9 +10,10 @@ import type {
   Phase,
   Project,
   ProjectBudget,
-  ProjectWorkflow,
-  ProjectVersion,
   ProjectStatus,
+  ProjectVersion,
+  ProjectWorkflow,
+  ReleasePlatform,
   Task,
   TimelineCustomRow
 } from "@/lib/types";
@@ -86,8 +88,10 @@ export type ProjectBasicsInput = {
 export type ProjectReleaseInput = {
   demoVersion: string;
   demoReleaseDate: string;
+  demoPlatforms?: ReleasePlatform[];
   officialVersion: string;
   officialReleaseDate: string;
+  officialPlatforms?: ReleasePlatform[];
 };
 
 export type UpdateProjectBudgetInput = ProjectBudget;
@@ -871,9 +875,13 @@ const createReleaseVersion = (
   kind: "demo" | "official",
   versionNumber: string,
   releaseDate: string,
+  platforms: ReleasePlatform[],
   existing?: ProjectVersion
 ): ProjectVersion => {
   const isReleased = Boolean(versionNumber && releaseDate);
+  // Renewals belong to a specific build; a new version number starts a clean history.
+  const keepRenewals =
+    isReleased && existing?.versionNumber === versionNumber && (existing.testflightRenewals?.length ?? 0) > 0;
 
   return {
     id: existing?.id ?? releaseVersionId(project, kind),
@@ -884,7 +892,9 @@ const createReleaseVersion = (
     status: isReleased ? "released" : "draft",
     createdAt: isReleased ? releaseDate : existing?.createdAt || (kind === "demo" ? project.startDate : project.endDate),
     versionNumber: isReleased ? versionNumber : undefined,
-    releaseDate: isReleased ? releaseDate : undefined
+    releaseDate: isReleased ? releaseDate : undefined,
+    ...(platforms.length ? { platforms: [...new Set(platforms)] } : {}),
+    ...(keepRenewals ? { testflightRenewals: existing?.testflightRenewals } : {})
   };
 };
 
@@ -901,9 +911,24 @@ export async function updateProjectReleasePlan(projectId: string, input: Project
 
   markProjectAsPopulated(project);
   project.versions = [
-    createReleaseVersion(project, "demo", demoVersion, demoReleaseDate, findReleaseVersion(project, "demo")),
-    createReleaseVersion(project, "official", officialVersion, officialReleaseDate, findReleaseVersion(project, "official"))
+    createReleaseVersion(
+      project,
+      "demo",
+      demoVersion,
+      demoReleaseDate,
+      input.demoPlatforms ?? [],
+      findReleaseVersion(project, "demo")
+    ),
+    createReleaseVersion(
+      project,
+      "official",
+      officialVersion,
+      officialReleaseDate,
+      input.officialPlatforms ?? [],
+      findReleaseVersion(project, "official")
+    )
   ];
+  syncProjectTestflightReminder(project);
 
   await persistMockDatabase();
 
@@ -1251,6 +1276,9 @@ export async function deleteProject(projectId: string) {
 
   mockDatabase.projects = mockDatabase.projects.filter((item) => item.id !== projectId);
   mockDatabase.shareLinks = mockDatabase.shareLinks.filter((link) => link.projectId !== projectId);
+  mockDatabase.testflightReminders = mockDatabase.testflightReminders.filter(
+    (reminder) => reminder.projectId !== projectId
+  );
   await persistMockDatabase();
 
   return mockApi(project);
