@@ -64,7 +64,6 @@ import type {
 } from "@/lib/types";
 import { projectPath } from "@/lib/utils/app-routes";
 import { cn } from "@/lib/utils/cn";
-import { formatLocalizedDate } from "@/lib/i18n/formatters";
 import { TESTFLIGHT_WARNING_DAYS, getTestflightDaysLeft, todayDateKey } from "@/lib/utils/testflight";
 import { USAGE_WARNING_DAYS, getUsageDaysLeft } from "@/lib/utils/usage-reminders";
 import { fixedNumericLocale, supportedCurrencies } from "@/lib/utils/money";
@@ -108,7 +107,9 @@ const metricIconToneStyles = {
 } as const;
 
 const TESTFLIGHT_CUSTOM_PROJECT = "__custom__";
-const PENDING_TASK_PREVIEW_COUNT = 9;
+// Two rows of pending tasks: 2 tiles per row on phones, 4 on desktop.
+const PENDING_TASK_PREVIEW_MOBILE = 4;
+const PENDING_TASK_PREVIEW_DESKTOP = 8;
 
 const projectStatusTone: Record<Project["status"], "aqua" | "lime" | "coral" | "dark" | "cloud"> = {
   planning: "cloud",
@@ -394,23 +395,35 @@ export function VisualDashboardShell() {
       setUsageMode("view");
     });
 
-  // Open tasks across live projects, soonest due first; undated ones sink to the end.
+  // Open tasks from phases that have already started (current period or earlier),
+  // grouped by project in list order, then by phase order, then by due date.
+  // Timeline edits move phases, so the set follows the adjusted periods.
+  const pendingTasksToday = today || todayDateKey();
   const pendingTasks = (data?.projects ?? [])
-    .flatMap((project) =>
-      project.phases.flatMap((phase) =>
-        phase.deliverables.flatMap((deliverable) =>
-          deliverable.tasks
-            .filter((task) => !task.completed)
-            .map((task) => ({ task, project, phase, dueDate: task.dueDate?.slice(0, 10) ?? "" }))
-        )
+    .flatMap((project, projectIndex) =>
+      project.phases.flatMap((phase, phaseIndex) =>
+        phase.startDate && phase.startDate.slice(0, 10) <= pendingTasksToday
+          ? phase.deliverables.flatMap((deliverable) =>
+              deliverable.tasks
+                .filter((task) => !task.completed)
+                .map((task) => ({
+                  task,
+                  project,
+                  projectIndex,
+                  phase,
+                  phaseIndex,
+                  deadline: (task.dueDate || phase.endDate || "").slice(0, 10)
+                }))
+            )
+          : []
       )
     )
     .sort(
       (a, b) =>
-        (a.dueDate || "9999-12-31").localeCompare(b.dueDate || "9999-12-31") ||
-        a.project.name.localeCompare(b.project.name)
+        a.projectIndex - b.projectIndex ||
+        a.phaseIndex - b.phaseIndex ||
+        (a.deadline || "9999-12-31").localeCompare(b.deadline || "9999-12-31")
     );
-  const visiblePendingTasks = showAllPendingTasks ? pendingTasks : pendingTasks.slice(0, PENDING_TASK_PREVIEW_COUNT);
 
   const completePendingTask = async (taskId: string) => {
     if (completingTaskId) {
@@ -1303,7 +1316,7 @@ export function VisualDashboardShell() {
         </section>
 
         <section className="mt-6">
-          <div className="min-w-0 rounded-studio-lg bg-[#4DA394] p-5 text-white shadow-soft sm:p-6">
+          <div className="min-w-0 rounded-studio-lg bg-[#028391] p-5 text-white shadow-soft sm:p-6">
             <div className="flex items-center gap-2">
               <ListChecks size={18} />
               <h2 className="text-lg font-black">{t("pendingTasksTitle")}</h2>
@@ -1312,9 +1325,16 @@ export function VisualDashboardShell() {
               </span>
             </div>
             {pendingTasks.length ? (
-              <ul className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                {visiblePendingTasks.map(({ task, project, phase, dueDate }) => {
-                  const overdue = Boolean(today && dueDate && dueDate < today);
+              <ul className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+                {pendingTasks.map(({ task, project, phase, deadline }, index) => {
+                  const overdue = Boolean(deadline && deadline < pendingTasksToday);
+                  const hiddenWhenCollapsed =
+                    !showAllPendingTasks &&
+                    (index >= PENDING_TASK_PREVIEW_DESKTOP
+                      ? "hidden"
+                      : index >= PENDING_TASK_PREVIEW_MOBILE
+                        ? "hidden lg:flex"
+                        : "");
                   const projectLabel = formatDemoEntityName(
                     translateDomainLabel(project.name, projectNameKeys, t),
                     project.id,
@@ -1327,7 +1347,7 @@ export function VisualDashboardShell() {
                     <li
                       key={task.id}
                       data-pending-task
-                      className="flex min-w-0 items-start gap-3 rounded-studio bg-white/[0.14] p-3"
+                      className={cn("flex min-w-0 items-start gap-3 rounded-studio bg-white/[0.14] p-3", hiddenWhenCollapsed)}
                     >
                       <input
                         type="checkbox"
@@ -1341,7 +1361,7 @@ export function VisualDashboardShell() {
                         <p className="break-words font-black leading-5 [overflow-wrap:anywhere]">{task.title || phase.name}</p>
                         <p className="mt-1 break-words text-xs font-medium leading-4 text-white/75 [overflow-wrap:anywhere]">
                           {projectLabel}
-                          {dueDate ? ` · ${formatLocalizedDate(dueDate, language)}` : ""}
+                          {phase.name ? ` · ${phase.name}` : ""}
                         </p>
                         {overdue ? (
                           <span className="mt-1.5 inline-flex min-h-5 items-center rounded-full bg-coral px-2 text-[10px] font-black text-white">
@@ -1356,11 +1376,14 @@ export function VisualDashboardShell() {
             ) : (
               <p className="mt-4 text-sm font-semibold leading-6 text-white/75">{t("pendingTasksEmpty")}</p>
             )}
-            {pendingTasks.length > PENDING_TASK_PREVIEW_COUNT ? (
+            {pendingTasks.length > PENDING_TASK_PREVIEW_MOBILE ? (
               <button
                 type="button"
                 onClick={() => setShowAllPendingTasks((current) => !current)}
-                className="mt-4 inline-flex min-h-9 items-center rounded-full bg-white/15 px-4 text-xs font-black text-white transition hover:bg-white/25"
+                className={cn(
+                  "mt-4 inline-flex min-h-9 items-center rounded-full bg-white/15 px-4 text-xs font-black text-white transition hover:bg-white/25",
+                  pendingTasks.length <= PENDING_TASK_PREVIEW_DESKTOP && "lg:hidden"
+                )}
               >
                 {showAllPendingTasks
                   ? t("pendingTasksShowLess")
