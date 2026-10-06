@@ -17,6 +17,7 @@ import {
   Gauge,
   Heart,
   Layers3,
+  ListChecks,
   Network,
   Pencil,
   Plus,
@@ -63,6 +64,7 @@ import type {
 } from "@/lib/types";
 import { projectPath } from "@/lib/utils/app-routes";
 import { cn } from "@/lib/utils/cn";
+import { formatLocalizedDate } from "@/lib/i18n/formatters";
 import { TESTFLIGHT_WARNING_DAYS, getTestflightDaysLeft, todayDateKey } from "@/lib/utils/testflight";
 import { USAGE_WARNING_DAYS, getUsageDaysLeft } from "@/lib/utils/usage-reminders";
 import { fixedNumericLocale, supportedCurrencies } from "@/lib/utils/money";
@@ -106,6 +108,7 @@ const metricIconToneStyles = {
 } as const;
 
 const TESTFLIGHT_CUSTOM_PROJECT = "__custom__";
+const PENDING_TASK_PREVIEW_COUNT = 9;
 
 const projectStatusTone: Record<Project["status"], "aqua" | "lime" | "coral" | "dark" | "cloud"> = {
   planning: "cloud",
@@ -152,6 +155,8 @@ export function VisualDashboardShell() {
   const [usageEditDate, setUsageEditDate] = useState("");
   const [usageSelectedIds, setUsageSelectedIds] = useState<Set<string>>(new Set());
   const [usageBusy, setUsageBusy] = useState(false);
+  const [completingTaskId, setCompletingTaskId] = useState("");
+  const [showAllPendingTasks, setShowAllPendingTasks] = useState(false);
   const [today, setToday] = useState("");
   const [wishlistDraft, setWishlistDraft] = useState("");
   const [wishlistAmountDraft, setWishlistAmountDraft] = useState("");
@@ -388,6 +393,46 @@ export function VisualDashboardShell() {
       setUsageSelectedIds(new Set());
       setUsageMode("view");
     });
+
+  // Open tasks across live projects, soonest due first; undated ones sink to the end.
+  const pendingTasks = (data?.projects ?? [])
+    .flatMap((project) =>
+      project.phases.flatMap((phase) =>
+        phase.deliverables.flatMap((deliverable) =>
+          deliverable.tasks
+            .filter((task) => !task.completed)
+            .map((task) => ({ task, project, phase, dueDate: task.dueDate?.slice(0, 10) ?? "" }))
+        )
+      )
+    )
+    .sort(
+      (a, b) =>
+        (a.dueDate || "9999-12-31").localeCompare(b.dueDate || "9999-12-31") ||
+        a.project.name.localeCompare(b.project.name)
+    );
+  const visiblePendingTasks = showAllPendingTasks ? pendingTasks : pendingTasks.slice(0, PENDING_TASK_PREVIEW_COUNT);
+
+  const completePendingTask = async (taskId: string) => {
+    if (completingTaskId) {
+      return;
+    }
+    setCompletingTaskId(taskId);
+    try {
+      await projectsApi.updateTaskCompletion(taskId, true);
+      const [projects, nextOverview] = await Promise.all([
+        projectsApi.listProjects(),
+        isCurrencyReady
+          ? projectsApi.getDashboardOverview(scope, { currency: displayCurrency, snapshot: exchangeRateSnapshot })
+          : Promise.resolve(null)
+      ]);
+      setData((current) => (current ? { ...current, projects } : current));
+      if (nextOverview) {
+        setOverview(nextOverview);
+      }
+    } finally {
+      setCompletingTaskId("");
+    }
+  };
 
   const activeWishes = wishlist.filter((item) => !item.fulfilledAt);
   const wishListTotal = sumInDisplayCurrency(
@@ -1257,6 +1302,74 @@ export function VisualDashboardShell() {
                   ))}
                 </div>
               </div>
+            ) : null}
+          </div>
+        </section>
+
+        <section className="mt-6">
+          <div className="min-w-0 rounded-studio-lg bg-[#4DA394] p-5 text-white shadow-soft sm:p-6">
+            <div className="flex items-center gap-2">
+              <ListChecks size={18} />
+              <h2 className="text-lg font-black">{t("pendingTasksTitle")}</h2>
+              <span className="grid min-w-7 place-items-center rounded-full bg-white/20 px-2 py-0.5 text-xs font-black">
+                {pendingTasks.length}
+              </span>
+            </div>
+            {pendingTasks.length ? (
+              <ul className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                {visiblePendingTasks.map(({ task, project, phase, dueDate }) => {
+                  const overdue = Boolean(today && dueDate && dueDate < today);
+                  const projectLabel = formatDemoEntityName(
+                    translateDomainLabel(project.name, projectNameKeys, t),
+                    project.id,
+                    "project",
+                    t,
+                    project.isExample
+                  );
+
+                  return (
+                    <li
+                      key={task.id}
+                      data-pending-task
+                      className="flex min-w-0 items-start gap-3 rounded-studio bg-white/[0.14] p-3"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={completingTaskId === task.id}
+                        disabled={Boolean(completingTaskId)}
+                        onChange={() => void completePendingTask(task.id)}
+                        aria-label={`${t("taskMarkDone")} · ${task.title || phase.name}`}
+                        className="mt-0.5 size-5 shrink-0 cursor-pointer accent-[#ffc700] disabled:cursor-wait"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <p className="break-words font-black leading-5 [overflow-wrap:anywhere]">{task.title || phase.name}</p>
+                        <p className="mt-1 break-words text-xs font-medium leading-4 text-white/75 [overflow-wrap:anywhere]">
+                          {projectLabel}
+                          {dueDate ? ` · ${formatLocalizedDate(dueDate, language)}` : ""}
+                        </p>
+                        {overdue ? (
+                          <span className="mt-1.5 inline-flex min-h-5 items-center rounded-full bg-coral px-2 text-[10px] font-black text-white">
+                            {t("taskOverdue")}
+                          </span>
+                        ) : null}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : (
+              <p className="mt-4 text-sm font-semibold leading-6 text-white/75">{t("pendingTasksEmpty")}</p>
+            )}
+            {pendingTasks.length > PENDING_TASK_PREVIEW_COUNT ? (
+              <button
+                type="button"
+                onClick={() => setShowAllPendingTasks((current) => !current)}
+                className="mt-4 inline-flex min-h-9 items-center rounded-full bg-white/15 px-4 text-xs font-black text-white transition hover:bg-white/25"
+              >
+                {showAllPendingTasks
+                  ? t("pendingTasksShowLess")
+                  : t("pendingTasksShowAll").replace("{count}", String(pendingTasks.length))}
+              </button>
             ) : null}
           </div>
         </section>
