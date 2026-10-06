@@ -330,6 +330,15 @@ export type ProjectVersion = {
   testflightRenewals?: string[];
 };
 
+/** Dashboard 7-day usage-refresh countdown; the cycle repeats from startDate until the date is changed. */
+export type UsageReminder = {
+  id: string;
+  name: string;
+  /** First day of the current cycle (yyyy-mm-dd); kept private, the card only shows days left. */
+  startDate: string;
+  createdAt: string;
+};
+
 /** Dashboard countdown for a TestFlight build; linked entries mirror a project's official iOS release. */
 export type TestFlightReminder = {
   id: string;
@@ -691,6 +700,8 @@ export type MockDatabase = {
   wishlist: WishlistItem[];
   /** iOS TestFlight 90-day countdowns shown on the dashboard. */
   testflightReminders: TestFlightReminder[];
+  /** Weekly usage-refresh countdowns shown on the dashboard. */
+  usageReminders: UsageReminder[];
   /** Bindings to outside services; travels with the workspace so every device reuses them. */
   integrations?: WorkspaceIntegrations;
 };

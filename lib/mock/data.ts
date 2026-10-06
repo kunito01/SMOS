@@ -694,7 +694,8 @@ export const createMockDatabase = (): MockDatabase => {
     comfyWorkflows: [],
     shareLinks,
     wishlist: [],
-    testflightReminders: []
+    testflightReminders: [],
+    usageReminders: []
   });
 };
 
@@ -713,7 +714,8 @@ export const createEmptyMockDatabase = (): MockDatabase => ({
   comfyWorkflows: [],
   shareLinks: [],
   wishlist: [],
-  testflightReminders: []
+  testflightReminders: [],
+  usageReminders: []
 });
 
 export const mockDatabase = createMockDatabase();

@@ -45,6 +45,7 @@ import type {
   ShareLink,
   TestFlightReminder,
   Tool,
+  UsageReminder,
   User,
   WishlistItem,
   WorkspaceIntegrations
@@ -102,6 +103,7 @@ export type PersistedMockDatabase = {
   shareLinks: ShareLink[];
   wishlist: WishlistItem[];
   testflightReminders: TestFlightReminder[];
+  usageReminders: UsageReminder[];
   integrations?: WorkspaceIntegrations;
 };
 
@@ -193,6 +195,20 @@ const isWishlistItem = (value: unknown): value is WishlistItem =>
   (value.amount === undefined || typeof value.amount === "number") &&
   (value.currency === undefined || isMoneyCurrency(value.currency)) &&
   (value.fulfilledAt === undefined || typeof value.fulfilledAt === "string");
+
+const isUsageReminder = (value: unknown): value is UsageReminder =>
+  isRecord(value) && hasStrings(value, ["id", "name", "startDate", "createdAt"]);
+
+// Workspaces saved before usage reminders shipped simply have no collection yet.
+const normalizeUsageReminders = (value: unknown): UsageReminder[] =>
+  Array.isArray(value)
+    ? value.filter(isUsageReminder).map((item) => ({
+        id: item.id,
+        name: item.name,
+        startDate: item.startDate,
+        createdAt: item.createdAt
+      }))
+    : [];
 
 const isTestflightReminder = (value: unknown): value is TestFlightReminder =>
   isRecord(value) &&
@@ -433,6 +449,7 @@ const createPersistedDatabaseSnapshot = (): PersistedMockDatabase => ({
   shareLinks: mockDatabase.shareLinks,
   wishlist: mockDatabase.wishlist,
   testflightReminders: mockDatabase.testflightReminders,
+  usageReminders: mockDatabase.usageReminders,
   ...(mockDatabase.integrations ? { integrations: mockDatabase.integrations } : {})
 });
 
@@ -470,6 +487,8 @@ const validatePersistedDatabase = (value: unknown): PersistedMockDatabase => {
       (Array.isArray(value.comfyWorkflows) && value.comfyWorkflows.every(isComfyWorkflow))) &&
     (value.testflightReminders === undefined ||
       (Array.isArray(value.testflightReminders) && value.testflightReminders.every(isTestflightReminder))) &&
+    (value.usageReminders === undefined ||
+      (Array.isArray(value.usageReminders) && value.usageReminders.every(isUsageReminder))) &&
     (value.integrations === undefined || isWorkspaceIntegrations(value.integrations));
 
   if (!isValid) {
@@ -756,7 +775,7 @@ const normalizePersistedDatabase = (
   }
 
   const persisted = retainBundledExampleProjects({
-    ...(value as unknown as Omit<PersistedMockDatabase, "pricingTemplates" | "quotes" | "workflows" | "wishlist" | "comfyWorkflows" | "testflightReminders" | "integrations">),
+    ...(value as unknown as Omit<PersistedMockDatabase, "pricingTemplates" | "quotes" | "workflows" | "wishlist" | "comfyWorkflows" | "testflightReminders" | "usageReminders" | "integrations">),
     // Workspaces saved before quoting shipped simply have no collection yet.
     pricingTemplates: normalizePricingTemplateLibrary(value.pricingTemplates),
     quotes: normalizeQuoteLibrary(value.quotes),
@@ -764,6 +783,7 @@ const normalizePersistedDatabase = (
     comfyWorkflows: normalizeComfyWorkflows(value.comfyWorkflows),
     wishlist: normalizeWishlist(value.wishlist),
     testflightReminders: normalizeTestflightReminders(value.testflightReminders),
+    usageReminders: normalizeUsageReminders(value.usageReminders),
     ...(normalizeIntegrations(value.integrations) ? { integrations: normalizeIntegrations(value.integrations) } : {})
   });
   const seedDatabase = createMockDatabase();
@@ -798,6 +818,7 @@ const normalizePersistedDatabase = (
     shareLinks: persisted.shareLinks,
     wishlist: persisted.wishlist,
     testflightReminders: persisted.testflightReminders,
+    usageReminders: persisted.usageReminders,
     ...(persisted.integrations ? { integrations: persisted.integrations } : {})
   };
 

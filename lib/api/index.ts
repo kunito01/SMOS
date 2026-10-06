@@ -8,4 +8,5 @@ export * as projectsApi from "./projects";
 export * as quotesApi from "./quotes";
 export * as shareApi from "./share";
 export * as testflightApi from "./testflight";
+export * as usageApi from "./usage-reminders";
 export * as workflowsApi from "./workflows";

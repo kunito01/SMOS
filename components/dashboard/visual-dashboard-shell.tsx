@@ -10,16 +10,20 @@ import {
   Calculator,
   CalendarDays,
   ChartPie,
+  Check,
   CheckCircle2,
   CircleDollarSign,
   FolderKanban,
+  Gauge,
   Heart,
   Layers3,
   Network,
+  Pencil,
   Plus,
   Rocket,
   Share2,
   Smartphone,
+  Trash2,
   Users,
   X
 } from "lucide-react";
@@ -36,7 +40,7 @@ import { Pill } from "@/components/ui/pill";
 import { ProgressBar } from "@/components/ui/progress-bar";
 import { Select } from "@/components/ui/select";
 import { SectionHeader } from "@/components/ui/section-header";
-import { companiesApi, groupsApi, librariesApi, projectsApi, testflightApi } from "@/lib/api";
+import { companiesApi, groupsApi, librariesApi, projectsApi, testflightApi, usageApi } from "@/lib/api";
 import { getToolMonthlySubscriptionCost, getToolMonthlySubscriptionMoney } from "@/lib/mock";
 import {
   formatDemoEntityName,
@@ -54,11 +58,13 @@ import type {
   ProjectGroup,
   TestFlightReminder,
   Tool,
+  UsageReminder,
   WishlistItem
 } from "@/lib/types";
 import { projectPath } from "@/lib/utils/app-routes";
 import { cn } from "@/lib/utils/cn";
 import { TESTFLIGHT_WARNING_DAYS, getTestflightDaysLeft, todayDateKey } from "@/lib/utils/testflight";
+import { USAGE_WARNING_DAYS, getUsageDaysLeft } from "@/lib/utils/usage-reminders";
 import { fixedNumericLocale, supportedCurrencies } from "@/lib/utils/money";
 import {
   listCreditsRefreshReminders,
@@ -138,6 +144,14 @@ export function VisualDashboardShell() {
   const [testflightVersion, setTestflightVersion] = useState("");
   const [testflightDate, setTestflightDate] = useState("");
   const [testflightBusy, setTestflightBusy] = useState(false);
+  const [usageReminders, setUsageReminders] = useState<UsageReminder[]>([]);
+  const [usageName, setUsageName] = useState("");
+  const [usageDate, setUsageDate] = useState("");
+  const [usageMode, setUsageMode] = useState<"view" | "edit" | "delete">("view");
+  const [usageEditingId, setUsageEditingId] = useState("");
+  const [usageEditDate, setUsageEditDate] = useState("");
+  const [usageSelectedIds, setUsageSelectedIds] = useState<Set<string>>(new Set());
+  const [usageBusy, setUsageBusy] = useState(false);
   const [today, setToday] = useState("");
   const [wishlistDraft, setWishlistDraft] = useState("");
   const [wishlistAmountDraft, setWishlistAmountDraft] = useState("");
@@ -148,13 +162,14 @@ export function VisualDashboardShell() {
     let isMounted = true;
 
     async function loadScopeData() {
-      const [companies, groups, projects, nextTools, wishlistItems, testflightItems] = await Promise.all([
+      const [companies, groups, projects, nextTools, wishlistItems, testflightItems, usageItems] = await Promise.all([
         companiesApi.listCompanies(),
         groupsApi.listGroups(),
         projectsApi.listProjects(),
         librariesApi.listTools(),
         librariesApi.listWishlist(),
-        testflightApi.listTestflightReminders()
+        testflightApi.listTestflightReminders(),
+        usageApi.listUsageReminders()
       ]);
 
       if (isMounted) {
@@ -162,6 +177,7 @@ export function VisualDashboardShell() {
         setTools(nextTools);
         setWishlist(wishlistItems);
         setTestflightReminders(testflightItems);
+        setUsageReminders(usageItems);
         setCreditsRefreshReminders(listCreditsRefreshReminders(nextTools));
       }
     }
@@ -241,6 +257,7 @@ export function VisualDashboardShell() {
     const current = todayDateKey();
     setToday(current);
     setTestflightDate((value) => value || current);
+    setUsageDate((value) => value || current);
   }, []);
 
   const testflightTiles = testflightReminders
@@ -315,6 +332,62 @@ export function VisualDashboardShell() {
       setTestflightDate(todayDateKey());
     });
   };
+
+  const runUsageAction = async (action: () => Promise<unknown>) => {
+    if (usageBusy) {
+      return;
+    }
+    setUsageBusy(true);
+    try {
+      await action();
+      setUsageReminders(await usageApi.listUsageReminders());
+    } finally {
+      setUsageBusy(false);
+    }
+  };
+
+  const submitUsageReminder = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!usageName.trim() || !usageDate) {
+      return;
+    }
+    void runUsageAction(async () => {
+      await usageApi.addUsageReminder({ name: usageName, startDate: usageDate });
+      setUsageName("");
+      setUsageDate(todayDateKey());
+    });
+  };
+
+  const toggleUsageMode = (mode: "edit" | "delete") => {
+    setUsageMode((current) => (current === mode ? "view" : mode));
+    setUsageEditingId("");
+    setUsageSelectedIds(new Set());
+  };
+
+  const toggleUsageSelected = (reminderId: string) => {
+    setUsageSelectedIds((current) => {
+      const next = new Set(current);
+      if (next.has(reminderId)) {
+        next.delete(reminderId);
+      } else {
+        next.add(reminderId);
+      }
+      return next;
+    });
+  };
+
+  const saveUsageStart = () =>
+    runUsageAction(async () => {
+      await usageApi.updateUsageReminderStart(usageEditingId, usageEditDate);
+      setUsageEditingId("");
+    });
+
+  const deleteSelectedUsage = () =>
+    runUsageAction(async () => {
+      await usageApi.removeUsageReminders([...usageSelectedIds]);
+      setUsageSelectedIds(new Set());
+      setUsageMode("view");
+    });
 
   const activeWishes = wishlist.filter((item) => !item.fulfilledAt);
   const wishListTotal = sumInDisplayCurrency(
@@ -693,40 +766,203 @@ export function VisualDashboardShell() {
           </motion.div>
         </section>
 
-        {creditsRefreshReminders.length ? (
-          <section className="mt-6">
-            <div className="rounded-studio-lg bg-[#e9e5df] p-5 shadow-soft ring-1 ring-black/[0.04] sm:p-6">
+        <section className="mt-6 grid gap-4 lg:grid-cols-2 lg:items-stretch">
+          <div
+            className={cn(
+              "grid min-w-0 content-start gap-4",
+              creditsRefreshReminders.length === 0 && "lg:col-span-2 lg:grid-cols-2"
+            )}
+          >
+          <div className="min-w-0 rounded-studio-lg bg-[#39362b] p-5 text-white shadow-soft sm:p-6">
+            <div className="flex items-start justify-between gap-3">
               <div className="flex items-center gap-2">
-                <CalendarDays size={18} />
-                <h2 className="text-lg font-black">{t("creditsRefreshTitle")}</h2>
+                <Gauge size={18} />
+                <h2 className="text-lg font-black">{t("usageRefreshTitle")}</h2>
               </div>
-              <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
-                {creditsRefreshReminders.map((item) => {
-                  const urgent = item.daysUntil <= 3;
+              <div className="flex shrink-0 items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => toggleUsageMode("edit")}
+                  aria-pressed={usageMode === "edit"}
+                  aria-label={t("comfyEdit")}
+                  title={t("comfyEdit")}
+                  data-usage-mode="edit"
+                  className={cn(
+                    "grid size-8 place-items-center rounded-full transition",
+                    usageMode === "edit" ? "bg-[#ffc700] text-ink" : "bg-white/10 text-white hover:bg-white/20"
+                  )}
+                >
+                  <Pencil size={14} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => toggleUsageMode("delete")}
+                  aria-pressed={usageMode === "delete"}
+                  aria-label={t("comfyDelete")}
+                  title={t("comfyDelete")}
+                  data-usage-mode="delete"
+                  className={cn(
+                    "grid size-8 place-items-center rounded-full transition",
+                    usageMode === "delete" ? "bg-coral text-white" : "bg-white/10 text-white hover:bg-white/20"
+                  )}
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            </div>
+            {usageMode === "edit" ? (
+              <p className="mt-2 text-xs font-semibold leading-5 text-white/60">{t("usageEditHint")}</p>
+            ) : null}
+            {usageMode === "delete" ? (
+              <p className="mt-2 text-xs font-semibold leading-5 text-white/60">{t("usageDeleteHint")}</p>
+            ) : null}
+            {usageReminders.length ? (
+              <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
+                {usageReminders.map((reminder) => {
+                  const daysLeft = today ? getUsageDaysLeft(reminder.startDate, today) : null;
+                  const urgent = daysLeft !== null && daysLeft <= USAGE_WARNING_DAYS;
+                  const editing = usageMode === "edit" && usageEditingId === reminder.id;
+                  const selected = usageSelectedIds.has(reminder.id);
+                  const interactive = usageMode !== "view" && !editing;
+                  const activate = () => {
+                    if (usageMode === "edit") {
+                      setUsageEditingId(reminder.id);
+                      setUsageEditDate(reminder.startDate);
+                    } else if (usageMode === "delete") {
+                      toggleUsageSelected(reminder.id);
+                    }
+                  };
+
                   return (
-                    <div key={item.toolId} className="min-w-0 rounded-studio bg-white/70 p-3">
-                      <p className="truncate font-black">{item.toolName}</p>
-                      <p className={cn("mt-2 text-sm font-medium tabular-nums", urgent ? "text-coral" : "text-ink")}>
-                        {item.daysUntil === 0
-                          ? t("creditsRefreshToday")
-                          : t("creditsRefreshInDays").replace("{days}", String(item.daysUntil))}
-                      </p>
+                    <div
+                      key={reminder.id}
+                      data-usage-tile
+                      role={interactive ? "button" : undefined}
+                      tabIndex={interactive ? 0 : undefined}
+                      aria-pressed={usageMode === "delete" ? selected : undefined}
+                      onClick={interactive ? activate : undefined}
+                      onKeyDown={
+                        interactive
+                          ? (event) => {
+                              if (event.key === "Enter" || event.key === " ") {
+                                event.preventDefault();
+                                activate();
+                              }
+                            }
+                          : undefined
+                      }
+                      className={cn(
+                        "min-w-0 rounded-studio bg-white/[0.08] p-3 transition",
+                        interactive && "cursor-pointer hover:bg-white/[0.14]",
+                        selected && "ring-2 ring-coral"
+                      )}
+                    >
+                      <div className="flex min-w-0 items-start justify-between gap-2">
+                        <p className="min-w-0 break-words font-black [overflow-wrap:anywhere]">{reminder.name}</p>
+                        {usageMode === "delete" ? (
+                          <input type="checkbox" checked={selected} readOnly className="mt-1 size-4 shrink-0 accent-coral" />
+                        ) : null}
+                      </div>
+                      {editing ? (
+                        <div className="mt-2 grid gap-2">
+                          <input
+                            type="date"
+                            value={usageEditDate}
+                            onChange={(event) => setUsageEditDate(event.target.value)}
+                            aria-label={t("startDate")}
+                            className="h-9 w-full min-w-0 rounded-full border-0 bg-white px-3 text-xs font-bold text-ink outline-none"
+                          />
+                          <div className="flex flex-wrap gap-1.5">
+                            <button
+                              type="button"
+                              disabled={usageBusy || !usageEditDate}
+                              onClick={() => void saveUsageStart()}
+                              className="inline-flex min-h-7 items-center gap-1 rounded-full bg-[#ffc700] px-3 text-[10px] font-black text-ink disabled:opacity-50"
+                            >
+                              <Check size={12} />
+                              {t("comfySave")}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setUsageEditingId("")}
+                              className="inline-flex min-h-7 items-center gap-1 rounded-full bg-white/10 px-3 text-[10px] font-black text-white hover:bg-white/20"
+                            >
+                              <X size={12} />
+                              {t("cancel")}
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <p className={cn("mt-2 text-sm font-medium tabular-nums", urgent ? "text-coral" : "text-white/85")}>
+                          {daysLeft === null
+                            ? reminder.startDate
+                            : t("creditsRefreshInDays").replace("{days}", String(daysLeft))}
+                        </p>
+                      )}
                     </div>
                   );
                 })}
               </div>
-            </div>
-          </section>
-        ) : null}
-
-        <section className="mt-6">
-          <div className="rounded-studio-lg bg-[#f8f9db] p-5 shadow-soft ring-1 ring-black/[0.04] sm:p-6">
+            ) : (
+              <p className="mt-4 text-sm font-semibold leading-6 text-white/60">{t("usageEmpty")}</p>
+            )}
+            {usageMode === "delete" ? (
+              <div className="mt-4 flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={usageBusy || usageSelectedIds.size === 0}
+                  onClick={() => void deleteSelectedUsage()}
+                  className="shrink-0 bg-coral hover:bg-coral/90"
+                >
+                  <Trash2 size={16} />
+                  {t("usageDeleteSelected").replace("{count}", String(usageSelectedIds.size))}
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => toggleUsageMode("delete")}
+                  className="bg-white/10 text-white hover:bg-white hover:text-ink"
+                >
+                  <X size={16} />
+                  {t("cancel")}
+                </Button>
+              </div>
+            ) : (
+              <form onSubmit={submitUsageReminder} className="mt-4 flex flex-wrap items-center gap-2">
+                <input
+                  value={usageName}
+                  onChange={(event) => setUsageName(event.target.value)}
+                  placeholder={t("usageNamePlaceholder")}
+                  className="h-11 min-w-0 flex-1 basis-40 rounded-full border-0 bg-white px-3 text-sm font-bold text-ink outline-none focus:ring-2 focus:ring-[#ffc700]"
+                />
+                <input
+                  type="date"
+                  value={usageDate}
+                  onChange={(event) => setUsageDate(event.target.value)}
+                  aria-label={t("startDate")}
+                  className="h-11 w-40 min-w-0 rounded-full border-0 bg-white px-3 text-sm font-bold text-ink outline-none focus:ring-2 focus:ring-[#ffc700]"
+                />
+                <Button
+                  type="submit"
+                  size="sm"
+                  disabled={usageBusy || !usageName.trim() || !usageDate}
+                  className="shrink-0 bg-[#ffc700] text-ink hover:bg-[#ffc700]/90"
+                >
+                  <Plus size={16} />
+                  {t("wishListAdd")}
+                </Button>
+              </form>
+            )}
+          </div>
+          <div className="min-w-0 rounded-studio-lg bg-[#f8f9db] p-5 shadow-soft ring-1 ring-black/[0.04] sm:p-6">
             <div className="flex items-center gap-2">
               <Smartphone size={18} />
               <h2 className="text-lg font-black">{t("testflightTitle")}</h2>
             </div>
             {testflightTiles.length ? (
-              <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+              <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
                 {testflightTiles.map(({ reminder, daysLeft, name }) => {
                   const urgent = daysLeft !== null && daysLeft <= TESTFLIGHT_WARNING_DAYS;
                   return (
@@ -829,6 +1065,30 @@ export function VisualDashboardShell() {
               </Button>
             </form>
           </div>
+          </div>
+        {creditsRefreshReminders.length ? (
+            <div className="h-full min-w-0 rounded-studio-lg bg-[#e9e5df] p-5 shadow-soft ring-1 ring-black/[0.04] sm:p-6">
+              <div className="flex items-center gap-2">
+                <CalendarDays size={18} />
+                <h2 className="text-lg font-black">{t("creditsRefreshTitle")}</h2>
+              </div>
+              <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
+                {creditsRefreshReminders.map((item) => {
+                  const urgent = item.daysUntil <= 3;
+                  return (
+                    <div key={item.toolId} className="min-w-0 rounded-studio bg-white/70 p-3">
+                      <p className="truncate font-black">{item.toolName}</p>
+                      <p className={cn("mt-2 text-sm font-medium tabular-nums", urgent ? "text-coral" : "text-ink")}>
+                        {item.daysUntil === 0
+                          ? t("creditsRefreshToday")
+                          : t("creditsRefreshInDays").replace("{days}", String(item.daysUntil))}
+                      </p>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+        ) : null}
         </section>
 
         <section className="mt-6 grid gap-4 lg:grid-cols-2">
