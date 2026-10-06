@@ -197,7 +197,9 @@ const isWishlistItem = (value: unknown): value is WishlistItem =>
   (value.fulfilledAt === undefined || typeof value.fulfilledAt === "string");
 
 const isUsageReminder = (value: unknown): value is UsageReminder =>
-  isRecord(value) && hasStrings(value, ["id", "name", "startDate", "createdAt"]);
+  isRecord(value) &&
+  hasStrings(value, ["id", "name", "startDate", "createdAt"]) &&
+  (value.cycle === undefined || value.cycle === "weekly" || value.cycle === "monthly");
 
 // Workspaces saved before usage reminders shipped simply have no collection yet.
 const normalizeUsageReminders = (value: unknown): UsageReminder[] =>
@@ -206,6 +208,7 @@ const normalizeUsageReminders = (value: unknown): UsageReminder[] =>
         id: item.id,
         name: item.name,
         startDate: item.startDate,
+        ...(item.cycle ? { cycle: item.cycle } : {}),
         createdAt: item.createdAt
       }))
     : [];

@@ -59,13 +59,14 @@ import type {
   ProjectGroup,
   TestFlightReminder,
   Tool,
+  UsageCycle,
   UsageReminder,
   WishlistItem
 } from "@/lib/types";
 import { projectPath } from "@/lib/utils/app-routes";
 import { cn } from "@/lib/utils/cn";
 import { TESTFLIGHT_WARNING_DAYS, getTestflightDaysLeft, todayDateKey } from "@/lib/utils/testflight";
-import { USAGE_WARNING_DAYS, getUsageDaysLeft } from "@/lib/utils/usage-reminders";
+import { USAGE_WARNING_DAYS, getUsageDaysLeft, usageCycles } from "@/lib/utils/usage-reminders";
 import { fixedNumericLocale, supportedCurrencies } from "@/lib/utils/money";
 import {
   listCreditsRefreshReminders,
@@ -151,9 +152,11 @@ export function VisualDashboardShell() {
   const [usageReminders, setUsageReminders] = useState<UsageReminder[]>([]);
   const [usageName, setUsageName] = useState("");
   const [usageDate, setUsageDate] = useState("");
+  const [usageCycle, setUsageCycle] = useState<UsageCycle>("weekly");
   const [usageMode, setUsageMode] = useState<"view" | "edit" | "delete">("view");
   const [usageEditingId, setUsageEditingId] = useState("");
   const [usageEditDate, setUsageEditDate] = useState("");
+  const [usageEditCycle, setUsageEditCycle] = useState<UsageCycle>("weekly");
   const [usageSelectedIds, setUsageSelectedIds] = useState<Set<string>>(new Set());
   const [usageBusy, setUsageBusy] = useState(false);
   const [completingTaskId, setCompletingTaskId] = useState("");
@@ -358,9 +361,10 @@ export function VisualDashboardShell() {
       return;
     }
     void runUsageAction(async () => {
-      await usageApi.addUsageReminder({ name: usageName, startDate: usageDate });
+      await usageApi.addUsageReminder({ name: usageName, startDate: usageDate, cycle: usageCycle });
       setUsageName("");
       setUsageDate(todayDateKey());
+      setUsageCycle("weekly");
     });
   };
 
@@ -384,7 +388,7 @@ export function VisualDashboardShell() {
 
   const saveUsageStart = () =>
     runUsageAction(async () => {
-      await usageApi.updateUsageReminderStart(usageEditingId, usageEditDate);
+      await usageApi.updateUsageReminder(usageEditingId, { startDate: usageEditDate, cycle: usageEditCycle });
       setUsageEditingId("");
     });
 
@@ -897,7 +901,8 @@ export function VisualDashboardShell() {
             {usageReminders.length ? (
               <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
                 {usageReminders.map((reminder) => {
-                  const daysLeft = today ? getUsageDaysLeft(reminder.startDate, today) : null;
+                  const cycle = reminder.cycle ?? "weekly";
+                  const daysLeft = today ? getUsageDaysLeft(reminder.startDate, today, cycle) : null;
                   const urgent = daysLeft !== null && daysLeft <= USAGE_WARNING_DAYS;
                   const editing = usageMode === "edit" && usageEditingId === reminder.id;
                   const selected = usageSelectedIds.has(reminder.id);
@@ -906,6 +911,7 @@ export function VisualDashboardShell() {
                     if (usageMode === "edit") {
                       setUsageEditingId(reminder.id);
                       setUsageEditDate(reminder.startDate);
+                      setUsageEditCycle(cycle);
                     } else if (usageMode === "delete") {
                       toggleUsageSelected(reminder.id);
                     }
@@ -936,7 +942,12 @@ export function VisualDashboardShell() {
                       )}
                     >
                       <div className="flex min-w-0 items-start justify-between gap-2">
-                        <p className="min-w-0 break-words font-black [overflow-wrap:anywhere]">{reminder.name}</p>
+                        <p className="flex min-w-0 flex-wrap items-baseline gap-x-1.5">
+                          <span className="min-w-0 break-words font-black [overflow-wrap:anywhere]">{reminder.name}</span>
+                          <span className="shrink-0 text-[10px] font-normal text-white/50">
+                            {t(cycle === "monthly" ? "usageCycleMonthly" : "usageCycleWeekly")}
+                          </span>
+                        </p>
                         {usageMode === "delete" ? (
                           <input type="checkbox" checked={selected} readOnly className="mt-1 size-4 shrink-0 accent-coral" />
                         ) : null}
@@ -950,6 +961,18 @@ export function VisualDashboardShell() {
                             aria-label={t("startDate")}
                             className="h-9 w-full min-w-0 rounded-full border-0 bg-white px-3 text-xs font-bold text-ink outline-none"
                           />
+                          <Select
+                            value={usageEditCycle}
+                            onChange={(event) => setUsageEditCycle(event.target.value as UsageCycle)}
+                            aria-label={t("usageCycleLabel")}
+                            className="h-9 rounded-full border-0 bg-white px-3 text-xs font-bold text-ink outline-none"
+                          >
+                            {usageCycles.map((option) => (
+                              <option key={option} value={option}>
+                                {t(option === "monthly" ? "usageCycleMonthly" : "usageCycleWeekly")}
+                              </option>
+                            ))}
+                          </Select>
                           <div className="flex flex-wrap gap-1.5">
                             <button
                               type="button"
@@ -1022,6 +1045,20 @@ export function VisualDashboardShell() {
                   aria-label={t("startDate")}
                   className="h-11 w-40 min-w-0 rounded-full border-0 bg-white px-3 text-sm font-bold text-ink outline-none focus:ring-2 focus:ring-[#ffc700]"
                 />
+                <div className="w-32 shrink-0">
+                  <Select
+                    value={usageCycle}
+                    onChange={(event) => setUsageCycle(event.target.value as UsageCycle)}
+                    aria-label={t("usageCycleLabel")}
+                    className="h-11 rounded-full border-0 bg-white px-3 text-sm font-bold text-ink outline-none"
+                  >
+                    {usageCycles.map((option) => (
+                      <option key={option} value={option}>
+                        {t(option === "monthly" ? "usageCycleMonthly" : "usageCycleWeekly")}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
                 <Button
                   type="submit"
                   size="sm"

@@ -330,12 +330,16 @@ export type ProjectVersion = {
   testflightRenewals?: string[];
 };
 
-/** Dashboard 7-day usage-refresh countdown; the cycle repeats from startDate until the date is changed. */
+export type UsageCycle = "weekly" | "monthly";
+
+/** Dashboard usage-refresh countdown; the cycle repeats from startDate until the date is changed. */
 export type UsageReminder = {
   id: string;
   name: string;
   /** First day of the current cycle (yyyy-mm-dd); kept private, the card only shows days left. */
   startDate: string;
+  /** Weekly cycles are 7 days; monthly cycles end on the same day-of-month next month. Missing means weekly. */
+  cycle?: UsageCycle;
   createdAt: string;
 };
 

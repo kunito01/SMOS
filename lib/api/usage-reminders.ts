@@ -1,7 +1,7 @@
 import { mockApi } from "@/lib/api/mock-client";
 import { hydrateMockDatabase, persistMockDatabase } from "@/lib/api/mock-persistence";
 import { mockDatabase } from "@/lib/mock";
-import type { UsageReminder } from "@/lib/types";
+import type { UsageCycle, UsageReminder } from "@/lib/types";
 import { isDateKey } from "@/lib/utils/testflight";
 
 const createReminderId = () => {
@@ -20,7 +20,10 @@ export async function listUsageReminders() {
 export type AddUsageReminderInput = {
   name: string;
   startDate: string;
+  cycle?: UsageCycle;
 };
+
+const isUsageCycle = (value: unknown): value is UsageCycle => value === "weekly" || value === "monthly";
 
 export async function addUsageReminder(input: AddUsageReminderInput) {
   await hydrateMockDatabase();
@@ -35,6 +38,7 @@ export async function addUsageReminder(input: AddUsageReminderInput) {
     id: createReminderId(),
     name,
     startDate,
+    cycle: isUsageCycle(input.cycle) ? input.cycle : "weekly",
     createdAt: new Date().toISOString()
   };
   mockDatabase.usageReminders.push(reminder);
@@ -43,18 +47,26 @@ export async function addUsageReminder(input: AddUsageReminderInput) {
   return mockApi({ ...reminder });
 }
 
-/** Restarts the cycle from the given day. */
-export async function updateUsageReminderStart(reminderId: string, startDate: string) {
+export type UpdateUsageReminderInput = {
+  startDate: string;
+  cycle?: UsageCycle;
+};
+
+/** Restarts the cycle from the given day, optionally switching its length. */
+export async function updateUsageReminder(reminderId: string, input: UpdateUsageReminderInput) {
   await hydrateMockDatabase();
   const reminder = mockDatabase.usageReminders.find((item) => item.id === reminderId);
   if (!reminder) {
     throw new Error(`Usage reminder not found: ${reminderId}`);
   }
-  if (!isDateKey(startDate)) {
+  if (!isDateKey(input.startDate)) {
     throw new Error("A usage reminder start must be a yyyy-mm-dd date");
   }
 
-  reminder.startDate = startDate;
+  reminder.startDate = input.startDate;
+  if (isUsageCycle(input.cycle)) {
+    reminder.cycle = input.cycle;
+  }
   await persistMockDatabase();
 
   return mockApi({ ...reminder });
