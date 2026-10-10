@@ -9,6 +9,7 @@ import { PixelCanyonScene } from "@/components/dashboard/pixel-canyon-scene";
 import { AppShell } from "@/components/layout/app-shell";
 import { useAuth, useI18n } from "@/components/providers/app-providers";
 import { ArchiveStorageSyncCard } from "@/components/storage/archive-storage-sync-card";
+import { AgentBridgeCard } from "@/components/storage/agent-bridge-card";
 import { GoogleCalendarSyncCard } from "@/components/storage/google-calendar-sync-card";
 import { isWorkspaceSyncConflictError } from "@/lib/storage/workspace-write-guard";
 import { Button } from "@/components/ui/button";
@@ -525,6 +526,12 @@ export function ArchivePage() {
         {data && user ? (
           <section className="mt-6">
             <GoogleCalendarSyncCard workspaceId={user.workspaceId} />
+          </section>
+        ) : null}
+
+        {data && user ? (
+          <section className="mt-6">
+            <AgentBridgeCard workspaceId={user.workspaceId} />
           </section>
         ) : null}
 

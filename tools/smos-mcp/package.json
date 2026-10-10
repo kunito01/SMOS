@@ -1,0 +1,14 @@
+{
+  "name": "smos-mcp",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Local MCP relay that lets AI agents operate an open Studio Map OS workspace",
+  "type": "module",
+  "bin": { "smos-mcp": "./index.mjs" },
+  "scripts": { "start": "node index.mjs" },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "ws": "^8.22.0"
+  },
+  "engines": { "node": ">=20" }
+}

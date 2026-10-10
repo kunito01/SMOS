@@ -36,6 +36,7 @@ import {
 import { formatLocalizedDate } from "@/lib/i18n/formatters";
 import { languageLocales } from "@/lib/i18n/translations";
 import { projectPath } from "@/lib/utils/app-routes";
+import { AgentBridgeClient } from "@/components/layout/agent-bridge-client";
 import { GoogleCalendarAutoSync } from "@/components/layout/google-calendar-auto-sync";
 import { cn } from "@/lib/utils/cn";
 import {
@@ -641,6 +642,7 @@ export function AppShell({ beforeNavigate, children }: AppShellProps) {
           </div>
 
           <GoogleCalendarAutoSync />
+          <AgentBridgeClient />
           {children}
           <SiteFooter dockSafe />
         </main>

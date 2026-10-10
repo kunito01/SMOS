@@ -16,6 +16,7 @@ const eslintConfig = [
       ".next-pages/**",
       ".next-pwa/**",
       "node_modules/**",
+      "tools/**",
       "out/**",
       "output/**",
       "public/sw.js",
