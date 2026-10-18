@@ -31,9 +31,15 @@ export function WorkspaceForegroundSync() {
         reloadPage: true,
         minIntervalMs: FOREGROUND_PULL_INTERVAL_MS,
         skipWhenUnsaved: hasUnsavedWork
-      }).finally(() => {
-        inFlight = false;
-      });
+      })
+        .then((result) => {
+          if (result.status === "failed") {
+            console.warn(`[smos-sync] foreground pull failed: ${result.message}`);
+          }
+        })
+        .finally(() => {
+          inFlight = false;
+        });
     };
 
     document.addEventListener("visibilitychange", pull);

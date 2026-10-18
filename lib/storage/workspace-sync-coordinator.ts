@@ -6,6 +6,7 @@ import {
 } from "@/lib/storage/cloudkit-provider";
 import {
   assertCloudKitAuthenticatedUser,
+  CloudKitClientError,
   getCloudKitConfigurationStatus,
   getCloudKitUserRecordName,
   setUpCloudKitAuth,
@@ -128,6 +129,74 @@ const noteLocalSaveRevision = (workspaceId: string) => {
   return next;
 };
 
+const GENERIC_REQUEST_FAILURE = "The CloudKit request failed.";
+const MAX_FAILURE_DETAIL_LENGTH = 240;
+
+/** Never let a CloudKit API token or web-auth session leak into a visible message. */
+const scrubSecrets = (text: string) =>
+  text.replace(/(ck(?:API|WebAuth)Token=)[^&\s"']+/gi, "$1…");
+
+const isPlainRecord = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === "object";
+
+/**
+ * Turn whatever CloudKit JS rejected with (a CKError-like object, a fetch
+ * TypeError, a plain Error) into one short human-readable line.
+ */
+const describeFailureCause = (cause: unknown): string => {
+  if (cause === null || cause === undefined) {
+    return "";
+  }
+  if (typeof cause === "string") {
+    return cause;
+  }
+  if (!isPlainRecord(cause)) {
+    return String(cause);
+  }
+  const pick = (...keys: string[]) => {
+    for (const key of keys) {
+      const value = cause[key];
+      if (typeof value === "string" && value.trim()) {
+        return value.trim();
+      }
+    }
+    return "";
+  };
+  const code = pick("ckErrorCode", "serverErrorCode");
+  const status =
+    typeof cause.status === "number" && Number.isFinite(cause.status)
+      ? `HTTP ${cause.status}`
+      : "";
+  const reason = pick("reason", "message");
+  const name = cause instanceof Error && !code ? cause.name : "";
+  const parts = [code, status, reason || name].filter(Boolean);
+  if (parts.length === 0 && isPlainRecord(cause.cause)) {
+    return describeFailureCause(cause.cause);
+  }
+  return parts.join(" · ");
+};
+
+/** Public detail string for a sync failure: provider message plus the cause. */
+export const describeWorkspaceSyncFailure = (error: unknown): string => {
+  const ownMessage =
+    error instanceof Error && error.message && error.message !== GENERIC_REQUEST_FAILURE
+      ? error.message
+      : "";
+  const causeDetail =
+    error instanceof Error ? describeFailureCause((error as { cause?: unknown }).cause) : "";
+  // The provider message often already embeds the cause text; keep one copy.
+  const detail =
+    ownMessage && causeDetail && (ownMessage.includes(causeDetail) || causeDetail.includes(ownMessage))
+      ? ownMessage.length >= causeDetail.length
+        ? ownMessage
+        : causeDetail
+      : [ownMessage, causeDetail].filter(Boolean).join(" — ");
+  const scrubbed = scrubSecrets(detail).replace(/\s+/g, " ").trim();
+  return scrubbed.length > MAX_FAILURE_DETAIL_LENGTH
+    ? `${scrubbed.slice(0, MAX_FAILURE_DETAIL_LENGTH - 1)}…`
+    : scrubbed;
+};
+
 const genericErrorMessage = (error: unknown) => {
   if (error instanceof CloudKitProviderError) {
     switch (error.code) {
@@ -141,14 +210,48 @@ const genericErrorMessage = (error: unknown) => {
         return "The CloudKit workspace is incomplete or failed verification.";
       case "CRYPTO_UNAVAILABLE":
         return "Secure browser cryptography is unavailable.";
-      default:
-        return "CloudKit could not be reached. The local encrypted copy is unchanged.";
+      case "QUOTA_EXCEEDED":
+        return "iCloud storage is full, so CloudKit rejected the upload. Free up iCloud space (or delete leftover SMOSWorkspaceChunk records) and sync again.";
+      case "THROTTLED":
+        return `CloudKit is rate-limiting this device (${describeWorkspaceSyncFailure(error) || "try again later"}).`;
+      default: {
+        // REQUEST_FAILED covers every server/transport failure (QUOTA_EXCEEDED,
+        // BAD_REQUEST, THROTTLED, CORS, 421, 5xx…). Show the actual reason so
+        // the storage card is diagnosable instead of a blanket "unreachable".
+        const detail = describeWorkspaceSyncFailure(error);
+        return detail
+          ? `CloudKit request failed: ${detail}. The local encrypted copy is unchanged.`
+          : "CloudKit could not be reached. The local encrypted copy is unchanged.";
+      }
     }
   }
   if (error instanceof WorkspaceSyncError) {
     return error.message;
   }
-  return "CloudKit sync failed. The local encrypted copy is unchanged.";
+  const detail = describeWorkspaceSyncFailure(error);
+  return detail
+    ? `CloudKit sync failed: ${detail}. The local encrypted copy is unchanged.`
+    : "CloudKit sync failed. The local encrypted copy is unchanged.";
+};
+
+/**
+ * Production builds strip NODE_ENV-gated debug logs, so sync failures are
+ * logged unconditionally (secrets scrubbed) for DevTools diagnosis.
+ */
+const logSyncFailure = (workspaceId: string, error: unknown) => {
+  if (typeof console === "undefined") {
+    return;
+  }
+  const code =
+    error instanceof CloudKitProviderError || error instanceof WorkspaceSyncError
+      ? error.code
+      : error instanceof Error
+        ? error.name
+        : typeof error;
+  console.warn(
+    `[smos-sync] workspace ${workspaceId} failed (${code}): ${describeWorkspaceSyncFailure(error) || "no detail"}`,
+    error
+  );
 };
 
 const withTimeout = async <T>(operation: Promise<T>, timeoutMs: number): Promise<T> => {
@@ -229,6 +332,17 @@ const markAuthRequired = (workspaceId: string) =>
     lastError: "Sign in to iCloud to sync this workspace."
   });
 
+/**
+ * The auth re-check inside a sync throws CloudKitClientError, not the
+ * provider's error class. Without this it was recorded as a generic failure
+ * and the card never asked the user to sign in again.
+ */
+const isClientAuthRequired = (error: unknown) =>
+  error instanceof CloudKitClientError && error.code === "AUTH_REQUIRED";
+
+const isClientAccountMismatch = (error: unknown) =>
+  error instanceof CloudKitClientError && error.code === "ACCOUNT_MISMATCH";
+
 const markAccountMismatch = (workspaceId: string, error: unknown) =>
   updateWorkspaceStoragePreference(workspaceId, {
     status: "account-mismatch",
@@ -242,11 +356,13 @@ const markConflict = (workspaceId: string, message: string) =>
     lastError: message
   });
 
-const markError = (workspaceId: string, error: unknown) =>
+const markError = (workspaceId: string, error: unknown) => {
+  logSyncFailure(workspaceId, error);
   updateWorkspaceStoragePreference(workspaceId, {
     status: "error",
     lastError: genericErrorMessage(error)
   });
+};
 
 const markSynced = (
   workspaceId: string,
@@ -726,11 +842,17 @@ const manualSyncInternal = async (
     if (bindingEstablished && user && !cloudBindingStillMatches(workspaceId, user)) {
       return staleSyncResult(workspaceId);
     }
-    if (error instanceof CloudKitProviderError && error.code === "AUTH_REQUIRED") {
+    if (
+      (error instanceof CloudKitProviderError && error.code === "AUTH_REQUIRED") ||
+      isClientAuthRequired(error)
+    ) {
       markAuthRequired(workspaceId);
       return result(workspaceId, "auth-required", "none", false, user);
     }
-    if (error instanceof WorkspaceSyncError && error.code === "ACCOUNT_MISMATCH") {
+    if (
+      (error instanceof WorkspaceSyncError && error.code === "ACCOUNT_MISMATCH") ||
+      isClientAccountMismatch(error)
+    ) {
       markAccountMismatch(workspaceId, error);
       return result(workspaceId, "account-mismatch", "none", false, user);
     }
@@ -1012,9 +1134,16 @@ export async function resolveWorkspaceCloudConflict(
       if (bindingEstablished && user && !cloudBindingStillMatches(workspaceId, user)) {
         return staleSyncResult(workspaceId);
       }
-      if (error instanceof CloudKitProviderError && error.code === "AUTH_REQUIRED") {
+      if (
+        (error instanceof CloudKitProviderError && error.code === "AUTH_REQUIRED") ||
+        isClientAuthRequired(error)
+      ) {
         markAuthRequired(workspaceId);
         return result(workspaceId, "auth-required", "none", false, user);
+      }
+      if (isClientAccountMismatch(error)) {
+        markAccountMismatch(workspaceId, error);
+        return result(workspaceId, "account-mismatch", "none", false, user);
       }
       if (error instanceof CloudKitProviderError && error.code === "CONFLICT") {
         markConflict(workspaceId, genericErrorMessage(error));
@@ -1232,11 +1361,17 @@ export async function pullWorkspaceFromCloudOnLogin(
       if (bindingEstablished && user && !cloudBindingStillMatches(workspaceId, user)) {
         return staleSyncResult(workspaceId);
       }
-      if (error instanceof CloudKitProviderError && error.code === "AUTH_REQUIRED") {
+      if (
+        (error instanceof CloudKitProviderError && error.code === "AUTH_REQUIRED") ||
+        isClientAuthRequired(error)
+      ) {
         markAuthRequired(workspaceId);
         return result(workspaceId, "auth-required", "none", false, user);
       }
-      if (error instanceof WorkspaceSyncError && error.code === "ACCOUNT_MISMATCH") {
+      if (
+        (error instanceof WorkspaceSyncError && error.code === "ACCOUNT_MISMATCH") ||
+        isClientAccountMismatch(error)
+      ) {
         markAccountMismatch(workspaceId, error);
         return result(workspaceId, "account-mismatch", "none", false, user);
       }
@@ -1244,6 +1379,7 @@ export async function pullWorkspaceFromCloudOnLogin(
         markConflict(workspaceId, genericErrorMessage(error));
         return result(workspaceId, "conflict", "none", false, user);
       }
+      logSyncFailure(workspaceId, error);
       updateWorkspaceStoragePreference(workspaceId, {
         status: "pending",
         lastError: genericErrorMessage(error)

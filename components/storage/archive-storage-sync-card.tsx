@@ -280,6 +280,11 @@ export function ArchiveStorageSyncCard({ workspaceId }: ArchiveStorageSyncCardPr
       };
     }
     if (preference.pendingUpload || preference.status === "pending") {
+      // A login-time pull that failed is stored as pending so uploads keep
+      // scheduling; still show what went wrong instead of a bare "pending".
+      if (preference.lastError) {
+        return { label: preference.lastError, tone: "error" as const };
+      }
       return { label: t("storagePendingUpload"), tone: "pending" as const };
     }
     return { label: t("storageUpToDate"), tone: "success" as const };

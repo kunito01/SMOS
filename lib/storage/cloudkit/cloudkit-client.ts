@@ -8,6 +8,13 @@ const SIGN_IN_MESSAGE_GUARD_WINDOW_MS = 10 * 60_000;
 // eight attempts bring per-operation failure below 0.5% even on such links.
 const CLOUDKIT_DB_MAX_ATTEMPTS = 8;
 const CLOUDKIT_DB_RETRY_BASE_DELAY_MS = 400;
+// Apple's retryAfter hint is honoured up to this cap so a throttled device
+// waits instead of burning its retry budget in a few seconds.
+const CLOUDKIT_DB_RETRY_AFTER_CAP_MS = 30_000;
+// CloudKit JS has no request timeout. A request stalled in a proxy tunnel
+// would otherwise hang the sync forever; after this it counts as a transport
+// failure and is retried like any other NETWORK_ERROR.
+const CLOUDKIT_DB_REQUEST_TIMEOUT_MS = 120_000;
 
 export const CLOUDKIT_SIGN_IN_BUTTON_ID = "apple-sign-in-button" as const;
 export const CLOUDKIT_SIGN_OUT_BUTTON_ID = "apple-sign-out-button" as const;
@@ -695,7 +702,9 @@ const fetchCloudKitIdentityViaRest = async (): Promise<CloudKitUserIdentity | nu
     `?ckAPIToken=${encodeURIComponent(configuration.apiToken)}` +
     `&ckWebAuthToken=${encodeURIComponent(session)}`;
 
-  const response = await fetch(url);
+  // The service worker caches cross-origin GETs (NetworkFirst, 1 h). A stale
+  // "signed in" answer must never mask an unreachable CloudKit API.
+  const response = await fetch(url, { cache: "no-store" });
   if (response.status === 401 || response.status === 421) {
     return null;
   }
@@ -783,8 +792,47 @@ const isRetryableDatabaseError = (error: unknown): boolean => {
   return (
     code === "NETWORK_ERROR" ||
     code === "SERVICE_UNAVAILABLE" ||
+    // Apple explicitly asks for a retry on these; THROTTLED carries retryAfter.
+    code === "THROTTLED" ||
+    code === "TRY_AGAIN_LATER" ||
+    code === "ZONE_BUSY" ||
+    code === "INTERNAL_ERROR" ||
     error instanceof TypeError
   );
+};
+
+const retryDelayMs = (error: unknown, attempt: number) => {
+  const backoff = CLOUDKIT_DB_RETRY_BASE_DELAY_MS * (attempt + 1);
+  const retryAfter =
+    error && typeof error === "object" && typeof (error as { retryAfter?: unknown }).retryAfter === "number"
+      ? (error as { retryAfter: number }).retryAfter
+      : 0;
+  if (Number.isFinite(retryAfter) && retryAfter > 0) {
+    return Math.min(Math.max(backoff, retryAfter * 1000), CLOUDKIT_DB_RETRY_AFTER_CAP_MS);
+  }
+  return backoff;
+};
+
+const withRequestTimeout = <T>(operation: () => Promise<T>): Promise<T> => {
+  if (typeof window === "undefined") {
+    return operation();
+  }
+  let timeoutId: number | null = null;
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = window.setTimeout(() => {
+      // Shaped like a CloudKit JS transport error so the retry policy treats
+      // it as a dropped request.
+      reject({
+        ckErrorCode: "NETWORK_ERROR",
+        reason: `CloudKit request timed out after ${Math.round(CLOUDKIT_DB_REQUEST_TIMEOUT_MS / 1000)} s.`
+      });
+    }, CLOUDKIT_DB_REQUEST_TIMEOUT_MS);
+  });
+  return Promise.race([operation(), timeout]).finally(() => {
+    if (timeoutId !== null) {
+      window.clearTimeout(timeoutId);
+    }
+  });
 };
 
 const delay = (ms: number) =>
@@ -800,7 +848,7 @@ const retryDatabaseOperation = async <T>(operation: () => Promise<T>): Promise<T
   let lastError: unknown;
   for (let attempt = 0; attempt < CLOUDKIT_DB_MAX_ATTEMPTS; attempt += 1) {
     try {
-      return await operation();
+      return await withRequestTimeout(operation);
     } catch (error) {
       lastError = error;
       if (
@@ -815,7 +863,7 @@ const retryDatabaseOperation = async <T>(operation: () => Promise<T>): Promise<T
             `(attempt ${attempt + 1}/${CLOUDKIT_DB_MAX_ATTEMPTS})`
         );
       }
-      await delay(CLOUDKIT_DB_RETRY_BASE_DELAY_MS * (attempt + 1));
+      await delay(retryDelayMs(error, attempt));
     }
   }
   throw lastError;

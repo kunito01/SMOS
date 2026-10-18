@@ -193,6 +193,16 @@ export const startAgentBridge = (workspaceId: string) => {
             "The workspace has an unresolved CloudKit conflict. Ask the user to pick a side on the Archive page first."
           );
         }
+        if (pulled.status === "failed") {
+          // The tool still runs on the local copy; the failure is visible in
+          // the Archive card's action log and in the storage card status.
+          appendLog(workspaceId, {
+            at: new Date().toISOString(),
+            tool: name,
+            ok: false,
+            summary: `cloud pull failed before the call: ${pulled.message}`
+          });
+        }
         const result = await runAgentTool(name, request.args);
         scheduleWorkspaceCloudUpload(workspaceId, 0);
         appendLog(workspaceId, { at: new Date().toISOString(), tool: name, ok: true, summary: summarizeArgs(request.args) });

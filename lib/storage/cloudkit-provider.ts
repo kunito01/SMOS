@@ -23,7 +23,16 @@ const CLOUDKIT_FORMAT_VERSION = "1";
 const CHUNK_BYTES = 384 * 1024;
 const MAX_CHUNK_COUNT = 1_024;
 const MAX_PAYLOAD_BYTES = 64 * 1024 * 1024;
+// records/modify and records/lookup accept up to 200 operations, but a single
+// request carrying 150 base64 chunks is ~75 MB of JSON — far too much for a
+// lossy or proxied link, where one dropped response costs the whole batch.
+// Writes are bounded by bytes and reads by chunk count so each request stays
+// around 6 MB; only name-only deletes still use the large batch.
 const RECORD_BATCH_SIZE = 150;
+const MAX_REQUEST_BYTES = 6 * 1024 * 1024;
+const LOOKUP_BATCH_SIZE = 12;
+const CHUNK_LEDGER_KEY_PREFIX = "studio-map-os.cloudkit-chunk-ledger.v1:";
+const CHUNK_LEDGER_LIMIT = 16;
 
 export type CloudKitWorkspaceManifest = {
   workspaceId: string;
@@ -62,6 +71,8 @@ export type CloudKitProviderErrorCode =
   | "CRYPTO_UNAVAILABLE"
   | "INVALID_REMOTE_DATA"
   | "PAYLOAD_TOO_LARGE"
+  | "QUOTA_EXCEEDED"
+  | "THROTTLED"
   | "REQUEST_FAILED";
 
 export class CloudKitProviderError extends Error {
@@ -221,8 +232,44 @@ const isAuthenticationError = (error: unknown) => {
   );
 };
 
-const describeResponseError = (error: CloudKitResponseError) =>
-  error.message ?? error.reason ?? error.ckErrorCode ?? error.serverErrorCode ?? "CloudKit request failed";
+/** The user's iCloud storage is full; nothing can be written until space is freed. */
+const isQuotaError = (error: unknown) => normalizeErrorCode(error) === "QUOTA_EXCEEDED";
+
+/** Apple asked us to back off; the request itself was fine. */
+const isThrottleError = (error: unknown) => {
+  const code = normalizeErrorCode(error);
+  return code === "THROTTLED" || code === "TRY_AGAIN_LATER" || code === "ZONE_BUSY";
+};
+
+/** A `create` hit a record that already exists (a retried batch that did commit). */
+const isExistsError = (error: unknown) => normalizeErrorCode(error) === "EXISTS";
+
+const errorText = (error: unknown) => {
+  if (!isRecord(error)) {
+    return typeof error === "string" ? error : "";
+  }
+  const text = error.reason ?? error.message;
+  return typeof text === "string" ? text : "";
+};
+
+/** "QUOTA_EXCEEDED: Quota exceeded" style line that keeps the server code visible. */
+const describeResponseError = (error: CloudKitResponseError) => {
+  const code = normalizeErrorCode(error);
+  const text = errorText(error);
+  if (code && text) {
+    return `${code}: ${text}`;
+  }
+  return code || text || "CloudKit request failed";
+};
+
+const describeThrownError = (error: unknown) => {
+  const code = normalizeErrorCode(error);
+  const text = errorText(error) || (error instanceof Error ? `${error.name}: ${error.message}` : "");
+  if (code && text) {
+    return `${code}: ${text}`;
+  }
+  return code || text || "The CloudKit request failed.";
+};
 
 const throwRequestError = (error: unknown): never => {
   if (error instanceof CloudKitProviderError) {
@@ -242,17 +289,34 @@ const throwRequestError = (error: unknown): never => {
       { cause: error }
     );
   }
-  throw new CloudKitProviderError("REQUEST_FAILED", "The CloudKit request failed.", {
+  if (isQuotaError(error)) {
+    throw new CloudKitProviderError("QUOTA_EXCEEDED", describeThrownError(error), {
+      cause: error
+    });
+  }
+  if (isThrottleError(error)) {
+    throw new CloudKitProviderError("THROTTLED", describeThrownError(error), {
+      cause: error
+    });
+  }
+  throw new CloudKitProviderError("REQUEST_FAILED", describeThrownError(error), {
     cause: error
   });
 };
 
 const assertResponseSuccess = (
   errors: CloudKitResponseError[] | undefined,
-  options: { allowNotFound?: boolean } = {}
+  options: { allowNotFound?: boolean; allowExistingRecordNames?: Set<string> } = {}
 ) => {
   const relevant = (errors ?? []).filter(
-    (error) => !(options.allowNotFound && isNotFoundError(error))
+    (error) =>
+      !(options.allowNotFound && isNotFoundError(error)) &&
+      !(
+        options.allowExistingRecordNames &&
+        isExistsError(error) &&
+        typeof error.recordName === "string" &&
+        options.allowExistingRecordNames.has(error.recordName)
+      )
   );
   if (relevant.length === 0) {
     return;
@@ -260,22 +324,41 @@ const assertResponseSuccess = (
 
   const first = relevant[0];
   if (isConflictError(first)) {
-    throw new CloudKitProviderError("CONFLICT", describeResponseError(first));
+    throw new CloudKitProviderError("CONFLICT", describeResponseError(first), { cause: first });
   }
   if (isAuthenticationError(first)) {
-    throw new CloudKitProviderError("AUTH_REQUIRED", describeResponseError(first));
+    throw new CloudKitProviderError("AUTH_REQUIRED", describeResponseError(first), {
+      cause: first
+    });
   }
-  throw new CloudKitProviderError("REQUEST_FAILED", describeResponseError(first));
+  if (isQuotaError(first)) {
+    throw new CloudKitProviderError("QUOTA_EXCEEDED", describeResponseError(first), {
+      cause: first
+    });
+  }
+  if (isThrottleError(first)) {
+    throw new CloudKitProviderError("THROTTLED", describeResponseError(first), {
+      cause: first
+    });
+  }
+  throw new CloudKitProviderError("REQUEST_FAILED", describeResponseError(first), {
+    cause: first
+  });
 };
 
+/**
+ * Chunk lookups are bounded by count (each chunk field is ~512 KiB) and
+ * tolerate per-record NOT_FOUND so a missing chunk is reported as incomplete
+ * remote data by the caller instead of as a generic request failure.
+ */
 const fetchRecords = async (database: CloudKitDatabase, recordNames: string[]) => {
   const records: CloudKitRecord[] = [];
 
-  for (let offset = 0; offset < recordNames.length; offset += RECORD_BATCH_SIZE) {
-    const batch = recordNames.slice(offset, offset + RECORD_BATCH_SIZE);
+  for (let offset = 0; offset < recordNames.length; offset += LOOKUP_BATCH_SIZE) {
+    const batch = recordNames.slice(offset, offset + LOOKUP_BATCH_SIZE);
     try {
       const response = await database.fetchRecords(batch);
-      assertResponseSuccess(response.errors);
+      assertResponseSuccess(response.errors, { allowNotFound: true });
       records.push(...(response.records ?? []).filter((record) => !record.deleted));
     } catch (error) {
       throwRequestError(error);
@@ -285,16 +368,71 @@ const fetchRecords = async (database: CloudKitDatabase, recordNames: string[]) =
   return records;
 };
 
-const saveRecords = async (database: CloudKitDatabase, records: CloudKitRecord[]) => {
+const approximateRecordBytes = (record: CloudKitRecord) => {
+  let total = 256;
+  for (const value of Object.values(record.fields ?? {})) {
+    if (typeof value?.value === "string") {
+      total += value.value.length;
+    }
+  }
+  return total;
+};
+
+/** Split records into request batches that stay under MAX_REQUEST_BYTES. */
+const splitRecordsByBytes = (records: CloudKitRecord[]) => {
+  const batches: CloudKitRecord[][] = [];
+  let current: CloudKitRecord[] = [];
+  let currentBytes = 0;
+
+  for (const record of records) {
+    const bytes = approximateRecordBytes(record);
+    if (
+      current.length > 0 &&
+      (currentBytes + bytes > MAX_REQUEST_BYTES || current.length >= RECORD_BATCH_SIZE)
+    ) {
+      batches.push(current);
+      current = [];
+      currentBytes = 0;
+    }
+    current.push(record);
+    currentBytes += bytes;
+  }
+  if (current.length > 0) {
+    batches.push(current);
+  }
+  return batches;
+};
+
+type SaveRecordsOptions = {
+  /**
+   * Treat per-record EXISTS as success. Generation-scoped chunk records are
+   * immutable, so when a retried `create` finds its record already committed
+   * (the response of the first attempt was lost), the content is identical.
+   */
+  tolerateExisting?: boolean;
+};
+
+const saveRecords = async (
+  database: CloudKitDatabase,
+  records: CloudKitRecord[],
+  options: SaveRecordsOptions = {}
+) => {
   const saved: CloudKitRecord[] = [];
 
-  for (let offset = 0; offset < records.length; offset += RECORD_BATCH_SIZE) {
-    const batch = records.slice(offset, offset + RECORD_BATCH_SIZE);
+  for (const batch of splitRecordsByBytes(records)) {
+    const batchNames = new Set(
+      batch.flatMap((record) => (typeof record.recordName === "string" ? [record.recordName] : []))
+    );
     try {
       const response = await database.saveRecords(batch);
-      assertResponseSuccess(response.errors);
+      assertResponseSuccess(response.errors, {
+        allowExistingRecordNames: options.tolerateExisting ? batchNames : undefined
+      });
       saved.push(...(response.records ?? []));
     } catch (error) {
+      if (options.tolerateExisting && isExistsError(error)) {
+        continue;
+      }
       throwRequestError(error);
     }
   }
@@ -332,6 +470,93 @@ const manifestRecordName = async (workspaceId: string) =>
 
 const chunkRecordName = (workspaceHash: string, generation: string, index: number) =>
   `smos-chunk-${workspaceHash}-${generation}-${String(index).padStart(4, "0")}`;
+
+type ChunkLedgerEntry = { generation: string; chunkCount: number };
+
+/**
+ * Every upload writes a brand-new generation of chunk records before the
+ * manifest commits. If the chunk save or the manifest save fails, those chunks
+ * stay in the user's private database and count against their iCloud quota.
+ * This device-local ledger remembers generations it started so the next upload
+ * can delete them first instead of leaking a full workspace per failed attempt.
+ */
+const chunkLedgerKey = (workspaceHash: string) => `${CHUNK_LEDGER_KEY_PREFIX}${workspaceHash}`;
+
+const readChunkLedger = (workspaceHash: string): ChunkLedgerEntry[] => {
+  if (typeof window === "undefined") {
+    return [];
+  }
+  try {
+    const raw = window.localStorage.getItem(chunkLedgerKey(workspaceHash));
+    const parsed: unknown = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed.filter(
+      (entry): entry is ChunkLedgerEntry =>
+        isRecord(entry) &&
+        typeof entry.generation === "string" &&
+        /^[0-9a-f]{32}$/.test(entry.generation) &&
+        typeof entry.chunkCount === "number" &&
+        Number.isInteger(entry.chunkCount) &&
+        entry.chunkCount > 0 &&
+        entry.chunkCount <= MAX_CHUNK_COUNT
+    );
+  } catch {
+    return [];
+  }
+};
+
+const writeChunkLedger = (workspaceHash: string, entries: ChunkLedgerEntry[]) => {
+  if (typeof window === "undefined") {
+    return;
+  }
+  try {
+    if (entries.length === 0) {
+      window.localStorage.removeItem(chunkLedgerKey(workspaceHash));
+    } else {
+      window.localStorage.setItem(
+        chunkLedgerKey(workspaceHash),
+        JSON.stringify(entries.slice(-CHUNK_LEDGER_LIMIT))
+      );
+    }
+  } catch {
+    // Storage quota or privacy mode: cleanup is best effort.
+  }
+};
+
+const rememberPendingGeneration = (workspaceHash: string, entry: ChunkLedgerEntry) =>
+  writeChunkLedger(workspaceHash, [
+    ...readChunkLedger(workspaceHash).filter((item) => item.generation !== entry.generation),
+    entry
+  ]);
+
+const forgetGeneration = (workspaceHash: string, generation: string) =>
+  writeChunkLedger(
+    workspaceHash,
+    readChunkLedger(workspaceHash).filter((item) => item.generation !== generation)
+  );
+
+/** Delete chunk generations that earlier failed uploads left behind. */
+const sweepLeakedGenerations = async (
+  database: CloudKitDatabase,
+  workspaceHash: string,
+  liveGeneration: string | null
+) => {
+  const stale = readChunkLedger(workspaceHash).filter(
+    (entry) => entry.generation !== liveGeneration
+  );
+  for (const entry of stale) {
+    const names = Array.from({ length: entry.chunkCount }, (_, index) =>
+      chunkRecordName(workspaceHash, entry.generation, index)
+    );
+    await deleteRecordsBestEffort(database, names);
+    forgetGeneration(workspaceHash, entry.generation);
+  }
+  if (liveGeneration) {
+    forgetGeneration(workspaceHash, liveGeneration);
+  }
+};
 
 const parseManifest = (record: CloudKitRecord): CloudKitWorkspaceManifest => {
   if (
@@ -573,6 +798,11 @@ export async function uploadEncryptedWorkspaceBundleToCloudKit(
 
   const generation = await createGeneration(snapshot.workspaceId);
   const workspaceHash = (await sha256Hex(textEncoder.encode(snapshot.workspaceId))).slice(0, 40);
+  // Reclaim quota from generations a previous attempt on this device left
+  // behind, then record the one about to be written so a failure here is
+  // cleaned up by the next attempt.
+  await sweepLeakedGenerations(database, workspaceHash, existingManifest?.generation ?? null);
+  rememberPendingGeneration(workspaceHash, { generation, chunkCount });
   const chunkRecords: CloudKitRecord[] = [];
 
   for (let index = 0; index < chunkCount; index += 1) {
@@ -594,8 +824,9 @@ export async function uploadEncryptedWorkspaceBundleToCloudKit(
 
   // Generation-specific chunks are immutable. The manifest is committed only
   // after every encrypted chunk has been accepted, so readers never observe a
-  // partially uploaded workspace.
-  await saveRecords(database, chunkRecords);
+  // partially uploaded workspace. A retried batch whose first attempt did
+  // commit answers EXISTS for identical content, which counts as success.
+  await saveRecords(database, chunkRecords, { tolerateExisting: true });
 
   const now = new Date().toISOString();
   const manifestName = await manifestRecordName(snapshot.workspaceId);
@@ -626,6 +857,10 @@ export async function uploadEncryptedWorkspaceBundleToCloudKit(
       "CloudKit did not return a change tag for the saved workspace manifest."
     );
   }
+
+  // The manifest now references the new generation; this device no longer
+  // needs to clean it up.
+  forgetGeneration(workspaceHash, generation);
 
   if (existingManifest && existingManifest.generation !== generation) {
     const previousGenerationRecordNames = Array.from(
