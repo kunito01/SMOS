@@ -7,6 +7,10 @@
 <p align="center"><strong>CREATIVE PROJECT OPERATING SYSTEM</strong></p>
 
 <p align="center">
+  <a href="./tools/smos-mcp/README.md"><img src="./docs/readme/mcp-ready.svg" alt="AI Agent — MCP ready" /></a>
+</p>
+
+<p align="center">
   <a href="./README.md">English</a> · <a href="./README.zh-CN.md">简体中文</a> · <strong>日本語</strong> · <a href="./README.es.md">Español</a> · <a href="./README.pt-BR.md">Português</a> · <a href="./README.de.md">Deutsch</a> · <a href="./README.fr.md">Français</a> · <a href="./README.ru.md">Русский</a> · <a href="./README.tr.md">Türkçe</a> · <a href="./README.ko.md">한국어</a> · <a href="./README.th.md">ไทย</a>
 </p>
 
@@ -29,6 +33,7 @@
   <img src="https://img.shields.io/badge/React-19-03b5aa?style=flat-square&logo=react&logoColor=white" alt="React 19" />
   <img src="https://img.shields.io/badge/TypeScript-5-3178c6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript 5" />
   <img src="https://img.shields.io/badge/PWA-installable-5a0fc8?style=flat-square&logo=pwa&logoColor=white" alt="インストール可能な PWA" />
+  <img src="https://img.shields.io/badge/AI_Agent-MCP_ready-1c2328?style=flat-square" alt="AI Agent MCP ready" />
   <img src="https://img.shields.io/badge/data-local--first-e9e5df?style=flat-square" alt="ローカルファーストのデータ" />
   <a href="./LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-03b5aa?style=flat-square" alt="Apache License 2.0" /></a>
 </p>
@@ -82,6 +87,26 @@ Studio Map OS は、ブランド、プロジェクトグループ、プロジェ
 - **アーカイブと可搬性** — プロジェクトのアーカイブ、個別プロジェクトの書き出し、ブラウザ内にある Studio Map OS 全データのバックアップに対応します。
 - **読み取り専用共有** — プロジェクトのスナップショットに、タイムライン、成果物、人員、ツール、素材、バージョン、コストプレビューのどれを含めるか選択できます。
 - **多言語インターフェース** — 英語、簡体字中国語、日本語、スペイン語、ポルトガル語、ドイツ語、フランス語、ロシア語、トルコ語、韓国語、タイ語、および学術用途ではない娯楽版シュメール楔形文字を利用できます。
+- **AI エージェント連携（MCP）** — ローカルリレーを通じて Claude Code、Claude Desktop、Cursor、Grok Build などの MCP クライアントに開いているワークスペースを操作させます。ペアリングトークン、破壊的操作の確認、操作ログ付き。
+
+## AI エージェント連携（MCP）
+
+Studio Map OS は **MCP ready** です。お使いのコンピューター上で動作する任意の [Model Context Protocol](https://modelcontextprotocol.io) クライアント（Claude Code、Claude Desktop、Cursor、Grok Build など）が、ブラウザーで開いているワークスペースを操作できます。クラウドサービス、API キー、追加アカウントは不要です。`tools/smos-mcp` の小さなリレーは `127.0.0.1` のみで待ち受け、PWA がそこへ接続し、すべてのツール呼び出しはサインイン済みのアプリ自身があなたのデータで実行します。
+
+- **25 種のワークスペースツール** — プロジェクトの一覧と参照、プロジェクト・ステータス・タイムライン・タスクの作成や更新、スケジュール全体の移動、会社・プロジェクトグループ・ライブラリ・コスト集計・年度決算の参照、ウィッシュリスト・USAGE・TestFlight リマインダーの管理。
+- **動的なツール一覧** — リレーはアプリにツール一覧を問い合わせるため、新機能はエージェントを再設定せずに利用できます。
+- **安全がデフォルト** — ペアリングトークンがローカルソケットを保護し、破壊的ツール（`archive_project`、`delete_project`）は `confirm: true` なしでは実行されず、すべての呼び出しはアーカイブページの操作ログに記録されます。
+- **クラウド同期を考慮** — 各呼び出しの前にアプリが最新の CloudKit コピーを取得し、呼び出し直後に変更をアップロードするため、他のデバイスは次に前面へ戻ったときに変更を受け取ります。
+
+**アーカイブ → エージェント接続** で有効にし、ペアリングトークンをコピーして、リレーをエージェントに登録します（以下は Claude Code の例。他のクライアントは同じカードに表示される JSON スニペットを使用します）:
+
+```bash
+claude mcp add studio-map-os \
+  -e SMOS_AGENT_TOKEN=<token> -e SMOS_AGENT_PORT=3391 \
+  -- node /absolute/path/to/Codex/tools/smos-mcp/index.mjs
+```
+
+エージェントの作業中は Studio Map OS を開いたままにしてください（ホスト版は Chrome、ローカル開発サーバーは任意のブラウザー）。セットアップの詳細とトラブルシューティングは [`tools/smos-mcp/README.md`](./tools/smos-mcp/README.md) を参照してください。
 
 ## 技術構成
 
@@ -248,6 +273,7 @@ lib/types/            ドメインモデル
 lib/utils/            予算、通貨、フェーズ、リリースのユーティリティ
 public/               ブランドアセット、PWA アイコン、生成済み Worker バンドル
 scripts/              可搬型 PWA のビルドおよびパッケージングスクリプト
+tools/smos-mcp/       AI エージェントが開いているワークスペースを操作するためのローカル MCP リレー
 ```
 
 ## 品質チェック

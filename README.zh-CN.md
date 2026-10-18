@@ -7,6 +7,10 @@
 <p align="center"><strong>创意项目操作系统</strong></p>
 
 <p align="center">
+  <a href="./tools/smos-mcp/README.md"><img src="./docs/readme/mcp-ready.svg" alt="AI Agent — MCP ready" /></a>
+</p>
+
+<p align="center">
   <a href="./README.md">English</a> · <strong>简体中文</strong> · <a href="./README.ja.md">日本語</a> · <a href="./README.es.md">Español</a> · <a href="./README.pt-BR.md">Português</a> · <a href="./README.de.md">Deutsch</a> · <a href="./README.fr.md">Français</a> · <a href="./README.ru.md">Русский</a> · <a href="./README.tr.md">Türkçe</a> · <a href="./README.ko.md">한국어</a> · <a href="./README.th.md">ไทย</a>
 </p>
 
@@ -29,6 +33,7 @@
   <img src="https://img.shields.io/badge/React-19-03b5aa?style=flat-square&logo=react&logoColor=white" alt="React 19" />
   <img src="https://img.shields.io/badge/TypeScript-5-3178c6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript 5" />
   <img src="https://img.shields.io/badge/PWA-可安装-5a0fc8?style=flat-square&logo=pwa&logoColor=white" alt="可安装 PWA" />
+  <img src="https://img.shields.io/badge/AI_Agent-MCP_ready-1c2328?style=flat-square" alt="AI Agent MCP ready" />
   <img src="https://img.shields.io/badge/数据-本地优先-e9e5df?style=flat-square" alt="本地优先数据" />
   <a href="./LICENSE"><img src="https://img.shields.io/badge/许可证-Apache--2.0-03b5aa?style=flat-square" alt="Apache 2.0 许可证" /></a>
 </p>
@@ -82,6 +87,26 @@ Studio Map OS 将品牌、项目组、项目、人员、软件工具、成本、
 - **归档与可移植性**：归档项目，导出单项目文件，或备份整个浏览器中的 Studio Map OS 数据。
 - **只读分享**：按项目选择可公开的时间表、交付物、人员、工具、素材、版本和成本预览。
 - **多语言界面**：支持英语、简体中文、日语、西班牙语、葡萄牙语、德语、法语、俄语、土耳其语、韩语、泰语，以及明确不具学术性质的娱乐版苏美尔楔形文字。
+- **AI 智能体接入（MCP）**：通过本地中继让 Claude Code、Claude Desktop、Cursor、Grok Build 或任意 MCP 客户端操作已打开的工作区，带配对令牌、破坏性操作确认和操作日志。
+
+## AI 智能体接入（MCP）
+
+Studio Map OS 已 **MCP ready**。运行在你电脑上的任何 [Model Context Protocol](https://modelcontextprotocol.io) 客户端（Claude Code、Claude Desktop、Cursor、Grok Build 等）都可以操作浏览器里打开的工作区。不经过任何云服务、API Key 或额外账号：`tools/smos-mcp` 里的小型中继只监听 `127.0.0.1`，PWA 主动连上它，每一次工具调用都由已登录的应用用你自己的数据执行。
+
+- **25 个工作区工具**：列出和查看项目，创建或更新项目、状态、时间表和任务，整体平移进度，读取公司、项目组、资源库、成本汇总和年度结算，管理愿望清单、USAGE 与 TestFlight 提醒。
+- **动态工具列表**：中继向应用索取工具清单，新功能无需重新配置智能体即可出现。
+- **默认安全**：配对令牌保护本地端口；破坏性工具（`archive_project`、`delete_project`）必须带 `confirm: true` 才会执行；每次调用都记录在档案馆的操作日志里。
+- **云同步感知**：每次调用前应用先拉取最新的 CloudKit 副本，调用后立即上传，你的其他设备会在下次回到前台时同步到。
+
+在 **档案馆 → Agent 接入** 中开启，复制配对令牌，然后把中继注册到你的智能体（下面以 Claude Code 为例，其他客户端使用同一卡片上显示的 JSON 片段）：
+
+```bash
+claude mcp add studio-map-os \
+  -e SMOS_AGENT_TOKEN=<token> -e SMOS_AGENT_PORT=3391 \
+  -- node /absolute/path/to/Codex/tools/smos-mcp/index.mjs
+```
+
+智能体工作期间请保持 Studio Map OS 打开：线上版本需使用 Chrome，本地开发服务器可用任意浏览器。安装细节与排错见 [`tools/smos-mcp/README.md`](./tools/smos-mcp/README.md)。
 
 ## 技术栈
 
@@ -248,6 +273,7 @@ lib/types/            领域数据模型
 lib/utils/            预算、货币、阶段与发布工具
 public/               品牌资源、PWA 图标与生成后的 Worker
 scripts/              便携 PWA 构建与打包脚本
+tools/smos-mcp/       让 AI 智能体操作已打开工作区的本地 MCP 中继
 ```
 
 ## 质量检查

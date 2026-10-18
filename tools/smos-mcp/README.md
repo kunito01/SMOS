@@ -1,7 +1,7 @@
 # smos-mcp — Studio Map OS agent bridge
 
 A tiny local [MCP](https://modelcontextprotocol.io) server that lets AI agents
-(Claude Code, Grok desktop, any MCP client) operate the Studio Map OS workspace
+(Claude Code, Claude Desktop, Cursor, Grok Build, any MCP client) operate the Studio Map OS workspace
 that is open in your browser. Nothing leaves your machine: the relay listens on
 `127.0.0.1` only, the PWA connects to it, and every tool call is executed by the
 PWA itself with your signed-in workspace.
@@ -23,6 +23,13 @@ PWA itself with your signed-in workspace.
    claude mcp add studio-map-os \
      -e SMOS_AGENT_TOKEN=<token> -e SMOS_AGENT_PORT=3391 \
      -- node /absolute/path/to/Codex/tools/smos-mcp/index.mjs
+   ```
+
+   Grok Build (xAI's CLI) takes the same server as a local stdio command:
+
+   ```bash
+   grok mcp add studio-map-os -- env SMOS_AGENT_TOKEN=<token> SMOS_AGENT_PORT=3391 \
+     node /absolute/path/to/Codex/tools/smos-mcp/index.mjs
    ```
 
    Other clients take the equivalent JSON:

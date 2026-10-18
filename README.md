@@ -7,6 +7,10 @@
 <p align="center"><strong>CREATIVE PROJECT OPERATING SYSTEM</strong></p>
 
 <p align="center">
+  <a href="./tools/smos-mcp/README.md"><img src="./docs/readme/mcp-ready.svg" alt="AI Agent — MCP ready" /></a>
+</p>
+
+<p align="center">
   <strong>English</strong> · <a href="./README.zh-CN.md">简体中文</a> · <a href="./README.ja.md">日本語</a> · <a href="./README.es.md">Español</a> · <a href="./README.pt-BR.md">Português</a> · <a href="./README.de.md">Deutsch</a> · <a href="./README.fr.md">Français</a> · <a href="./README.ru.md">Русский</a> · <a href="./README.tr.md">Türkçe</a> · <a href="./README.ko.md">한국어</a> · <a href="./README.th.md">ไทย</a>
 </p>
 
@@ -29,6 +33,7 @@
   <img src="https://img.shields.io/badge/React-19-03b5aa?style=flat-square&logo=react&logoColor=white" alt="React 19" />
   <img src="https://img.shields.io/badge/TypeScript-5-3178c6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript 5" />
   <img src="https://img.shields.io/badge/PWA-installable-5a0fc8?style=flat-square&logo=pwa&logoColor=white" alt="Installable PWA" />
+  <img src="https://img.shields.io/badge/AI_Agent-MCP_ready-1c2328?style=flat-square" alt="AI Agent MCP ready" />
   <img src="https://img.shields.io/badge/data-local--first-e9e5df?style=flat-square" alt="Local-first data" />
   <a href="./LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-03b5aa?style=flat-square" alt="Apache License 2.0" /></a>
 </p>
@@ -82,6 +87,26 @@ The current version is an installable, local-first PWA. Business data stays on t
 - **Archive and portability** — archive projects, export an individual project, or back up all Studio Map OS data in the browser.
 - **Read-only sharing** — choose whether a project snapshot includes timelines, deliverables, people, tools, materials, versions, and cost previews.
 - **International interface** — use English, Simplified Chinese, Japanese, Spanish, Portuguese, German, French, Russian, Turkish, Korean, Thai, or the explicitly non-academic Sumerian cuneiform entertainment locale.
+- **AI agent access (MCP)** — let Claude Code, Claude Desktop, Cursor, Grok Build, or any MCP client operate the open workspace through a local relay, with a pairing token, confirmation for destructive tools, and an action log.
+
+## AI agent access (MCP)
+
+Studio Map OS is **MCP ready**. Any [Model Context Protocol](https://modelcontextprotocol.io) client running on your computer — Claude Code, Claude Desktop, Cursor, Grok Build, and others — can operate the workspace that is open in your browser. No cloud service, API key, or extra account is involved: a small relay in `tools/smos-mcp` listens on `127.0.0.1` only, the PWA connects to it, and every tool call is executed by the signed-in app with your own data.
+
+- **25 workspace tools** — list and inspect projects, create or update projects, status, timelines, and tasks, shift a whole schedule, read companies, groups, libraries, cost summaries, and fiscal-year reports, and manage wish-list, USAGE, and TestFlight reminders.
+- **Dynamic tool list** — the relay asks the app for its tools, so new capabilities appear without reconfiguring the agent.
+- **Safe by default** — a pairing token guards the local socket, destructive tools (`archive_project`, `delete_project`) refuse to run without `confirm: true`, and every call is recorded in the action log on the Archive page.
+- **Cloud aware** — before each call the app pulls the latest CloudKit copy, and right after it uploads the change, so your other devices pick it up on their next foreground sync.
+
+Turn it on under **Archive → Agent access**, copy the pairing token, and register the relay with your agent (Claude Code shown; other clients use the JSON snippet displayed on the same card):
+
+```bash
+claude mcp add studio-map-os \
+  -e SMOS_AGENT_TOKEN=<token> -e SMOS_AGENT_PORT=3391 \
+  -- node /absolute/path/to/Codex/tools/smos-mcp/index.mjs
+```
+
+Keep Studio Map OS open in Chrome (hosted app) or in any browser (local dev server) while the agent works. Setup details and troubleshooting: [`tools/smos-mcp/README.md`](./tools/smos-mcp/README.md).
 
 ## Technology
 
@@ -248,6 +273,7 @@ lib/types/            Domain models
 lib/utils/            Budget, currency, phase, and release utilities
 public/               Brand assets, PWA icons, and generated Worker bundles
 scripts/              Portable PWA build and packaging scripts
+tools/smos-mcp/       Local MCP relay that lets AI agents operate the open workspace
 ```
 
 ## Quality checks

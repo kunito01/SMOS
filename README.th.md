@@ -7,6 +7,10 @@
 <p align="center"><strong>CREATIVE PROJECT OPERATING SYSTEM</strong></p>
 
 <p align="center">
+  <a href="./tools/smos-mcp/README.md"><img src="./docs/readme/mcp-ready.svg" alt="AI Agent — MCP ready" /></a>
+</p>
+
+<p align="center">
   <a href="./README.md">English</a> · <a href="./README.zh-CN.md">简体中文</a> · <a href="./README.ja.md">日本語</a> · <a href="./README.es.md">Español</a> · <a href="./README.pt-BR.md">Português</a> · <a href="./README.de.md">Deutsch</a> · <a href="./README.fr.md">Français</a> · <a href="./README.ru.md">Русский</a> · <a href="./README.tr.md">Türkçe</a> · <a href="./README.ko.md">한국어</a> · <strong>ไทย</strong>
 </p>
 
@@ -29,6 +33,7 @@
   <img src="https://img.shields.io/badge/React-19-03b5aa?style=flat-square&logo=react&logoColor=white" alt="React 19" />
   <img src="https://img.shields.io/badge/TypeScript-5-3178c6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript 5" />
   <img src="https://img.shields.io/badge/PWA-installable-5a0fc8?style=flat-square&logo=pwa&logoColor=white" alt="PWA ที่ติดตั้งได้" />
+  <img src="https://img.shields.io/badge/AI_Agent-MCP_ready-1c2328?style=flat-square" alt="AI Agent MCP ready" />
   <img src="https://img.shields.io/badge/data-local--first-e9e5df?style=flat-square" alt="ข้อมูลแบบให้ความสำคัญกับข้อมูลในเครื่อง" />
   <a href="./LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-03b5aa?style=flat-square" alt="Apache License 2.0" /></a>
 </p>
@@ -82,6 +87,26 @@ Studio Map OS เชื่อมโยงแบรนด์ กลุ่มโ�
 - **คลังเก็บและการเคลื่อนย้ายข้อมูล** — เก็บโครงการถาวร ส่งออกโครงการแต่ละรายการ หรือสำรองข้อมูล Studio Map OS ทั้งหมดในเบราว์เซอร์
 - **การแชร์แบบอ่านอย่างเดียว** — เลือกว่าจะให้สแนปช็อตโครงการมีไทม์ไลน์ ผลงานส่งมอบ บุคลากร เครื่องมือ สื่อ เวอร์ชัน และตัวอย่างต้นทุนหรือไม่
 - **อินเทอร์เฟซหลายภาษา** — ใช้งานได้ในภาษาอังกฤษ จีนตัวย่อ ญี่ปุ่น สเปน โปรตุเกส เยอรมัน ฝรั่งเศส รัสเซีย ตุรกี เกาหลี ไทย หรือตัวเลือกอักษรลิ่มสุเมเรียนเพื่อความบันเทิงที่ระบุชัดว่าไม่ใช่เชิงวิชาการ
+- **การเข้าถึงสำหรับ AI agent (MCP)** — ให้ Claude Code, Claude Desktop, Cursor, Grok Build หรือไคลเอนต์ MCP ใดก็ได้สั่งงานพื้นที่ทำงานที่เปิดอยู่ผ่านรีเลย์ภายในเครื่อง พร้อมโทเคนจับคู่ การยืนยันสำหรับเครื่องมือที่ทำลายข้อมูล และบันทึกการดำเนินการ
+
+## การเข้าถึงสำหรับ AI agent (MCP)
+
+Studio Map OS **พร้อมใช้กับ MCP** ไคลเอนต์ [Model Context Protocol](https://modelcontextprotocol.io) ใดก็ตามที่รันอยู่บนคอมพิวเตอร์ของคุณ (Claude Code, Claude Desktop, Cursor, Grok Build และอื่น ๆ) สามารถสั่งงานพื้นที่ทำงานที่เปิดอยู่ในเบราว์เซอร์ได้ โดยไม่ต้องใช้บริการคลาวด์ คีย์ API หรือบัญชีเพิ่มเติม: รีเลย์ขนาดเล็กใน `tools/smos-mcp` รับฟังเฉพาะที่ `127.0.0.1` PWA จะเชื่อมต่อเข้าไป และทุกการเรียกใช้เครื่องมือจะถูกดำเนินการโดยแอปที่ลงชื่อเข้าใช้อยู่ด้วยข้อมูลของคุณเอง
+
+- **เครื่องมือพื้นที่ทำงาน 25 รายการ** — แสดงรายการและตรวจดูโปรเจกต์ สร้างหรืออัปเดตโปรเจกต์ สถานะ ไทม์ไลน์และงาน เลื่อนกำหนดการทั้งชุด อ่านข้อมูลบริษัท กลุ่ม คลังข้อมูล สรุปต้นทุนและรายงานปีงบประมาณ รวมถึงจัดการรายการสิ่งที่อยากได้และการแจ้งเตือน USAGE กับ TestFlight
+- **รายการเครื่องมือแบบไดนามิก** — รีเลย์ขอรายการเครื่องมือจากแอป ความสามารถใหม่จึงปรากฏโดยไม่ต้องตั้งค่า agent ใหม่
+- **ปลอดภัยโดยค่าเริ่มต้น** — โทเคนจับคู่ปกป้องซ็อกเก็ตภายในเครื่อง เครื่องมือที่ทำลายข้อมูล (`archive_project`, `delete_project`) จะไม่ทำงานหากไม่มี `confirm: true` และทุกการเรียกจะถูกบันทึกในบันทึกการดำเนินการบนหน้าคลังเก็บ
+- **รับรู้การซิงก์คลาวด์** — ก่อนการเรียกแต่ละครั้งแอปจะดึงสำเนา CloudKit ล่าสุด และอัปโหลดการเปลี่ยนแปลงทันทีหลังจากนั้น อุปกรณ์อื่นของคุณจึงได้รับการเปลี่ยนแปลงในการซิงก์เบื้องหน้าครั้งถัดไป
+
+เปิดใช้งานที่ **คลังเก็บ → การเข้าถึงของ agent** คัดลอกโทเคนจับคู่ แล้วลงทะเบียนรีเลย์กับ agent ของคุณ (ตัวอย่างด้านล่างคือ Claude Code ส่วนไคลเอนต์อื่นใช้ส่วนย่อย JSON ที่แสดงบนการ์ดเดียวกัน):
+
+```bash
+claude mcp add studio-map-os \
+  -e SMOS_AGENT_TOKEN=<token> -e SMOS_AGENT_PORT=3391 \
+  -- node /absolute/path/to/Codex/tools/smos-mcp/index.mjs
+```
+
+เปิด Studio Map OS ค้างไว้ใน Chrome (แอปที่โฮสต์) หรือเบราว์เซอร์ใดก็ได้ (เซิร์ฟเวอร์พัฒนาภายในเครื่อง) ระหว่างที่ agent ทำงาน รายละเอียดการติดตั้งและการแก้ปัญหา: [`tools/smos-mcp/README.md`](./tools/smos-mcp/README.md)
 
 ## เทคโนโลยี
 
@@ -248,6 +273,7 @@ lib/types/            โมเดลโดเมน
 lib/utils/            ยูทิลิตีสำหรับงบประมาณ สกุลเงิน ขั้นตอน และการเผยแพร่
 public/               สินทรัพย์แบรนด์ ไอคอน PWA และชุด Worker ที่สร้างแล้ว
 scripts/              สคริปต์บิลด์และแพ็กเกจ PWA แบบพกพา
+tools/smos-mcp/       รีเลย์ MCP ภายในเครื่องที่ให้ AI agent สั่งงานพื้นที่ทำงานที่เปิดอยู่
 ```
 
 ## การตรวจสอบคุณภาพ

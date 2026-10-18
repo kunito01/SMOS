@@ -7,6 +7,10 @@
 <p align="center"><strong>SISTEMA OPERATIVO PARA PROYECTOS CREATIVOS</strong></p>
 
 <p align="center">
+  <a href="./tools/smos-mcp/README.md"><img src="./docs/readme/mcp-ready.svg" alt="AI Agent — MCP ready" /></a>
+</p>
+
+<p align="center">
   <a href="./README.md">English</a> · <a href="./README.zh-CN.md">简体中文</a> · <a href="./README.ja.md">日本語</a> · <strong>Español</strong> · <a href="./README.pt-BR.md">Português</a> · <a href="./README.de.md">Deutsch</a> · <a href="./README.fr.md">Français</a> · <a href="./README.ru.md">Русский</a> · <a href="./README.tr.md">Türkçe</a> · <a href="./README.ko.md">한국어</a> · <a href="./README.th.md">ไทย</a>
 </p>
 
@@ -29,6 +33,7 @@
   <img src="https://img.shields.io/badge/React-19-03b5aa?style=flat-square&logo=react&logoColor=white" alt="React 19" />
   <img src="https://img.shields.io/badge/TypeScript-5-3178c6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript 5" />
   <img src="https://img.shields.io/badge/PWA-installable-5a0fc8?style=flat-square&logo=pwa&logoColor=white" alt="PWA instalable" />
+  <img src="https://img.shields.io/badge/AI_Agent-MCP_ready-1c2328?style=flat-square" alt="AI Agent MCP ready" />
   <img src="https://img.shields.io/badge/data-local--first-e9e5df?style=flat-square" alt="Datos local-first" />
   <a href="./LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-03b5aa?style=flat-square" alt="Apache License 2.0" /></a>
 </p>
@@ -82,6 +87,26 @@ La versión actual es una PWA instalable y local-first. Los datos de negocio per
 - **Archivo y portabilidad** — archiva proyectos, exporta un proyecto concreto o crea una copia de seguridad de todos los datos de Studio Map OS en el navegador.
 - **Uso compartido de solo lectura** — elige si una instantánea del proyecto incluye cronogramas, entregables, personas, herramientas, materiales, versiones y vistas previas de costes.
 - **Interfaz internacional** — utiliza inglés, chino simplificado, japonés, español, portugués, alemán, francés, ruso, turco, coreano, tailandés o la opción recreativa de cuneiforme sumerio, expresamente no académica.
+- **Acceso para agentes de IA (MCP)** — permite que Claude Code, Claude Desktop, Cursor, Grok Build o cualquier cliente MCP opere el espacio de trabajo abierto a través de un relé local, con token de emparejamiento, confirmación para herramientas destructivas y registro de acciones.
+
+## Acceso para agentes de IA (MCP)
+
+Studio Map OS está **listo para MCP**. Cualquier cliente de [Model Context Protocol](https://modelcontextprotocol.io) que se ejecute en tu equipo (Claude Code, Claude Desktop, Cursor, Grok Build y otros) puede operar el espacio de trabajo abierto en tu navegador. No interviene ningún servicio en la nube, clave de API ni cuenta adicional: un pequeño relé en `tools/smos-mcp` escucha solo en `127.0.0.1`, la PWA se conecta a él y cada llamada a una herramienta la ejecuta la propia aplicación con tu sesión y tus datos.
+
+- **25 herramientas del espacio de trabajo** — listar e inspeccionar proyectos, crear o actualizar proyectos, estados, cronogramas y tareas, desplazar un calendario completo, consultar empresas, grupos, bibliotecas, resúmenes de costes e informes por ejercicio fiscal, y gestionar la lista de deseos y los recordatorios de USAGE y TestFlight.
+- **Lista de herramientas dinámica** — el relé pide las herramientas a la aplicación, así que las nuevas capacidades aparecen sin reconfigurar el agente.
+- **Seguro por defecto** — un token de emparejamiento protege el socket local, las herramientas destructivas (`archive_project`, `delete_project`) no se ejecutan sin `confirm: true` y cada llamada queda registrada en el historial de acciones de la página Archivo.
+- **Consciente de la nube** — antes de cada llamada la aplicación descarga la copia más reciente de CloudKit y justo después sube el cambio, de modo que tus otros dispositivos lo reciben en su siguiente sincronización en primer plano.
+
+Actívalo en **Archivo → Acceso de agentes**, copia el token de emparejamiento y registra el relé en tu agente (se muestra Claude Code; otros clientes usan el fragmento JSON que aparece en la misma tarjeta):
+
+```bash
+claude mcp add studio-map-os \
+  -e SMOS_AGENT_TOKEN=<token> -e SMOS_AGENT_PORT=3391 \
+  -- node /absolute/path/to/Codex/tools/smos-mcp/index.mjs
+```
+
+Mantén Studio Map OS abierto en Chrome (aplicación alojada) o en cualquier navegador (servidor de desarrollo local) mientras el agente trabaja. Detalles de configuración y resolución de problemas: [`tools/smos-mcp/README.md`](./tools/smos-mcp/README.md).
 
 ## Tecnología
 
@@ -248,6 +273,7 @@ lib/types/            Modelos de dominio
 lib/utils/            Utilidades de presupuestos, divisas, fases y lanzamientos
 public/               Recursos de marca, iconos PWA y paquetes Worker generados
 scripts/              Scripts de compilación y empaquetado de la PWA portátil
+tools/smos-mcp/       Relé MCP local que permite a los agentes de IA operar el espacio de trabajo abierto
 ```
 
 ## Comprobaciones de calidad

@@ -7,6 +7,10 @@
 <p align="center"><strong>YARATICI PROJE İŞLETİM SİSTEMİ</strong></p>
 
 <p align="center">
+  <a href="./tools/smos-mcp/README.md"><img src="./docs/readme/mcp-ready.svg" alt="AI Agent — MCP ready" /></a>
+</p>
+
+<p align="center">
   <a href="./README.md">English</a> · <a href="./README.zh-CN.md">简体中文</a> · <a href="./README.ja.md">日本語</a> · <a href="./README.es.md">Español</a> · <a href="./README.pt-BR.md">Português</a> · <a href="./README.de.md">Deutsch</a> · <a href="./README.fr.md">Français</a> · <a href="./README.ru.md">Русский</a> · <strong>Türkçe</strong> · <a href="./README.ko.md">한국어</a> · <a href="./README.th.md">ไทย</a>
 </p>
 
@@ -29,6 +33,7 @@
   <img src="https://img.shields.io/badge/React-19-03b5aa?style=flat-square&logo=react&logoColor=white" alt="React 19" />
   <img src="https://img.shields.io/badge/TypeScript-5-3178c6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript 5" />
   <img src="https://img.shields.io/badge/PWA-installable-5a0fc8?style=flat-square&logo=pwa&logoColor=white" alt="Kurulabilir PWA" />
+  <img src="https://img.shields.io/badge/AI_Agent-MCP_ready-1c2328?style=flat-square" alt="AI Agent MCP ready" />
   <img src="https://img.shields.io/badge/data-local--first-e9e5df?style=flat-square" alt="Local-First veriler" />
   <a href="./LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-03b5aa?style=flat-square" alt="Apache License 2.0" /></a>
 </p>
@@ -82,6 +87,26 @@ Mevcut sürüm, kurulabilir ve Local-First bir PWA'dır. İş verileri cihazda k
 - **Arşiv ve taşınabilirlik** — projeleri arşivleyin, tek bir projeyi dışa aktarın veya tarayıcıdaki tüm Studio Map OS verilerini yedekleyin.
 - **Salt okunur paylaşım** — proje anlık görüntüsünün zaman çizelgelerini, teslimatları, kişileri, araçları, malzemeleri, sürümleri ve maliyet önizlemelerini içerip içermeyeceğini seçin.
 - **Uluslararası arayüz** — İngilizce, Basitleştirilmiş Çince, Japonca, İspanyolca, Portekizce, Almanca, Fransızca, Rusça, Türkçe, Korece, Tayca veya açıkça akademik olmayan eğlencelik Sümer çivi yazısını kullanın.
+- **Yapay zekâ ajanı erişimi (MCP)** — Claude Code, Claude Desktop, Cursor, Grok Build veya herhangi bir MCP istemcisinin açık çalışma alanını yerel bir aktarıcı üzerinden yönetmesine izin verin; eşleştirme belirteci, yıkıcı araçlar için onay ve işlem günlüğü ile.
+
+## Yapay Zekâ Ajanı Erişimi (MCP)
+
+Studio Map OS **MCP'ye hazırdır**. Bilgisayarınızda çalışan herhangi bir [Model Context Protocol](https://modelcontextprotocol.io) istemcisi (Claude Code, Claude Desktop, Cursor, Grok Build ve diğerleri) tarayıcınızda açık olan çalışma alanını yönetebilir. Hiçbir bulut hizmeti, API anahtarı veya ek hesap gerekmez: `tools/smos-mcp` içindeki küçük bir aktarıcı yalnızca `127.0.0.1` üzerinde dinler, PWA ona bağlanır ve her araç çağrısı oturum açmış uygulamanın kendisi tarafından sizin verilerinizle yürütülür.
+
+- **25 çalışma alanı aracı** — projeleri listeleme ve inceleme; proje, durum, zaman çizelgesi ve görev oluşturma veya güncelleme; tüm takvimi kaydırma; şirketleri, grupları, kitaplıkları, maliyet özetlerini ve mali yıl raporlarını okuma; istek listesi ile USAGE ve TestFlight hatırlatmalarını yönetme.
+- **Dinamik araç listesi** — aktarıcı araçları uygulamadan ister; yeni yetenekler ajanı yeniden yapılandırmadan görünür.
+- **Varsayılan olarak güvenli** — eşleştirme belirteci yerel soketi korur, yıkıcı araçlar (`archive_project`, `delete_project`) `confirm: true` olmadan çalışmaz ve her çağrı Arşiv sayfasındaki işlem günlüğüne yazılır.
+- **Bulut bilinçli** — her çağrıdan önce uygulama en güncel CloudKit kopyasını çeker ve hemen ardından değişikliği yükler; böylece diğer cihazlarınız bir sonraki ön plan eşitlemesinde değişikliği alır.
+
+**Arşiv → Ajan erişimi** altında etkinleştirin, eşleştirme belirtecini kopyalayın ve aktarıcıyı ajanınıza kaydedin (Claude Code gösterilmiştir; diğer istemciler aynı kartta görüntülenen JSON parçasını kullanır):
+
+```bash
+claude mcp add studio-map-os \
+  -e SMOS_AGENT_TOKEN=<token> -e SMOS_AGENT_PORT=3391 \
+  -- node /absolute/path/to/Codex/tools/smos-mcp/index.mjs
+```
+
+Ajan çalışırken Studio Map OS'i Chrome'da (barındırılan uygulama) veya herhangi bir tarayıcıda (yerel geliştirme sunucusu) açık tutun. Kurulum ayrıntıları ve sorun giderme: [`tools/smos-mcp/README.md`](./tools/smos-mcp/README.md).
 
 ## Teknoloji
 
@@ -248,6 +273,7 @@ lib/types/            Alan modelleri
 lib/utils/            Bütçe, para birimi, aşama ve yayın yardımcıları
 public/               Marka varlıkları, PWA simgeleri ve oluşturulan Worker paketleri
 scripts/              Taşınabilir PWA derleme ve paketleme betikleri
+tools/smos-mcp/       Yapay zekâ ajanlarının açık çalışma alanını yönetmesini sağlayan yerel MCP aktarıcısı
 ```
 
 ## Kalite Kontrolleri
