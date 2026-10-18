@@ -43,6 +43,7 @@ import {
 import type { CostItem, CostLibraryItem, Person, Project, ProjectBudget, Tool } from "@/lib/types";
 import { projectPath } from "@/lib/utils/app-routes";
 import { cn } from "@/lib/utils/cn";
+import { registerUnsavedWork } from "@/lib/utils/unsaved-work";
 import { createEmptyProjectBudget } from "@/lib/utils/project-budget";
 
 type ProjectCostsData = {
@@ -267,6 +268,8 @@ export function ProjectCostsPage({ projectId }: { projectId: string }) {
     window.addEventListener("beforeunload", handleBeforeUnload);
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, [isBudgetDirty]);
+
+  useEffect(() => (isBudgetDirty ? registerUnsavedWork("project-budget") : undefined), [isBudgetDirty]);
 
   const confirmBudgetNavigation = useCallback(
     (proceed: () => void) => {

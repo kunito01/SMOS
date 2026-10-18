@@ -38,6 +38,7 @@ import { languageLocales } from "@/lib/i18n/translations";
 import { projectPath } from "@/lib/utils/app-routes";
 import { AgentBridgeClient } from "@/components/layout/agent-bridge-client";
 import { GoogleCalendarAutoSync } from "@/components/layout/google-calendar-auto-sync";
+import { WorkspaceForegroundSync } from "@/components/layout/workspace-foreground-sync";
 import { cn } from "@/lib/utils/cn";
 import {
   getSystemNotificationPermission,
@@ -643,6 +644,7 @@ export function AppShell({ beforeNavigate, children }: AppShellProps) {
 
           <GoogleCalendarAutoSync />
           <AgentBridgeClient />
+          <WorkspaceForegroundSync />
           {children}
           <SiteFooter dockSafe />
         </main>

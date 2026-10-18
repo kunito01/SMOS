@@ -1,6 +1,8 @@
 "use client";
 
 import { getActiveMockDatabaseWorkspaceId } from "@/lib/api/mock-persistence";
+import { scheduleWorkspaceCloudUpload } from "@/lib/storage/workspace-sync-coordinator";
+import { pullWorkspaceFromCloud } from "@/lib/storage/workspace-foreground-sync";
 import { listAgentTools, runAgentTool } from "@/lib/integrations/agent-tools";
 
 /**
@@ -15,6 +17,7 @@ export const AGENT_BRIDGE_SETTINGS_EVENT = "smos:agent-bridge-settings";
 const SETTINGS_KEY_PREFIX = "studio-map-os.agent-bridge:";
 const LOG_LIMIT = 50;
 const RECONNECT_MIN_MS = 2_000;
+const AGENT_PULL_INTERVAL_MS = 15_000;
 const RECONNECT_MAX_MS = 15_000;
 
 export type AgentBridgeSettings = {
@@ -183,7 +186,15 @@ export const startAgentBridge = (workspaceId: string) => {
     if (request.method === "call_tool") {
       const name = request.name ?? "";
       try {
+        // Work on the latest cloud copy, then push the agent's change straight back up.
+        const pulled = await pullWorkspaceFromCloud(workspaceId, { minIntervalMs: AGENT_PULL_INTERVAL_MS });
+        if (pulled.status === "skipped" && pulled.reason === "conflict") {
+          throw new Error(
+            "The workspace has an unresolved CloudKit conflict. Ask the user to pick a side on the Archive page first."
+          );
+        }
         const result = await runAgentTool(name, request.args);
+        scheduleWorkspaceCloudUpload(workspaceId, 0);
         appendLog(workspaceId, { at: new Date().toISOString(), tool: name, ok: true, summary: summarizeArgs(request.args) });
         return result;
       } catch (error) {

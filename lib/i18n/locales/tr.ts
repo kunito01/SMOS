@@ -841,7 +841,7 @@ export const trTranslations = {
   googleCalendarScopeNote: "SMOS yalnızca kendi oluşturduğu takvimi okur ve yazar, diğer takvimlerinize dokunmaz; örnek ve arşivlenmiş projeler gönderilmez.",
   agentBridgeEyebrow: "Agent erişimi",
   agentBridgeTitle: "AI agent köprüsü (MCP)",
-  agentBridgeBody: "Açıkken bu Mac'teki MCP uyumlu agent'lar (Claude Code, Grok vb.) tools/smos-mcp aktarıcısı üzerinden oturum açık çalışma alanında çalışabilir: projeleri okur, görevleri tamamlar, zaman çizelgesini düzenler, ödemeleri kaydeder, dilek ve hatırlatıcı ekler. Veriler bu makineden çıkmaz; silme ve arşivleme için agent'ın onayı gerekir.",
+  agentBridgeBody: "Açıkken bu Mac'teki MCP uyumlu agent'lar (Claude Code, Grok vb.) tools/smos-mcp aktarıcısı üzerinden oturum açık çalışma alanında çalışabilir: projeleri okur, görevleri tamamlar, zaman çizelgesini düzenler, ödemeleri kaydeder, dilek ve hatırlatıcı ekler. Veriler bu makineden çıkmaz; silme ve arşivleme için agent'ın onayı gerekir. Agent her çağrıdan önce güncel bulut kopyasını çeker ve hemen ardından yükler; diğer cihazlarınız ön plana döndüğünde eşitlenir.",
   agentBridgeEnable: "AI agent'lara izin ver",
   agentBridgeStatusOff: "Kapalı",
   agentBridgeStatusConnecting: "Yerel aktarıcı bekleniyor…",
