@@ -7,6 +7,7 @@ import {
 import {
   assertCloudKitAuthenticatedUser,
   CloudKitClientError,
+  describeLastFailedCloudKitResponse,
   getCloudKitConfigurationStatus,
   getCloudKitUserRecordName,
   setUpCloudKitAuth,
@@ -130,7 +131,11 @@ const noteLocalSaveRevision = (workspaceId: string) => {
 };
 
 const GENERIC_REQUEST_FAILURE = "The CloudKit request failed.";
-const MAX_FAILURE_DETAIL_LENGTH = 240;
+const MAX_FAILURE_DETAIL_LENGTH = 320;
+
+/** Loose comparison so "CODE: text" and "CODE · text" count as the same detail. */
+const normalizeDetail = (text: string) =>
+  text.toLowerCase().replace(/[\s·:—–-]+/g, " ").trim();
 
 /** Never let a CloudKit API token or web-auth session leak into a visible message. */
 const scrubSecrets = (text: string) =>
@@ -169,7 +174,9 @@ const describeFailureCause = (cause: unknown): string => {
       : "";
   const reason = pick("reason", "message");
   const name = cause instanceof Error && !code ? cause.name : "";
-  const parts = [code, status, reason || name].filter(Boolean);
+  // CloudKit JS messages already start with the code ("UNEXPECTED_SERVER_RESPONSE: …").
+  const codeAlreadyInReason = Boolean(code) && reason.toUpperCase().startsWith(code);
+  const parts = [codeAlreadyInReason ? "" : code, status, reason || name].filter(Boolean);
   if (parts.length === 0 && isPlainRecord(cause.cause)) {
     return describeFailureCause(cause.cause);
   }
@@ -185,12 +192,18 @@ export const describeWorkspaceSyncFailure = (error: unknown): string => {
   const causeDetail =
     error instanceof Error ? describeFailureCause((error as { cause?: unknown }).cause) : "";
   // The provider message often already embeds the cause text; keep one copy.
-  const detail =
-    ownMessage && causeDetail && (ownMessage.includes(causeDetail) || causeDetail.includes(ownMessage))
-      ? ownMessage.length >= causeDetail.length
-        ? ownMessage
-        : causeDetail
-      : [ownMessage, causeDetail].filter(Boolean).join(" — ");
+  const sameDetail =
+    Boolean(ownMessage && causeDetail) &&
+    (normalizeDetail(ownMessage).includes(normalizeDetail(causeDetail)) ||
+      normalizeDetail(causeDetail).includes(normalizeDetail(ownMessage)));
+  const combined = sameDetail
+    ? ownMessage.length >= causeDetail.length
+      ? ownMessage
+      : causeDetail
+    : [ownMessage, causeDetail].filter(Boolean).join(" — ");
+  // The SDK hides the HTTP status; quote the last failed response instead.
+  const lastResponse = describeLastFailedCloudKitResponse();
+  const detail = lastResponse ? `${combined}; last response: ${lastResponse}` : combined;
   const scrubbed = scrubSecrets(detail).replace(/\s+/g, " ").trim();
   return scrubbed.length > MAX_FAILURE_DETAIL_LENGTH
     ? `${scrubbed.slice(0, MAX_FAILURE_DETAIL_LENGTH - 1)}…`

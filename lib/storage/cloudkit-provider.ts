@@ -26,11 +26,13 @@ const MAX_PAYLOAD_BYTES = 64 * 1024 * 1024;
 // records/modify and records/lookup accept up to 200 operations, but a single
 // request carrying 150 base64 chunks is ~75 MB of JSON — far too much for a
 // lossy or proxied link, where one dropped response costs the whole batch.
-// Writes are bounded by bytes and reads by chunk count so each request stays
-// around 6 MB; only name-only deletes still use the large batch.
+// Measured on 2026-10-18 through the user's proxy: a 6 MB POST takes ~12 s and
+// a 20 MB one is rejected by Apple's edge after ~70 s. Writes are therefore
+// bounded to ~2 MB (three chunks) and reads to six chunks per request; only
+// name-only deletes still use the large batch.
 const RECORD_BATCH_SIZE = 150;
-const MAX_REQUEST_BYTES = 6 * 1024 * 1024;
-const LOOKUP_BATCH_SIZE = 12;
+const MAX_REQUEST_BYTES = 2 * 1024 * 1024;
+const LOOKUP_BATCH_SIZE = 6;
 const CHUNK_LEDGER_KEY_PREFIX = "studio-map-os.cloudkit-chunk-ledger.v1:";
 const CHUNK_LEDGER_LIMIT = 16;
 
@@ -252,23 +254,25 @@ const errorText = (error: unknown) => {
   return typeof text === "string" ? text : "";
 };
 
-/** "QUOTA_EXCEEDED: Quota exceeded" style line that keeps the server code visible. */
-const describeResponseError = (error: CloudKitResponseError) => {
-  const code = normalizeErrorCode(error);
-  const text = errorText(error);
-  if (code && text) {
-    return `${code}: ${text}`;
+/** Prefix the server code unless the SDK text already starts with it. */
+const withErrorCode = (code: string, text: string) => {
+  if (!code) {
+    return text;
   }
-  return code || text || "CloudKit request failed";
+  if (!text) {
+    return code;
+  }
+  return text.toUpperCase().startsWith(code) ? text : `${code}: ${text}`;
 };
+
+/** "QUOTA_EXCEEDED: Quota exceeded" style line that keeps the server code visible. */
+const describeResponseError = (error: CloudKitResponseError) =>
+  withErrorCode(normalizeErrorCode(error), errorText(error)) || "CloudKit request failed";
 
 const describeThrownError = (error: unknown) => {
   const code = normalizeErrorCode(error);
   const text = errorText(error) || (error instanceof Error ? `${error.name}: ${error.message}` : "");
-  if (code && text) {
-    return `${code}: ${text}`;
-  }
-  return code || text || "The CloudKit request failed.";
+  return withErrorCode(code, text) || "The CloudKit request failed.";
 };
 
 const throwRequestError = (error: unknown): never => {

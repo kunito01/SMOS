@@ -543,11 +543,181 @@ const installSignInMessageGuard = () => {
   );
 };
 
+// ---------------------------------------------------------------------------
+// Request probe: CloudKit JS reports a non-JSON answer as
+// UNEXPECTED_SERVER_RESPONSE without the HTTP status, so the storage card
+// could not tell a proxy 502 from an Apple 413. Every request to
+// *.apple-cloudkit.com is recorded (method, path, status, size, duration —
+// never the query string, which carries tokens) so failures can quote the
+// last real response.
+// ---------------------------------------------------------------------------
+
+export type CloudKitRequestRecord = {
+  at: number;
+  method: string;
+  path: string;
+  status: number;
+  bytes: number | null;
+  ms: number;
+};
+
+const CLOUDKIT_REQUEST_LOG_LIMIT = 24;
+const cloudKitRequestLog: CloudKitRequestRecord[] = [];
+let requestProbeInstalled = false;
+
+const isCloudKitUrl = (href: string) => {
+  try {
+    return new URL(href, window.location.href).hostname.endsWith("apple-cloudkit.com");
+  } catch {
+    return false;
+  }
+};
+
+const cloudKitRequestPath = (href: string) => {
+  try {
+    const segments = new URL(href, window.location.href).pathname.split("/").filter(Boolean);
+    return segments.slice(-2).join("/") || "/";
+  } catch {
+    return "?";
+  }
+};
+
+const recordCloudKitRequest = (record: CloudKitRequestRecord) => {
+  cloudKitRequestLog.push(record);
+  if (cloudKitRequestLog.length > CLOUDKIT_REQUEST_LOG_LIMIT) {
+    cloudKitRequestLog.splice(0, cloudKitRequestLog.length - CLOUDKIT_REQUEST_LOG_LIMIT);
+  }
+};
+
+const xhrResponseBytes = (xhr: XMLHttpRequest): number | null => {
+  try {
+    if (xhr.responseType === "" || xhr.responseType === "text") {
+      return xhr.responseText.length;
+    }
+    const length = Number(xhr.getResponseHeader("content-length"));
+    return Number.isFinite(length) && length >= 0 ? length : null;
+  } catch {
+    return null;
+  }
+};
+
+const installCloudKitRequestProbe = () => {
+  if (
+    requestProbeInstalled ||
+    typeof window === "undefined" ||
+    typeof XMLHttpRequest === "undefined"
+  ) {
+    return;
+  }
+  requestProbeInstalled = true;
+
+  const pending = new WeakMap<XMLHttpRequest, { method: string; path: string; startedAt: number }>();
+  const originalOpen = XMLHttpRequest.prototype.open;
+  const originalSend = XMLHttpRequest.prototype.send;
+
+  XMLHttpRequest.prototype.open = function patchedOpen(
+    this: XMLHttpRequest,
+    method: string,
+    url: string | URL,
+    async?: boolean,
+    username?: string | null,
+    password?: string | null
+  ) {
+    const href = String(url);
+    if (isCloudKitUrl(href)) {
+      pending.set(this, { method: method.toUpperCase(), path: cloudKitRequestPath(href), startedAt: 0 });
+    }
+    return originalOpen.call(this, method, url, async ?? true, username ?? null, password ?? null);
+  };
+
+  XMLHttpRequest.prototype.send = function patchedSend(
+    this: XMLHttpRequest,
+    body?: Parameters<XMLHttpRequest["send"]>[0]
+  ) {
+    const info = pending.get(this);
+    if (info) {
+      info.startedAt = Date.now();
+      this.addEventListener(
+        "loadend",
+        () => {
+          recordCloudKitRequest({
+            at: Date.now(),
+            method: info.method,
+            path: info.path,
+            status: this.status,
+            bytes: xhrResponseBytes(this),
+            ms: Date.now() - info.startedAt
+          });
+        },
+        { once: true }
+      );
+    }
+    return originalSend.call(this, body);
+  };
+
+  const originalFetch = window.fetch.bind(window);
+  window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const href =
+      typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    if (!isCloudKitUrl(href)) {
+      return originalFetch(input, init);
+    }
+    const method = (init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase();
+    const path = cloudKitRequestPath(href);
+    const startedAt = Date.now();
+    try {
+      const response = await originalFetch(input, init);
+      const length = Number(response.headers.get("content-length"));
+      recordCloudKitRequest({
+        at: Date.now(),
+        method,
+        path,
+        status: response.status,
+        bytes: Number.isFinite(length) && length >= 0 ? length : null,
+        ms: Date.now() - startedAt
+      });
+      return response;
+    } catch (error) {
+      recordCloudKitRequest({ at: Date.now(), method, path, status: 0, bytes: null, ms: Date.now() - startedAt });
+      throw error;
+    }
+  };
+};
+
+export const getRecentCloudKitRequests = (): CloudKitRequestRecord[] => [...cloudKitRequestLog];
+
+const formatByteCount = (bytes: number) =>
+  bytes >= 1024 * 1024
+    ? `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+    : bytes >= 1024
+      ? `${Math.round(bytes / 1024)} KB`
+      : `${bytes} B`;
+
+/**
+ * One line about the most recent non-2xx CloudKit response within the window,
+ * e.g. "POST records/modify → HTTP 502 (empty body) in 38.4 s", or "" when
+ * every recent request succeeded at the HTTP level.
+ */
+export const describeLastFailedCloudKitResponse = (withinMs = 5 * 60_000): string => {
+  const now = Date.now();
+  const failed = [...cloudKitRequestLog]
+    .reverse()
+    .find((record) => now - record.at <= withinMs && (record.status < 200 || record.status >= 300));
+  if (!failed) {
+    return "";
+  }
+  const status = failed.status === 0 ? "no response" : `HTTP ${failed.status}`;
+  const size =
+    failed.bytes === null ? "" : failed.bytes === 0 ? " (empty body)" : ` (${formatByteCount(failed.bytes)} body)`;
+  return `${failed.method} ${failed.path} → ${status}${size} in ${(failed.ms / 1000).toFixed(1)} s`;
+};
+
 const configureCloudKit = (
   cloudKit: CloudKitNamespace,
   configuration: CloudKitConfiguration
 ) => {
   installSignInMessageGuard();
+  installCloudKitRequestProbe();
 
   const key = configurationKey(configuration);
 
@@ -792,6 +962,11 @@ const isRetryableDatabaseError = (error: unknown): boolean => {
   return (
     code === "NETWORK_ERROR" ||
     code === "SERVICE_UNAVAILABLE" ||
+    // Apple always answers with JSON, even for 404/401. A non-JSON or empty
+    // body therefore comes from a proxy or tunnel that gave up on the request
+    // (observed 2026-10-18 as "Could not parse json: " with an empty body),
+    // which is a transport failure and safe to retry.
+    code === "UNEXPECTED_SERVER_RESPONSE" ||
     // Apple explicitly asks for a retry on these; THROTTLED carries retryAfter.
     code === "THROTTLED" ||
     code === "TRY_AGAIN_LATER" ||
