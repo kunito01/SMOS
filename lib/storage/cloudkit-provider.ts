@@ -246,6 +246,23 @@ const isThrottleError = (error: unknown) => {
 /** A `create` hit a record that already exists (a retried batch that did commit). */
 const isExistsError = (error: unknown) => normalizeErrorCode(error) === "EXISTS";
 
+/**
+ * The request never produced a usable answer: dropped connection, proxy
+ * giving up mid-body, non-JSON gateway page, or our own request timeout.
+ * Such failures are often size-dependent on lossy links, so callers may
+ * retry with a smaller batch.
+ */
+const isTransportError = (error: unknown) => {
+  const code = normalizeErrorCode(error);
+  return (
+    code === "NETWORK_ERROR" ||
+    code === "UNEXPECTED_SERVER_RESPONSE" ||
+    code === "SERVICE_UNAVAILABLE" ||
+    code === "TRY_AGAIN_LATER" ||
+    error instanceof TypeError
+  );
+};
+
 const errorText = (error: unknown) => {
   if (!isRecord(error)) {
     return typeof error === "string" ? error : "";
@@ -355,18 +372,32 @@ const assertResponseSuccess = (
  * tolerate per-record NOT_FOUND so a missing chunk is reported as incomplete
  * remote data by the caller instead of as a generic request failure.
  */
+const fetchRecordBatch = async (
+  database: CloudKitDatabase,
+  batch: string[],
+  records: CloudKitRecord[]
+): Promise<void> => {
+  try {
+    const response = await database.fetchRecords(batch);
+    assertResponseSuccess(response.errors, { allowNotFound: true });
+    records.push(...(response.records ?? []).filter((record) => !record.deleted));
+  } catch (error) {
+    if (batch.length > 1 && isTransportError(error)) {
+      // The link may only manage smaller responses right now: halve and retry.
+      const middle = Math.ceil(batch.length / 2);
+      await fetchRecordBatch(database, batch.slice(0, middle), records);
+      await fetchRecordBatch(database, batch.slice(middle), records);
+      return;
+    }
+    throwRequestError(error);
+  }
+};
+
 const fetchRecords = async (database: CloudKitDatabase, recordNames: string[]) => {
   const records: CloudKitRecord[] = [];
 
   for (let offset = 0; offset < recordNames.length; offset += LOOKUP_BATCH_SIZE) {
-    const batch = recordNames.slice(offset, offset + LOOKUP_BATCH_SIZE);
-    try {
-      const response = await database.fetchRecords(batch);
-      assertResponseSuccess(response.errors, { allowNotFound: true });
-      records.push(...(response.records ?? []).filter((record) => !record.deleted));
-    } catch (error) {
-      throwRequestError(error);
-    }
+    await fetchRecordBatch(database, recordNames.slice(offset, offset + LOOKUP_BATCH_SIZE), records);
   }
 
   return records;
@@ -416,6 +447,37 @@ type SaveRecordsOptions = {
   tolerateExisting?: boolean;
 };
 
+const saveRecordBatch = async (
+  database: CloudKitDatabase,
+  batch: CloudKitRecord[],
+  options: SaveRecordsOptions,
+  saved: CloudKitRecord[]
+): Promise<void> => {
+  const batchNames = new Set(
+    batch.flatMap((record) => (typeof record.recordName === "string" ? [record.recordName] : []))
+  );
+  try {
+    const response = await database.saveRecords(batch);
+    assertResponseSuccess(response.errors, {
+      allowExistingRecordNames: options.tolerateExisting ? batchNames : undefined
+    });
+    saved.push(...(response.records ?? []));
+  } catch (error) {
+    if (options.tolerateExisting && isExistsError(error)) {
+      return;
+    }
+    if (batch.length > 1 && isTransportError(error)) {
+      // A multi-record POST died in transit; the records that did commit
+      // answer EXISTS on the retry (tolerated), the rest go in smaller bodies.
+      const middle = Math.ceil(batch.length / 2);
+      await saveRecordBatch(database, batch.slice(0, middle), options, saved);
+      await saveRecordBatch(database, batch.slice(middle), options, saved);
+      return;
+    }
+    throwRequestError(error);
+  }
+};
+
 const saveRecords = async (
   database: CloudKitDatabase,
   records: CloudKitRecord[],
@@ -424,21 +486,7 @@ const saveRecords = async (
   const saved: CloudKitRecord[] = [];
 
   for (const batch of splitRecordsByBytes(records)) {
-    const batchNames = new Set(
-      batch.flatMap((record) => (typeof record.recordName === "string" ? [record.recordName] : []))
-    );
-    try {
-      const response = await database.saveRecords(batch);
-      assertResponseSuccess(response.errors, {
-        allowExistingRecordNames: options.tolerateExisting ? batchNames : undefined
-      });
-      saved.push(...(response.records ?? []));
-    } catch (error) {
-      if (options.tolerateExisting && isExistsError(error)) {
-        continue;
-      }
-      throwRequestError(error);
-    }
+    await saveRecordBatch(database, batch, options, saved);
   }
 
   return saved;

@@ -562,8 +562,11 @@ export type CloudKitRequestRecord = {
 };
 
 const CLOUDKIT_REQUEST_LOG_LIMIT = 24;
+const CLOUDKIT_REACHABILITY_TIMEOUT_MS = 15_000;
 const cloudKitRequestLog: CloudKitRequestRecord[] = [];
 let requestProbeInstalled = false;
+// The unwrapped fetch, so diagnostics do not pollute the request log.
+let nativeFetch: typeof window.fetch | null = null;
 
 const isCloudKitUrl = (href: string) => {
   try {
@@ -656,6 +659,7 @@ const installCloudKitRequestProbe = () => {
   };
 
   const originalFetch = window.fetch.bind(window);
+  nativeFetch = originalFetch;
   window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const href =
       typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
@@ -710,6 +714,52 @@ export const describeLastFailedCloudKitResponse = (withinMs = 5 * 60_000): strin
   const size =
     failed.bytes === null ? "" : failed.bytes === 0 ? " (empty body)" : ` (${formatByteCount(failed.bytes)} body)`;
   return `${failed.method} ${failed.path} → ${status}${size} in ${(failed.ms / 1000).toFixed(1)} s`;
+};
+
+/**
+ * After a transport failure, a tiny GET tells whether api.apple-cloudkit.com
+ * is reachable from this browser at all (any HTTP status counts, 401/421 are
+ * the expected answers without a session) or whether only the larger
+ * request was cut. Returns one sentence for the storage card, or "" when
+ * CloudKit is not configured.
+ */
+export const probeCloudKitReachability = async (): Promise<string> => {
+  if (typeof window === "undefined") {
+    return "";
+  }
+  let configuration: CloudKitConfiguration;
+  try {
+    configuration = requireConfiguration();
+  } catch {
+    return "";
+  }
+  const url =
+    "https://api.apple-cloudkit.com/database/1/" +
+    `${encodeURIComponent(configuration.containerIdentifier)}/` +
+    `${configuration.environment}/private/users/current` +
+    `?ckAPIToken=${encodeURIComponent(configuration.apiToken)}`;
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), CLOUDKIT_REACHABILITY_TIMEOUT_MS);
+  const startedAt = Date.now();
+  const elapsed = () => `${((Date.now() - startedAt) / 1000).toFixed(1)} s`;
+  try {
+    const response = await (nativeFetch ?? window.fetch)(url, {
+      cache: "no-store",
+      signal: controller.signal
+    });
+    return (
+      `Reachability check: GET users/current → HTTP ${response.status} in ${elapsed()}, ` +
+      "so the API is reachable and only the larger request is being cut off."
+    );
+  } catch (error) {
+    const outcome = error instanceof Error && error.name === "AbortError" ? "timed out" : "no response";
+    return (
+      `Reachability check: GET users/current → ${outcome} in ${elapsed()}, ` +
+      "so api.apple-cloudkit.com is not reachable from this browser (check the proxy/VPN rule for apple-cloudkit.com)."
+    );
+  } finally {
+    window.clearTimeout(timer);
+  }
 };
 
 const configureCloudKit = (

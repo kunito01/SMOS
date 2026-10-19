@@ -9,6 +9,7 @@ import {
   CloudKitClientError,
   describeLastFailedCloudKitResponse,
   getCloudKitConfigurationStatus,
+  probeCloudKitReachability,
   getCloudKitUserRecordName,
   setUpCloudKitAuth,
   type CloudKitUserIdentity
@@ -369,11 +370,35 @@ const markConflict = (workspaceId: string, message: string) =>
     lastError: message
   });
 
+const TRANSPORT_FAILURE_PATTERN =
+  /NETWORK_ERROR|UNEXPECTED_SERVER_RESPONSE|SERVICE_UNAVAILABLE|TRY_AGAIN_LATER|timed out|Failed to fetch|no response/i;
+
+const isTransportFailure = (error: unknown) =>
+  error instanceof CloudKitProviderError &&
+  (error.code === "REQUEST_FAILED" || error.code === "THROTTLED") &&
+  TRANSPORT_FAILURE_PATTERN.test(describeWorkspaceSyncFailure(error));
+
 const markError = (workspaceId: string, error: unknown) => {
   logSyncFailure(workspaceId, error);
+  const message = genericErrorMessage(error);
   updateWorkspaceStoragePreference(workspaceId, {
     status: "error",
-    lastError: genericErrorMessage(error)
+    lastError: message
+  });
+  if (!isTransportFailure(error)) {
+    return;
+  }
+  // Append a reachability verdict once it is known, unless a newer attempt
+  // has replaced the status in the meantime.
+  void probeCloudKitReachability().then((summary) => {
+    if (!summary) {
+      return;
+    }
+    console.warn(`[smos-sync] ${summary}`);
+    const current = getWorkspaceStoragePreference(workspaceId);
+    if (current.status === "error" && current.lastError === message) {
+      updateWorkspaceStoragePreference(workspaceId, { lastError: `${message} ${summary}` });
+    }
   });
 };
 
