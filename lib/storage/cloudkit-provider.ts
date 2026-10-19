@@ -17,10 +17,14 @@ const MANIFEST_SCHEMA = "studio-map-os.cloudkit-workspace-manifest";
 const CHUNK_SCHEMA = "studio-map-os.cloudkit-workspace-chunk";
 const CLOUDKIT_FORMAT_VERSION = "1";
 
-// A CloudKit record may contain at most 1 MiB outside Asset fields. Encoding a
-// 384 KiB byte chunk as base64 keeps the resulting field around 512 KiB and
-// leaves ample room for record metadata and future additive schema fields.
-const CHUNK_BYTES = 384 * 1024;
+// A CloudKit record may contain at most 1 MiB outside Asset fields. Chunks
+// used to be 384 KiB (~512 KiB base64), but on the user's link to Apple the
+// upload runs at 40-110 KB/s and Apple's edge drops request bodies that
+// arrive too slowly (bare 400/404 without CORS headers, measured
+// 2026-10-19). 96 KiB chunks (~128 KiB base64) keep even a single-record
+// request under a few seconds. Older generations with larger chunks are
+// still read back by name, so no migration is needed.
+const CHUNK_BYTES = 96 * 1024;
 const MAX_CHUNK_COUNT = 1_024;
 const MAX_PAYLOAD_BYTES = 64 * 1024 * 1024;
 // records/modify and records/lookup accept up to 200 operations, but a single
@@ -31,8 +35,8 @@ const MAX_PAYLOAD_BYTES = 64 * 1024 * 1024;
 // bounded to ~2 MB (three chunks) and reads to six chunks per request; only
 // name-only deletes still use the large batch.
 const RECORD_BATCH_SIZE = 150;
-const MAX_REQUEST_BYTES = 2 * 1024 * 1024;
-const LOOKUP_BATCH_SIZE = 6;
+const MAX_REQUEST_BYTES = 384 * 1024;
+const LOOKUP_BATCH_SIZE = 4;
 const CHUNK_LEDGER_KEY_PREFIX = "studio-map-os.cloudkit-chunk-ledger.v1:";
 const CHUNK_LEDGER_LIMIT = 16;
 

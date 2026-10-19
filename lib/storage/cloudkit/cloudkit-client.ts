@@ -7,6 +7,10 @@ const SIGN_IN_MESSAGE_GUARD_WINDOW_MS = 10 * 60_000;
 // exceeds 50%, so the retry budget must survive several consecutive drops:
 // eight attempts bring per-operation failure below 0.5% even on such links.
 const CLOUDKIT_DB_MAX_ATTEMPTS = 8;
+// A multi-record request that dies in transit is usually too big for the
+// link; the provider halves it after a failure, so do not burn eight
+// attempts on the same oversized body first.
+const CLOUDKIT_DB_MULTI_RECORD_ATTEMPTS = 2;
 const CLOUDKIT_DB_RETRY_BASE_DELAY_MS = 400;
 // Apple's retryAfter hint is honoured up to this cap so a throttled device
 // waits instead of burning its retry budget in a few seconds.
@@ -755,10 +759,20 @@ export const probeCloudKitReachability = async (): Promise<string> => {
     const elapsed = () => `${((Date.now() - startedAt) / 1000).toFixed(1)} s`;
     try {
       const response = await fetchImpl(url, { ...init, cache: "no-store", signal: controller.signal });
-      return { label, ok: true, text: `${label} → HTTP ${response.status} in ${elapsed()}` };
+      return {
+        label,
+        ok: true,
+        seconds: (Date.now() - startedAt) / 1000,
+        text: `${label} → HTTP ${response.status} in ${elapsed()}`
+      };
     } catch (error) {
       const outcome = error instanceof Error && error.name === "AbortError" ? "timed out" : "no response";
-      return { label, ok: false, text: `${label} → ${outcome} in ${elapsed()}` };
+      return {
+        label,
+        ok: false,
+        seconds: (Date.now() - startedAt) / 1000,
+        text: `${label} → ${outcome} in ${elapsed()}`
+      };
     } finally {
       window.clearTimeout(timer);
     }
@@ -778,13 +792,17 @@ export const probeCloudKitReachability = async (): Promise<string> => {
     })
   ];
   const [get, smallPost, largePost] = results;
+  const largeProbeSeconds = largePost.seconds;
+  const uploadKbPerSecond = largeProbeSeconds > 0 ? Math.round(300 / largeProbeSeconds) : 0;
   const verdict = !get.ok
     ? "api.apple-cloudkit.com is not reachable from this browser (check the proxy/VPN rule for apple-cloudkit.com)."
     : !smallPost.ok
       ? "GET works but even a tiny POST is cut: something in this browser (an extension, a filter list, or the proxy) blocks POSTs to CloudKit."
       : !largePost.ok
         ? "small requests pass but a few hundred KB upload is cut: the link drops larger POST bodies."
-        : "plain POSTs of this size pass from this browser, so the failure is specific to the SDK's own request.";
+        : largeProbeSeconds > 2.5
+          ? `the upload link to Apple is slow (about ${uploadKbPerSecond} KB/s), so larger request bodies time out at Apple's edge before they are accepted; the app uploads in small pieces to cope with this.`
+          : "plain POSTs of this size pass from this browser, so the failure is specific to the SDK's own request.";
   return `Reachability check: ${results.map((result) => result.text).join("; ")}, so ${verdict}`;
 };
 
@@ -1095,23 +1113,23 @@ const delay = (ms: number) =>
     window.setTimeout(resolve, ms);
   });
 
-const retryDatabaseOperation = async <T>(operation: () => Promise<T>): Promise<T> => {
+const retryDatabaseOperation = async <T>(
+  operation: () => Promise<T>,
+  maxAttempts = CLOUDKIT_DB_MAX_ATTEMPTS
+): Promise<T> => {
   let lastError: unknown;
-  for (let attempt = 0; attempt < CLOUDKIT_DB_MAX_ATTEMPTS; attempt += 1) {
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     try {
       return await withRequestTimeout(operation);
     } catch (error) {
       lastError = error;
-      if (
-        !isRetryableDatabaseError(error) ||
-        attempt === CLOUDKIT_DB_MAX_ATTEMPTS - 1
-      ) {
+      if (!isRetryableDatabaseError(error) || attempt === maxAttempts - 1) {
         throw error;
       }
       if (process.env.NODE_ENV === "development") {
         console.debug(
           `[cloudkit-db] retrying after ${errorCodeOf(error) || "transport error"} ` +
-            `(attempt ${attempt + 1}/${CLOUDKIT_DB_MAX_ATTEMPTS})`
+            `(attempt ${attempt + 1}/${maxAttempts})`
         );
       }
       await delay(retryDelayMs(error, attempt));
@@ -1120,11 +1138,22 @@ const retryDatabaseOperation = async <T>(operation: () => Promise<T>): Promise<T
   throw lastError;
 };
 
+const attemptsForBatch = (batch: unknown) =>
+  Array.isArray(batch) && batch.length > 1
+    ? CLOUDKIT_DB_MULTI_RECORD_ATTEMPTS
+    : CLOUDKIT_DB_MAX_ATTEMPTS;
+
 const wrapDatabaseWithRetry = (database: CloudKitDatabase): CloudKitDatabase => ({
   fetchRecords: (recordNames, options) =>
-    retryDatabaseOperation(() => database.fetchRecords(recordNames, options)),
+    retryDatabaseOperation(
+      () => database.fetchRecords(recordNames, options),
+      attemptsForBatch(recordNames)
+    ),
   saveRecords: (records, options) =>
-    retryDatabaseOperation(() => database.saveRecords(records, options)),
+    retryDatabaseOperation(
+      () => database.saveRecords(records, options),
+      attemptsForBatch(records)
+    ),
   deleteRecords: (recordNames, options) =>
     retryDatabaseOperation(() => database.deleteRecords(recordNames, options))
 });
