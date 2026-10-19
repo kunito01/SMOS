@@ -706,7 +706,13 @@ export const describeLastFailedCloudKitResponse = (withinMs = 5 * 60_000): strin
   const now = Date.now();
   const failed = [...cloudKitRequestLog]
     .reverse()
-    .find((record) => now - record.at <= withinMs && (record.status < 200 || record.status >= 300));
+    .find(
+      (record) =>
+        now - record.at <= withinMs &&
+        (record.status < 200 || record.status >= 300) &&
+        // The SDK's telemetry POST fails independently of the sync itself.
+        !record.path.endsWith("reportStats")
+    );
   if (!failed) {
     return "";
   }
@@ -733,33 +739,53 @@ export const probeCloudKitReachability = async (): Promise<string> => {
   } catch {
     return "";
   }
-  const url =
+  const base =
     "https://api.apple-cloudkit.com/database/1/" +
     `${encodeURIComponent(configuration.containerIdentifier)}/` +
-    `${configuration.environment}/private/users/current` +
-    `?ckAPIToken=${encodeURIComponent(configuration.apiToken)}`;
-  const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), CLOUDKIT_REACHABILITY_TIMEOUT_MS);
-  const startedAt = Date.now();
-  const elapsed = () => `${((Date.now() - startedAt) / 1000).toFixed(1)} s`;
-  try {
-    const response = await (nativeFetch ?? window.fetch)(url, {
-      cache: "no-store",
-      signal: controller.signal
-    });
-    return (
-      `Reachability check: GET users/current → HTTP ${response.status} in ${elapsed()}, ` +
-      "so the API is reachable and only the larger request is being cut off."
-    );
-  } catch (error) {
-    const outcome = error instanceof Error && error.name === "AbortError" ? "timed out" : "no response";
-    return (
-      `Reachability check: GET users/current → ${outcome} in ${elapsed()}, ` +
-      "so api.apple-cloudkit.com is not reachable from this browser (check the proxy/VPN rule for apple-cloudkit.com)."
-    );
-  } finally {
-    window.clearTimeout(timer);
-  }
+    `${configuration.environment}/private/`;
+  const query = `?ckAPIToken=${encodeURIComponent(configuration.apiToken)}`;
+  const fetchImpl = nativeFetch ?? window.fetch;
+
+  // Without a session every request is answered 421; any HTTP status proves
+  // the request got through, "no response" means it was cut or blocked.
+  const attempt = async (label: string, url: string, init: RequestInit) => {
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), CLOUDKIT_REACHABILITY_TIMEOUT_MS);
+    const startedAt = Date.now();
+    const elapsed = () => `${((Date.now() - startedAt) / 1000).toFixed(1)} s`;
+    try {
+      const response = await fetchImpl(url, { ...init, cache: "no-store", signal: controller.signal });
+      return { label, ok: true, text: `${label} → HTTP ${response.status} in ${elapsed()}` };
+    } catch (error) {
+      const outcome = error instanceof Error && error.name === "AbortError" ? "timed out" : "no response";
+      return { label, ok: false, text: `${label} → ${outcome} in ${elapsed()}` };
+    } finally {
+      window.clearTimeout(timer);
+    }
+  };
+
+  const results = [
+    await attempt("GET users/current", `${base}users/current${query}`, { method: "GET" }),
+    await attempt("POST records/modify 2 KB", `${base}records/modify${query}`, {
+      method: "POST",
+      headers: { "content-type": "text/plain" },
+      body: "a".repeat(2 * 1024)
+    }),
+    await attempt("POST records/modify 300 KB", `${base}records/modify${query}`, {
+      method: "POST",
+      headers: { "content-type": "text/plain" },
+      body: "a".repeat(300 * 1024)
+    })
+  ];
+  const [get, smallPost, largePost] = results;
+  const verdict = !get.ok
+    ? "api.apple-cloudkit.com is not reachable from this browser (check the proxy/VPN rule for apple-cloudkit.com)."
+    : !smallPost.ok
+      ? "GET works but even a tiny POST is cut: something in this browser (an extension, a filter list, or the proxy) blocks POSTs to CloudKit."
+      : !largePost.ok
+        ? "small requests pass but a few hundred KB upload is cut: the link drops larger POST bodies."
+        : "plain POSTs of this size pass from this browser, so the failure is specific to the SDK's own request.";
+  return `Reachability check: ${results.map((result) => result.text).join("; ")}, so ${verdict}`;
 };
 
 const configureCloudKit = (
