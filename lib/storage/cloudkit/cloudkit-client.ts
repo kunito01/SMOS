@@ -752,13 +752,19 @@ export const probeCloudKitReachability = async (): Promise<string> => {
 
   // Without a session every request is answered 421; any HTTP status proves
   // the request got through, "no response" means it was cut or blocked.
-  const attempt = async (label: string, url: string, init: RequestInit) => {
+  const attempt = async (
+    label: string,
+    url: string,
+    init: RequestInit,
+    onResponse?: (response: Response) => void
+  ) => {
     const controller = new AbortController();
     const timer = window.setTimeout(() => controller.abort(), CLOUDKIT_REACHABILITY_TIMEOUT_MS);
     const startedAt = Date.now();
     const elapsed = () => `${((Date.now() - startedAt) / 1000).toFixed(1)} s`;
     try {
       const response = await fetchImpl(url, { ...init, cache: "no-store", signal: controller.signal });
+      onResponse?.(response);
       return {
         label,
         ok: true,
@@ -791,6 +797,36 @@ export const probeCloudKitReachability = async (): Promise<string> => {
       body: "a".repeat(300 * 1024)
     })
   ];
+  // The SDK's own calls carry the web-auth session. A private-database
+  // request that passes the auth layer can still be refused further in
+  // (observed as a bare 400 without CORS headers), for example when the
+  // Apple ID has Advanced Data Protection turned on and web access to
+  // third-party CloudKit data is not permitted. Probe that path with a
+  // harmless lookup of a record that does not exist.
+  const session = readStoredCloudKitSession();
+  const sessionLookup = session
+    ? await attempt(
+        "POST records/lookup with session",
+        `${base}records/lookup${query}&ckWebAuthToken=${encodeURIComponent(session)}`,
+        {
+          method: "POST",
+          headers: { "content-type": "text/plain" },
+          body: JSON.stringify({ records: [{ recordName: "smos-reachability-probe" }] })
+        },
+        (response) => {
+          // Sessions rotate on use; keep the replacement like the SDK would.
+          const rotated =
+            response.headers.get("x-apple-cloudkit-web-auth-token") ??
+            response.headers.get("x-apple-cloudkit-session");
+          if (rotated) {
+            writeStoredCloudKitSession(rotated);
+          }
+        }
+      )
+    : null;
+  if (sessionLookup) {
+    results.push(sessionLookup);
+  }
   const [get, smallPost, largePost] = results;
   const largeProbeSeconds = largePost.seconds;
   const uploadKbPerSecond = largeProbeSeconds > 0 ? Math.round(300 / largeProbeSeconds) : 0;
@@ -800,9 +836,11 @@ export const probeCloudKitReachability = async (): Promise<string> => {
       ? "GET works but even a tiny POST is cut: something in this browser (an extension, a filter list, or the proxy) blocks POSTs to CloudKit."
       : !largePost.ok
         ? "small requests pass but a few hundred KB upload is cut: the link drops larger POST bodies."
-        : largeProbeSeconds > 2.5
-          ? `the upload link to Apple is slow (about ${uploadKbPerSecond} KB/s), so larger request bodies time out at Apple's edge before they are accepted; the app uploads in small pieces to cope with this.`
-          : "plain POSTs of this size pass from this browser, so the failure is specific to the SDK's own request.";
+        : sessionLookup && !sessionLookup.ok
+          ? "requests without a session pass but a signed-in private-database request is refused: this Apple ID is not letting web apps touch its private CloudKit data. Check whether Advanced Data Protection (高级数据保护) is turned on for the account; CloudKit JS cannot read or write the private database while it is on."
+          : largeProbeSeconds > 2.5
+            ? `the upload link to Apple is slow (about ${uploadKbPerSecond} KB/s), so larger request bodies time out at Apple's edge before they are accepted; the app uploads in small pieces to cope with this.`
+            : "plain POSTs of this size pass from this browser, so the failure is specific to the SDK's own request.";
   return `Reachability check: ${results.map((result) => result.text).join("; ")}, so ${verdict}`;
 };
 
