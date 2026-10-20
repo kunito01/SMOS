@@ -190,7 +190,7 @@ export const startAgentBridge = (workspaceId: string) => {
         const pulled = await pullWorkspaceFromCloud(workspaceId, { minIntervalMs: AGENT_PULL_INTERVAL_MS });
         if (pulled.status === "skipped" && pulled.reason === "conflict") {
           throw new Error(
-            "The workspace has an unresolved CloudKit conflict. Ask the user to pick a side on the Archive page first."
+            "The workspace has an unresolved cloud storage conflict. Ask the user to pick a side on the Archive page first."
           );
         }
         if (pulled.status === "failed") {

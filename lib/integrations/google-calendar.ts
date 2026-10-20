@@ -2,6 +2,25 @@
 
 import { integrationsApi, projectsApi } from "@/lib/api";
 import { getActiveMockDatabaseWorkspaceId } from "@/lib/api/mock-persistence";
+import {
+  GoogleAuthError,
+  preloadGoogleIdentity,
+  readGoogleToken,
+  requestGoogleToken,
+  revokeGoogleToken,
+  writeGoogleToken,
+  type GoogleStoredToken
+} from "@/lib/integrations/google-auth";
+
+import {
+  forgetGoogleDriveAccessToken,
+  isGoogleDriveConnected,
+  readGoogleDriveSettings
+} from "@/lib/storage/google-drive/google-drive-client";
+
+// Shared Google Identity Services plumbing lives in google-auth.ts; these
+// re-exports keep the Calendar card and auto-sync component unchanged.
+export { preloadGoogleIdentity, GoogleAuthError as GoogleCalendarAuthError };
 import type { Project } from "@/lib/types";
 import { projectPath, withBasePath } from "@/lib/utils/app-routes";
 
@@ -18,7 +37,6 @@ import { projectPath, withBasePath } from "@/lib/utils/app-routes";
  */
 
 export const GOOGLE_CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.app.created";
-const GIS_SCRIPT_URL = "https://accounts.google.com/gsi/client";
 const CALENDAR_API = "https://www.googleapis.com/calendar/v3";
 const CALENDAR_SUMMARY = "Studio Map OS";
 const SETTINGS_KEY_PREFIX = "studio-map-os.google-calendar:";
@@ -48,39 +66,7 @@ export type GoogleCalendarStatus = {
   failedCount?: number;
 };
 
-type StoredToken = {
-  accessToken: string;
-  expiresAt: number;
-};
-
-type TokenResponse = {
-  access_token?: string;
-  expires_in?: number;
-  error?: string;
-  error_description?: string;
-};
-
-type TokenClient = {
-  requestAccessToken: (overrides?: { prompt?: string }) => void;
-};
-
-declare global {
-  interface Window {
-    google?: {
-      accounts?: {
-        oauth2?: {
-          initTokenClient: (config: {
-            client_id: string;
-            scope: string;
-            callback: (response: TokenResponse) => void;
-            error_callback?: (error: { type?: string; message?: string }) => void;
-          }) => TokenClient;
-          revoke: (accessToken: string, done?: () => void) => void;
-        };
-      };
-    };
-  }
-}
+type StoredToken = GoogleStoredToken;
 
 const canUseBrowser = () => typeof window !== "undefined";
 
@@ -144,95 +130,16 @@ export const writeGoogleCalendarSettings = (
 export const isGoogleCalendarConnected = (settings: GoogleCalendarSettings) =>
   Boolean(settings.clientId && settings.calendarId && settings.connectedAt);
 
-const readToken = (workspaceId: string): StoredToken | null => {
-  if (!canUseBrowser()) {
-    return null;
-  }
-  try {
-    const raw = window.localStorage.getItem(tokenKey(workspaceId));
-    if (!raw) {
-      return null;
-    }
-    const parsed = JSON.parse(raw) as Partial<StoredToken>;
-    if (typeof parsed.accessToken !== "string" || typeof parsed.expiresAt !== "number") {
-      return null;
-    }
-    // Treat tokens within a minute of expiry as expired so a sync never dies mid-flight.
-    return parsed.expiresAt - 60_000 > Date.now()
-      ? { accessToken: parsed.accessToken, expiresAt: parsed.expiresAt }
-      : null;
-  } catch {
-    return null;
-  }
-};
+const readToken = (workspaceId: string): StoredToken | null => readGoogleToken(tokenKey(workspaceId));
 
-const writeToken = (workspaceId: string, token: StoredToken | null) => {
-  if (!canUseBrowser()) {
-    return;
-  }
-  if (token) {
-    window.localStorage.setItem(tokenKey(workspaceId), JSON.stringify(token));
-  } else {
-    window.localStorage.removeItem(tokenKey(workspaceId));
-  }
-};
+const writeToken = (workspaceId: string, token: StoredToken | null) =>
+  writeGoogleToken(tokenKey(workspaceId), token);
 
 /** True while a usable token is cached, i.e. auto-sync can run without any popup. */
 export const hasGoogleAccessToken = (workspaceId: string) => readToken(workspaceId) !== null;
 
-let gisLoading: Promise<void> | null = null;
-
-/** Loads the Google Identity Services script; call early so a later click can open the popup synchronously. */
-export const preloadGoogleIdentity = () => {
-  if (!canUseBrowser()) {
-    return Promise.reject(new Error("Google Identity Services needs a browser"));
-  }
-  if (window.google?.accounts?.oauth2) {
-    return Promise.resolve();
-  }
-  if (!gisLoading) {
-    gisLoading = new Promise<void>((resolve, reject) => {
-      const existing = document.querySelector<HTMLScriptElement>(`script[src="${GIS_SCRIPT_URL}"]`);
-      const script = existing ?? document.createElement("script");
-      const finish = () => {
-        if (window.google?.accounts?.oauth2) {
-          resolve();
-        } else {
-          gisLoading = null;
-          reject(new Error("Google Identity Services failed to initialise"));
-        }
-      };
-      script.addEventListener("load", finish, { once: true });
-      script.addEventListener(
-        "error",
-        () => {
-          gisLoading = null;
-          reject(new Error("Google Identity Services could not be loaded"));
-        },
-        { once: true }
-      );
-      if (!existing) {
-        script.src = GIS_SCRIPT_URL;
-        script.async = true;
-        script.defer = true;
-        document.head.appendChild(script);
-      } else if (window.google?.accounts?.oauth2) {
-        finish();
-      }
-    });
-  }
-  return gisLoading;
-};
-
-export class GoogleCalendarAuthError extends Error {
-  constructor(message: string, readonly interactive: boolean) {
-    super(message);
-    this.name = "GoogleCalendarAuthError";
-  }
-}
-
 /**
- * Returns a usable access token.
+ * Returns a usable access token for the Calendar scope.
  *
  * `silent` never opens Google UI: it returns the cached token or rejects with
  * `interactive = true` so callers can ask for a click. `interactive` reuses a
@@ -244,88 +151,31 @@ export const requestGoogleAccessToken = async (
   clientId: string,
   mode: "interactive" | "silent"
 ): Promise<StoredToken> => {
-  const cached = readToken(workspaceId);
-  if (cached) {
-    return cached;
-  }
-  if (mode === "silent") {
-    throw new GoogleCalendarAuthError("Google sign-in required", true);
-  }
-
-  // When the script is already present this resolves in a microtask and keeps the user activation.
-  await preloadGoogleIdentity();
-  const oauth2 = window.google?.accounts?.oauth2;
-  if (!oauth2) {
-    throw new GoogleCalendarAuthError("Google Identity Services unavailable", true);
-  }
   const { consentGranted } = readGoogleCalendarSettings(workspaceId);
-
-  return new Promise<StoredToken>((resolve, reject) => {
-    let settled = false;
-    const settle = (fn: () => void) => {
-      if (!settled) {
-        settled = true;
-        fn();
-      }
-    };
-    const timeout = window.setTimeout(
-      () => settle(() => reject(new GoogleCalendarAuthError("Google sign-in timed out", true))),
-      120_000
-    );
-    const client = oauth2.initTokenClient({
-      client_id: clientId,
-      scope: GOOGLE_CALENDAR_SCOPE,
-      callback: (response) => {
-        window.clearTimeout(timeout);
-        if (!response.access_token) {
-          settle(() =>
-            reject(
-              new GoogleCalendarAuthError(
-                response.error_description ?? response.error ?? "Google sign-in was cancelled",
-                true
-              )
-            )
-          );
-          return;
-        }
-        const token = {
-          accessToken: response.access_token,
-          expiresAt: Date.now() + (response.expires_in ?? 3600) * 1000
-        };
-        writeToken(workspaceId, token);
-        writeGoogleCalendarSettings(workspaceId, { consentGranted: true });
-        settle(() => resolve(token));
-      },
-      error_callback: (error) => {
-        window.clearTimeout(timeout);
-        settle(() =>
-          reject(new GoogleCalendarAuthError(error?.message ?? error?.type ?? "Google sign-in failed", true))
-        );
-      }
-    });
-    client.requestAccessToken({ prompt: consentGranted ? "" : "consent" });
+  return requestGoogleToken({
+    storageKey: tokenKey(workspaceId),
+    clientId,
+    scope: GOOGLE_CALENDAR_SCOPE,
+    mode,
+    consentGranted,
+    onGranted: () => {
+      writeGoogleCalendarSettings(workspaceId, { consentGranted: true });
+    }
   });
 };
 
+/**
+ * Drops the Calendar token. The OAuth grant is shared with Google Drive
+ * storage, so it is only revoked when Drive is not connected on this device.
+ */
 export const revokeGoogleAccessToken = async (workspaceId: string) => {
-  const token = readToken(workspaceId);
-  writeToken(workspaceId, null);
-  if (!token || !canUseBrowser()) {
-    return;
-  }
-  try {
-    await preloadGoogleIdentity();
-    await new Promise<void>((resolve) => {
-      const oauth2 = window.google?.accounts?.oauth2;
-      if (!oauth2) {
-        resolve();
-        return;
-      }
-      oauth2.revoke(token.accessToken, () => resolve());
-      window.setTimeout(resolve, 3_000);
-    });
-  } catch {
-    // Revocation is best effort; the token expires within the hour anyway.
+  const drive = readGoogleDriveSettings(workspaceId);
+  const revokeGrant = !(
+    isGoogleDriveConnected(drive) && drive.clientId === readGoogleCalendarSettings(workspaceId).clientId
+  );
+  await revokeGoogleToken(tokenKey(workspaceId), { revokeGrant });
+  if (revokeGrant) {
+    forgetGoogleDriveAccessToken(workspaceId);
   }
 };
 
@@ -754,7 +604,7 @@ export const syncGoogleCalendar = (
 export const connectGoogleCalendar = async (workspaceId: string, clientId: string) => {
   const trimmedClientId = clientId.trim();
   if (!trimmedClientId) {
-    throw new GoogleCalendarAuthError("Missing Google OAuth client id", true);
+    throw new GoogleAuthError("Missing Google OAuth client id", true);
   }
   writeGoogleCalendarSettings(workspaceId, { clientId: trimmedClientId });
   return syncGoogleCalendar(workspaceId, { mode: "interactive" });

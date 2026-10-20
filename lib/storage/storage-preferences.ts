@@ -1,6 +1,22 @@
 import { validateWorkspaceId } from "@/lib/security/workspace-crypto";
+import { cloudProviderOfIdentity } from "@/lib/storage/cloud-provider-error";
 
-export type WorkspaceStorageProvider = "indexeddb" | "cloudkit";
+export type WorkspaceStorageProvider = "indexeddb" | "cloudkit" | "gdrive";
+
+/** Every provider other than the device's own IndexedDB keeps an encrypted cloud copy. */
+export type WorkspaceCloudStorageProvider = Exclude<WorkspaceStorageProvider, "indexeddb">;
+
+const storageProviders = new Set<WorkspaceStorageProvider>(["indexeddb", "cloudkit", "gdrive"]);
+
+export const isStorageProvider = (value: unknown): value is WorkspaceStorageProvider =>
+  typeof value === "string" && storageProviders.has(value as WorkspaceStorageProvider);
+
+export const isCloudStorageProvider = (
+  provider: WorkspaceStorageProvider
+): provider is WorkspaceCloudStorageProvider => provider !== "indexeddb";
+
+export const cloudStorageProviderLabel = (provider: WorkspaceStorageProvider) =>
+  provider === "gdrive" ? "Google Drive" : provider === "cloudkit" ? "iCloud" : "this device";
 
 export type WorkspaceSyncStatus =
   | "idle"
@@ -101,7 +117,7 @@ const parsePreference = (
   if (
     !isRecord(value) ||
     value.workspaceId !== expectedWorkspaceId ||
-    (value.provider !== "indexeddb" && value.provider !== "cloudkit") ||
+    !isStorageProvider(value.provider) ||
     typeof value.status !== "string" ||
     !syncStatuses.has(value.status as WorkspaceSyncStatus) ||
     typeof value.pendingUpload !== "boolean" ||
@@ -268,7 +284,7 @@ export function parsePortableWorkspaceStoragePreference(
     Object.keys(value).length !== 2 ||
     !("workspaceId" in value) ||
     !("provider" in value) ||
-    (value.provider !== "indexeddb" && value.provider !== "cloudkit")
+    !isStorageProvider(value.provider)
   ) {
     throw new Error("The portable workspace storage preference is invalid.");
   }
@@ -311,14 +327,13 @@ export function replaceWorkspaceStoragePreferencesFromBackup(
     registry.workspaces[preference.workspaceId] = {
       workspaceId: preference.workspaceId,
       provider: preference.provider,
-      status: preference.provider === "cloudkit" ? "auth-required" : "idle",
+      status: isCloudStorageProvider(preference.provider) ? "auth-required" : "idle",
       lastSyncAt: null,
       pendingUpload: false,
-      lastError:
-        preference.provider === "cloudkit"
-          ? "Reconnect iCloud on this device before syncing the restored workspace."
-          : null,
-      // CloudKit identities, server change tags, session tokens, and other
+      lastError: isCloudStorageProvider(preference.provider)
+        ? `Reconnect ${cloudStorageProviderLabel(preference.provider)} on this device before syncing the restored workspace.`
+        : null,
+      // Cloud identities, server change tags, session tokens, and other
       // device-bound authentication state are deliberately never portable.
       cloudKitUserRecordName: null,
       cloudManifestChangeTag: null,
@@ -352,12 +367,25 @@ export function setWorkspaceStorageProvider(
   workspaceIdInput: string,
   provider: WorkspaceStorageProvider
 ): WorkspaceStoragePreference {
+  const current = getWorkspaceStoragePreference(workspaceIdInput);
+  // The bound account and the server change tag belong to one cloud. A stale
+  // CloudKit tag must never be compared with a Drive file version (or vice
+  // versa), so moving to a DIFFERENT cloud starts from a clean binding. A
+  // pause on this device (cloud → local → same cloud) keeps it, so resuming
+  // stays silent and the original-account guard keeps working.
+  const boundTo = cloudProviderOfIdentity(current.cloudKitUserRecordName);
+  const rebind =
+    isCloudStorageProvider(provider) && boundTo !== null && boundTo !== provider
+      ? { cloudKitUserRecordName: null, cloudManifestChangeTag: null }
+      : {};
+
   if (provider === "indexeddb") {
     return updateWorkspaceStoragePreference(workspaceIdInput, {
       provider,
       status: "idle",
       pendingUpload: false,
-      lastError: null
+      lastError: null,
+      ...rebind
     });
   }
 
@@ -365,7 +393,8 @@ export function setWorkspaceStorageProvider(
     provider,
     status: "pending",
     pendingUpload: true,
-    lastError: null
+    lastError: null,
+    ...rebind
   });
 }
 

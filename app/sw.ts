@@ -2,7 +2,7 @@
 
 import { defaultCache } from "@serwist/next/worker";
 import type { PrecacheEntry, SerwistGlobalConfig } from "serwist";
-import { Serwist } from "serwist";
+import { NetworkOnly, Serwist } from "serwist";
 
 declare global {
   interface WorkerGlobalScope extends SerwistGlobalConfig {
@@ -30,7 +30,17 @@ const serwist = new Serwist({
   skipWaiting: true,
   navigationPreload: true,
   disableDevLogs: true,
-  runtimeCaching: defaultCache,
+  runtimeCaching: [
+    // Cloud storage and Google sign-in answers must never come from the
+    // cross-origin NetworkFirst cache that defaultCache applies to every GET:
+    // a stale Drive download or identity reply would mask the real state.
+    {
+      matcher: ({ url }) =>
+        /^(www\.googleapis\.com|oauth2\.googleapis\.com|api\.apple-cloudkit\.com)$/.test(url.hostname),
+      handler: new NetworkOnly()
+    },
+    ...defaultCache
+  ],
   fallbacks: {
     entries: [
       {

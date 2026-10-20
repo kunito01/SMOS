@@ -10,6 +10,7 @@ import {
   type EncryptedWorkspaceBundleSnapshot
 } from "@/lib/storage/indexed-db";
 import { validateWorkspaceId } from "@/lib/security/workspace-crypto";
+import { CloudProviderError, type CloudProviderErrorCode } from "@/lib/storage/cloud-provider-error";
 
 const MANIFEST_RECORD_TYPE = "SMOSWorkspaceManifest";
 const CHUNK_RECORD_TYPE = "SMOSWorkspaceChunk";
@@ -71,23 +72,11 @@ export type CloudKitWorkspaceUploadOptions = {
   expectedManifestChangeTag?: string | null;
 };
 
-export type CloudKitProviderErrorCode =
-  | "AUTH_REQUIRED"
-  | "CONFLICT"
-  | "CRYPTO_UNAVAILABLE"
-  | "INVALID_REMOTE_DATA"
-  | "PAYLOAD_TOO_LARGE"
-  | "QUOTA_EXCEEDED"
-  | "THROTTLED"
-  | "REQUEST_FAILED";
+export type CloudKitProviderErrorCode = CloudProviderErrorCode;
 
-export class CloudKitProviderError extends Error {
-  constructor(
-    public readonly code: CloudKitProviderErrorCode,
-    message: string,
-    options?: ErrorOptions
-  ) {
-    super(message, options);
+export class CloudKitProviderError extends CloudProviderError {
+  constructor(code: CloudKitProviderErrorCode, message: string, options?: ErrorOptions) {
+    super("cloudkit", code, message, options);
     this.name = "CloudKitProviderError";
   }
 }

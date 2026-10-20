@@ -15,6 +15,7 @@ export const trTranslations = {
   loginRestoreDeviceBackupError: "Geri yüklenemedi: Kurtarma anahtarı yanlış veya yedek dosyası hasarlı.",
   loginRestoreDeviceNotEmpty: "Bu tarayıcıda zaten yerel hesaplar var. Mevcut verilerin uyarı olmadan üzerine yazılmasını önlemek için oturum açın ve Arşiv’den geri yükleyin.",
   loginRestoreRequired: "Bu cihazdaki şifreli verilere erişilemiyor veya önceki tam site geri yüklemesi tamamlanmadı. Onarımı tamamlamak için şifreli tam site yedeğini yeniden içe aktarın.",
+  loginCloudReconnectRequired: "Bu çalışma alanı Google Drive'da saklanıyor ancak bu cihazda kullanılabilir bir Google oturumu yok. Önce başka bir cihazdan şifreli tam site yedeğini geri yükleyin, sonra Arşiv'de Google Drive'a yeniden bağlanın.",
   loginEmail: "E-posta",
   loginPassword: "Parola",
   registerConfirmPassword: "Parolayı doğrula",

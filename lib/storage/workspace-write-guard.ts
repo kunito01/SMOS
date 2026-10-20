@@ -1,4 +1,4 @@
-import { getWorkspaceStoragePreference } from "@/lib/storage/storage-preferences";
+import { getWorkspaceStoragePreference, isCloudStorageProvider } from "@/lib/storage/storage-preferences";
 
 export const WORKSPACE_CONFLICT_BLOCKED_EVENT = "smos:workspace-conflict-blocked";
 
@@ -6,7 +6,7 @@ export class WorkspaceSyncConflictError extends Error {
   public readonly code = "WORKSPACE_SYNC_CONFLICT" as const;
 
   constructor() {
-    super("Resolve the iCloud storage conflict before creating or changing anything");
+    super("Resolve the cloud storage conflict before creating or changing anything");
     this.name = "WorkspaceSyncConflictError";
     Object.setPrototypeOf(this, new.target.prototype);
   }
@@ -40,7 +40,7 @@ export function assertWorkspaceWritable(
 ) {
   const preference = getWorkspaceStoragePreference(workspaceId);
 
-  if (preference.provider === "cloudkit" && preference.status === "conflict") {
+  if (isCloudStorageProvider(preference.provider) && preference.status === "conflict") {
     if (notify) {
       notifyWorkspaceConflictBlocked();
     }

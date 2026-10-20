@@ -1,5 +1,7 @@
 "use client";
 
+import { LocalAuthError } from "@/lib/api/auth";
+
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowRight, Check, Cloud, LoaderCircle, ShieldCheck } from "lucide-react";
@@ -95,7 +97,12 @@ export function AppleCloudKitLoginPanel() {
         requestSequence === requestSequenceRef.current &&
         currentIdentityKeyRef.current === identityKey
       ) {
-        setFlow({ phase: "error", message: t("loginAppleSetupFailed") });
+        const cloudReconnect =
+          error instanceof LocalAuthError && error.code === "CLOUD_AUTH_REQUIRED";
+        setFlow({
+          phase: "error",
+          message: cloudReconnect ? t("loginCloudReconnectRequired") : t("loginAppleSetupFailed")
+        });
       }
     }
   }, [commitAppleAccountUser, inspectAppleAccount, router, t]);

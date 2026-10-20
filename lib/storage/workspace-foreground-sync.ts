@@ -1,7 +1,7 @@
 "use client";
 
 import { authApi } from "@/lib/api";
-import { getWorkspaceStoragePreference } from "@/lib/storage/storage-preferences";
+import { getWorkspaceStoragePreference, isCloudStorageProvider } from "@/lib/storage/storage-preferences";
 
 /**
  * Pulls the CloudKit copy when it is newer than the local one. Used when a
@@ -25,7 +25,7 @@ export const pullWorkspaceFromCloud = async (
   options: { reloadPage?: boolean; minIntervalMs?: number; skipWhenUnsaved?: () => boolean } = {}
 ): Promise<ForegroundPullResult> => {
   const preference = getWorkspaceStoragePreference(workspaceId);
-  if (preference.provider !== "cloudkit") {
+  if (!isCloudStorageProvider(preference.provider)) {
     return { status: "skipped", reason: "not-cloud" };
   }
   if (preference.status === "conflict") {

@@ -71,7 +71,9 @@ export function LoginPage() {
           ? t("authInvalidCredentials")
           : cause.code === "STORAGE_CORRUPT"
             ? t("loginRestoreRequired")
-            : t("authLoginFailed")
+            : cause.code === "CLOUD_AUTH_REQUIRED"
+              ? t("loginCloudReconnectRequired")
+              : t("authLoginFailed")
         : t("authLoginFailed"));
     } finally {
       setBusy(false);

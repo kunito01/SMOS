@@ -7,9 +7,12 @@ import {
   Cloud,
   CloudOff,
   Database,
+  FolderSync,
   HardDrive,
+  Link2,
   RefreshCw,
-  ShieldCheck
+  ShieldCheck,
+  Unplug
 } from "lucide-react";
 import { useCloudKitAuth } from "@/components/providers/cloudkit-auth-provider";
 import { useAuth, useI18n } from "@/components/providers/app-providers";
@@ -20,11 +23,24 @@ import { SectionHeader } from "@/components/ui/section-header";
 import { useCloudKitAccountDisplay } from "@/components/storage/use-cloudkit-account-display";
 import { authApi } from "@/lib/api";
 import { formatLocalizedDate } from "@/lib/i18n/formatters";
+import { preloadGoogleIdentity } from "@/lib/integrations/google-auth";
 import {
   CLOUDKIT_SIGN_IN_BUTTON_ID,
   CLOUDKIT_SIGN_OUT_BUTTON_ID
 } from "@/lib/storage/cloudkit/cloudkit-client";
 import {
+  connectGoogleDriveAccount,
+  disconnectGoogleDriveAccount,
+  getGoogleDriveTokenUsableUntil,
+  hasGoogleDriveAccessToken,
+  isGoogleDriveConnected,
+  readGoogleDriveSettings,
+  requestGoogleDriveAccessToken,
+  subscribeGoogleDriveStatus,
+  type GoogleDriveSettings
+} from "@/lib/storage/google-drive/google-drive-client";
+import {
+  describeWorkspaceSyncFailure,
   getWorkspaceCloudSyncAvailability,
   type WorkspaceConflictResolution,
   type WorkspaceSyncResult
@@ -74,6 +90,50 @@ export function ArchiveStorageSyncCard({ workspaceId }: ArchiveStorageSyncCardPr
     error: cloudKitAuthError
   };
 
+  // Google Drive connection state is device-bound (localStorage), like the
+  // CloudKit session: the OAuth client id, the connected account, and whether
+  // a usable token is still cached.
+  const [drive, setDrive] = useState<GoogleDriveSettings>(() => readGoogleDriveSettings(workspaceId));
+  const [driveHasToken, setDriveHasToken] = useState(() => hasGoogleDriveAccessToken(workspaceId));
+  const [driveClientIdDraft, setDriveClientIdDraft] = useState(
+    () => readGoogleDriveSettings(workspaceId).clientId
+  );
+  const refreshDrive = useCallback(() => {
+    const next = readGoogleDriveSettings(workspaceId);
+    setDrive(next);
+    setDriveHasToken(hasGoogleDriveAccessToken(workspaceId));
+    setDriveClientIdDraft((draft) => (draft.trim() ? draft : next.clientId));
+  }, [workspaceId]);
+
+  useEffect(() => {
+    refreshDrive();
+    // Load Google Identity Services early so the connect click can open the popup synchronously.
+    void preloadGoogleIdentity().catch(() => undefined);
+    return subscribeGoogleDriveStatus(refreshDrive);
+  }, [refreshDrive]);
+
+  // Google tokens live about an hour and cannot be refreshed silently. Flip
+  // the card to "reconnect" the moment the cached one lapses, so the Sync
+  // button never surprises the user with a popup it did not announce.
+  useEffect(() => {
+    if (!driveHasToken) {
+      return;
+    }
+    const usableUntil = getGoogleDriveTokenUsableUntil(workspaceId);
+    if (usableUntil === null) {
+      refreshDrive();
+      return;
+    }
+    const timer = window.setTimeout(refreshDrive, Math.max(1_000, usableUntil - Date.now() + 500));
+    return () => window.clearTimeout(timer);
+  }, [driveHasToken, refreshDrive, workspaceId]);
+
+  const driveConfigured = Boolean(drive.clientId.trim());
+  const driveConnected = isGoogleDriveConnected(drive);
+  const driveNeedsReconnect = driveConnected && !driveHasToken;
+  const isDriveProvider = preference.provider === "gdrive";
+  const isCloudKitProvider = preference.provider === "cloudkit";
+
   const refreshPreference = useCallback(() => {
     const next = getWorkspaceStoragePreference(workspaceId);
     setPreference(next);
@@ -84,7 +144,7 @@ export function ArchiveStorageSyncCard({ workspaceId }: ArchiveStorageSyncCardPr
     setPreference(getWorkspaceStoragePreference(workspaceId));
   }, [workspaceId]);
 
-  // Keep the status badge and "last sync" time live: the background CloudKit
+  // Keep the status badge and "last sync" time live: the background cloud
   // auto-upload updates the stored preference without any user action, so
   // re-read it whenever it changes (this tab), another tab/window writes it
   // (storage event), or the user returns to this tab.
@@ -94,10 +154,15 @@ export function ArchiveStorageSyncCard({ workspaceId }: ArchiveStorageSyncCardPr
       setPreference((prev) =>
         prev.updatedAt === next.updatedAt && prev.status === next.status ? prev : next
       );
+      refreshDrive();
     };
 
     const onStorage = (event: StorageEvent) => {
-      if (!event.key || event.key.includes("workspace-storage-preferences")) {
+      if (
+        !event.key ||
+        event.key.includes("workspace-storage-preferences") ||
+        event.key.includes("google-drive")
+      ) {
         refresh();
       }
     };
@@ -118,7 +183,7 @@ export function ArchiveStorageSyncCard({ workspaceId }: ArchiveStorageSyncCardPr
       document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("focus", refresh);
     };
-  }, [workspaceId]);
+  }, [refreshDrive, workspaceId]);
 
   useEffect(() => {
     if (availability.available) {
@@ -126,11 +191,33 @@ export function ArchiveStorageSyncCard({ workspaceId }: ArchiveStorageSyncCardPr
     }
   }, [availability.available, refreshCloudKitAuth]);
 
+  // Scope picks the headline: which cloud was syncing, or the Google account
+  // step itself. The detail is the coordinator's scrubbed description, so a
+  // token or upload session id can never end up on screen.
+  const describeFailure = useCallback(
+    (error: unknown, scope: WorkspaceStorageProvider | "google-account" = preference.provider) => {
+      const headline =
+        scope === "google-account"
+          ? t("storageGoogleDriveConnectFailed")
+          : scope === "gdrive"
+            ? t("storageGoogleDriveSyncFailed")
+            : t("storageSyncFailed");
+      const detail = describeWorkspaceSyncFailure(error);
+      return detail ? `${headline} (${detail})` : headline;
+    },
+    [preference.provider, t]
+  );
+
   const finishSyncResult = useCallback(
     async (result: WorkspaceSyncResult, successMessage: string) => {
       setPreference(result.preference);
+      const resultIsDrive = result.preference.provider === "gdrive";
       if (result.outcome === "auth-required") {
-        void refreshCloudKitAuth();
+        if (resultIsDrive) {
+          refreshDrive();
+        } else {
+          void refreshCloudKitAuth();
+        }
       }
 
       if (result.outcome === "synced") {
@@ -145,16 +232,28 @@ export function ArchiveStorageSyncCard({ workspaceId }: ArchiveStorageSyncCardPr
       setNotice({
         message:
           result.outcome === "auth-required"
-            ? t("storageCloudKitSignInRequired")
+            ? resultIsDrive
+              ? t("storageGoogleDriveSignInRequired")
+              : t("storageCloudKitSignInRequired")
             : result.outcome === "account-mismatch"
-              ? t("storageCloudKitAccountMismatch")
-            : result.preference.lastError || t("storageSyncFailed"),
+              ? resultIsDrive
+                ? t("storageGoogleDriveAccountMismatch")
+                : t("storageCloudKitAccountMismatch")
+              : result.preference.lastError || t("storageSyncFailed"),
         tone: "error"
       });
       return false;
     },
-    [refreshCloudKitAuth, t]
+    [refreshCloudKitAuth, refreshDrive, t]
   );
+
+  /** Must run inside a click handler: Google's popup needs the user gesture. */
+  const ensureDriveToken = useCallback(async () => {
+    if (!hasGoogleDriveAccessToken(workspaceId)) {
+      await requestGoogleDriveAccessToken(workspaceId, "interactive");
+    }
+    refreshDrive();
+  }, [refreshDrive, workspaceId]);
 
   const switchProvider = useCallback(
     async (target: WorkspaceStorageProvider) => {
@@ -163,9 +262,27 @@ export function ArchiveStorageSyncCard({ workspaceId }: ArchiveStorageSyncCardPr
 
       try {
         if (target === "indexeddb") {
-          const next = await authApi.disconnectActiveWorkspaceCloudKit();
+          const next = await authApi.disconnectActiveWorkspaceCloud();
           setPreference(next);
           setNotice({ message: t("storageSwitchSuccess"), tone: "success" });
+          return;
+        }
+
+        if (target === "gdrive") {
+          if (!driveConfigured) {
+            setNotice({ message: t("storageGoogleDriveUnavailable"), tone: "error" });
+            return;
+          }
+          if (!driveConnected) {
+            setNotice({ message: t("storageGoogleDriveSignInRequired"), tone: "error" });
+            return;
+          }
+          await ensureDriveToken();
+          const result = await authApi.connectActiveWorkspaceCloud("gdrive");
+          const synced = await finishSyncResult(result, t("storageSwitchSuccess"));
+          if (!synced) {
+            refreshPreference();
+          }
           return;
         }
 
@@ -180,19 +297,32 @@ export function ArchiveStorageSyncCard({ workspaceId }: ArchiveStorageSyncCardPr
           return;
         }
 
-        const result = await authApi.connectActiveWorkspaceCloudKit(user);
+        const result = await authApi.connectActiveWorkspaceCloud("cloudkit", user);
         const synced = await finishSyncResult(result, t("storageSwitchSuccess"));
         if (!synced) {
           refreshPreference();
         }
-      } catch {
+      } catch (error) {
         refreshPreference();
-        setNotice({ message: t("storageSyncFailed"), tone: "error" });
+        refreshDrive();
+        setNotice({ message: describeFailure(error, target), tone: "error" });
       } finally {
         setBusy(null);
       }
     },
-    [availability.available, cloudKitIdentity, finishSyncResult, refreshCloudKitAuth, refreshPreference, t]
+    [
+      availability.available,
+      cloudKitIdentity,
+      describeFailure,
+      driveConfigured,
+      driveConnected,
+      ensureDriveToken,
+      finishSyncResult,
+      refreshCloudKitAuth,
+      refreshDrive,
+      refreshPreference,
+      t
+    ]
   );
 
   const syncNow = async () => {
@@ -200,13 +330,19 @@ export function ArchiveStorageSyncCard({ workspaceId }: ArchiveStorageSyncCardPr
     setNotice(null);
 
     try {
+      if (preference.provider === "gdrive") {
+        await ensureDriveToken();
+      }
       await finishSyncResult(
-        await authApi.syncActiveWorkspaceCloud(cloudKitIdentity ?? undefined),
+        await authApi.syncActiveWorkspaceCloud(
+          preference.provider === "cloudkit" ? (cloudKitIdentity ?? undefined) : undefined
+        ),
         t("storageSyncSuccess")
       );
-    } catch {
+    } catch (error) {
       refreshPreference();
-      setNotice({ message: t("storageSyncFailed"), tone: "error" });
+      refreshDrive();
+      setNotice({ message: describeFailure(error), tone: "error" });
     } finally {
       setBusy(null);
     }
@@ -218,31 +354,99 @@ export function ArchiveStorageSyncCard({ workspaceId }: ArchiveStorageSyncCardPr
       setNotice(null);
 
       try {
+        if (preference.provider === "gdrive") {
+          await ensureDriveToken();
+        }
         const resolved = await finishSyncResult(
           await authApi.resolveActiveWorkspaceCloudConflict(
             resolution,
-            cloudKitIdentity ?? undefined
+            preference.provider === "cloudkit" ? (cloudKitIdentity ?? undefined) : undefined
           ),
           t("storageSyncSuccess")
         );
         if (!resolved) {
           refreshPreference();
         }
-      } catch {
+      } catch (error) {
         refreshPreference();
-        setNotice({ message: t("storageSyncFailed"), tone: "error" });
+        refreshDrive();
+        setNotice({ message: describeFailure(error), tone: "error" });
       } finally {
         setBusy(null);
         setConflictResolution(null);
       }
     },
-    [cloudKitIdentity, finishSyncResult, refreshPreference, t]
+    [
+      cloudKitIdentity,
+      describeFailure,
+      ensureDriveToken,
+      finishSyncResult,
+      preference.provider,
+      refreshDrive,
+      refreshPreference,
+      t
+    ]
   );
+
+  const connectDrive = async () => {
+    setBusy("auth");
+    setNotice(null);
+    try {
+      await connectGoogleDriveAccount(workspaceId, driveClientIdDraft);
+      refreshDrive();
+      setNotice({ message: t("storageGoogleDriveConnected"), tone: "success" });
+    } catch (error) {
+      refreshDrive();
+      setNotice({ message: describeFailure(error, "google-account"), tone: "error" });
+      setBusy(null);
+      return;
+    }
+    setBusy(null);
+    // Drive was already this workspace's storage (disconnect → connect, or a
+    // mismatch fixed by picking the right account): resume straight away.
+    if (preference.provider === "gdrive") {
+      await syncNow();
+    }
+  };
+
+  const reconnectDrive = async () => {
+    setBusy("auth");
+    setNotice(null);
+    try {
+      await ensureDriveToken();
+    } catch (error) {
+      refreshDrive();
+      setNotice({ message: describeFailure(error, "google-account"), tone: "error" });
+      setBusy(null);
+      return;
+    }
+    setBusy(null);
+    if (preference.provider === "gdrive") {
+      await syncNow();
+    }
+  };
+
+  const disconnectDrive = async () => {
+    setBusy("auth");
+    setNotice(null);
+    try {
+      await disconnectGoogleDriveAccount(workspaceId);
+      refreshDrive();
+      refreshPreference();
+    } catch (error) {
+      refreshDrive();
+      setNotice({ message: describeFailure(error, "google-account"), tone: "error" });
+    } finally {
+      setBusy(null);
+    }
+  };
 
   const providerTitle =
     preference.provider === "cloudkit"
       ? t("storageCloudKitTitle")
-      : t("storageIndexedDbTitle");
+      : preference.provider === "gdrive"
+        ? t("storageGoogleDriveTitle")
+        : t("storageIndexedDbTitle");
   const lastSync = preference.lastSyncAt
     ? formatLocalizedDate(preference.lastSyncAt, language, {
         dateStyle: "medium",
@@ -253,29 +457,50 @@ export function ArchiveStorageSyncCard({ workspaceId }: ArchiveStorageSyncCardPr
     if (preference.provider === "indexeddb") {
       return { label: t("storageUpToDate"), tone: "success" as const };
     }
-    if (!availability.available) {
-      return { label: t("storageCloudKitUnavailable"), tone: "error" as const };
-    }
-    if (
+    const working =
       busy === "sync" ||
       busy === "switch" ||
       busy === "resolve" ||
-      preference.status === "syncing"
-    ) {
-      return { label: t("storageSyncing"), tone: "pending" as const };
-    }
-    if (authState.error) {
-      return { label: t("storageSyncFailed"), tone: "error" as const };
-    }
-    if (preference.status === "auth-required" || !authState.signedIn) {
-      return { label: t("storageCloudKitSignInRequired"), tone: "error" as const };
-    }
-    if (preference.status === "account-mismatch") {
-      return { label: t("storageCloudKitAccountMismatch"), tone: "error" as const };
+      preference.status === "syncing";
+
+    if (isDriveProvider) {
+      if (!driveConfigured) {
+        return { label: t("storageGoogleDriveUnavailable"), tone: "error" as const };
+      }
+      if (working) {
+        return { label: t("storageSyncing"), tone: "pending" as const };
+      }
+      if (driveNeedsReconnect) {
+        return { label: t("storageGoogleDriveTokenExpired"), tone: "pending" as const };
+      }
+      if (preference.status === "auth-required" || !driveConnected) {
+        return { label: t("storageGoogleDriveSignInRequired"), tone: "error" as const };
+      }
+      if (preference.status === "account-mismatch") {
+        return { label: t("storageGoogleDriveAccountMismatch"), tone: "error" as const };
+      }
+    } else {
+      if (!availability.available) {
+        return { label: t("storageCloudKitUnavailable"), tone: "error" as const };
+      }
+      if (working) {
+        return { label: t("storageSyncing"), tone: "pending" as const };
+      }
+      if (authState.error) {
+        return { label: t("storageSyncFailed"), tone: "error" as const };
+      }
+      if (preference.status === "auth-required" || !authState.signedIn) {
+        return { label: t("storageCloudKitSignInRequired"), tone: "error" as const };
+      }
+      if (preference.status === "account-mismatch") {
+        return { label: t("storageCloudKitAccountMismatch"), tone: "error" as const };
+      }
     }
     if (preference.status === "conflict" || preference.status === "error") {
       return {
-        label: preference.lastError || t("storageSyncFailed"),
+        label:
+          preference.lastError ||
+          (isDriveProvider ? t("storageGoogleDriveSyncFailed") : t("storageSyncFailed")),
         tone: "error" as const
       };
     }
@@ -310,7 +535,13 @@ export function ArchiveStorageSyncCard({ workspaceId }: ArchiveStorageSyncCardPr
             </p>
             <div className="mt-3 flex min-w-0 items-center gap-3">
               <span className="grid size-11 shrink-0 place-items-center rounded-full bg-limepop text-ink">
-                {preference.provider === "cloudkit" ? <Cloud size={20} /> : <HardDrive size={20} />}
+                {isCloudKitProvider ? (
+                  <Cloud size={20} />
+                ) : isDriveProvider ? (
+                  <FolderSync size={20} />
+                ) : (
+                  <HardDrive size={20} />
+                )}
               </span>
               <p className="min-w-0 text-lg font-black leading-tight">{providerTitle}</p>
             </div>
@@ -345,10 +576,10 @@ export function ArchiveStorageSyncCard({ workspaceId }: ArchiveStorageSyncCardPr
             body={t("storageIndexedDbBody")}
             warning={t("storageIndexedDbWarning")}
             action={
-              preference.provider === "cloudkit" ? (
+              preference.provider !== "indexeddb" ? (
                 isAppleAccount ? (
                   <p className="rounded-studio bg-ink/[0.06] p-3 text-xs font-bold leading-5 text-muted">
-                    {t("storageAppleAlwaysCloud")}
+                    {t("storageAppleCloudRequired")}
                   </p>
                 ) : (
                   <Button
@@ -359,7 +590,7 @@ export function ArchiveStorageSyncCard({ workspaceId }: ArchiveStorageSyncCardPr
                     className="w-full sm:w-auto"
                   >
                     <CloudOff size={17} />
-                    {t("storageCloudKitDisconnect")}
+                    {isDriveProvider ? t("storageGoogleDriveStopSync") : t("storageCloudKitDisconnect")}
                   </Button>
                 )
               ) : null
@@ -425,7 +656,7 @@ export function ArchiveStorageSyncCard({ workspaceId }: ArchiveStorageSyncCardPr
                       </code>
                     </div>
                   ) : null}
-                  {preference.provider !== "cloudkit" ? (
+                  {!isCloudKitProvider ? (
                     <p className="mt-3 rounded-studio bg-limepop/45 p-2 text-[0.68rem] font-bold leading-5 text-ink">
                       {t("storageCloudKitConfirmChoice")}
                     </p>
@@ -438,7 +669,7 @@ export function ArchiveStorageSyncCard({ workspaceId }: ArchiveStorageSyncCardPr
               )}
               {authState.signedIn ? (
                 <div className="grid w-full gap-2">
-                  {preference.provider !== "cloudkit" ? (
+                  {!isCloudKitProvider ? (
                     <Button
                       variant="secondary"
                       size="md"
@@ -519,6 +750,180 @@ export function ArchiveStorageSyncCard({ workspaceId }: ArchiveStorageSyncCardPr
           ) : null}
         </div>
 
+        <div className="mt-4 grid gap-4 rounded-studio-lg bg-ink/[0.055] p-4 lg:grid-cols-[minmax(0,1fr)_minmax(15rem,0.45fr)]">
+          <div className="min-w-0">
+            <div className="flex items-start gap-3">
+              <span className="grid size-10 shrink-0 place-items-center rounded-full bg-limepop text-ink">
+                <FolderSync size={19} />
+              </span>
+              <div className="min-w-0">
+                <p className="text-sm font-black">
+                  {!driveConfigured
+                    ? t("storageGoogleDriveUnavailable")
+                    : driveConnected
+                      ? driveNeedsReconnect
+                        ? t("storageGoogleDriveTokenExpired")
+                        : t("storageGoogleDriveConnected")
+                      : t("storageGoogleDriveTitle")}
+                </p>
+                <p className="mt-1 text-xs font-bold leading-5 text-muted">
+                  {t("storageGoogleDriveBody")}
+                </p>
+                <p className="mt-1 text-xs font-bold leading-5 text-muted">
+                  {t("storageGoogleDriveSameAccountOnly")}
+                </p>
+                <p className="mt-1 text-xs font-bold leading-5 text-coral">
+                  {t("storageGoogleDriveWarning")}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid min-h-12 content-center justify-stretch gap-3 rounded-studio bg-white p-3 shadow-sm ring-1 ring-black/[0.05]">
+            {driveConnected ? (
+              <div className="min-w-0 rounded-studio bg-aqua/45 p-3 ring-1 ring-black/[0.05]">
+                <p className="text-[0.68rem] font-black uppercase tracking-[0.08em] text-muted">
+                  {t("storageGoogleDriveAccountTitle")}
+                </p>
+                <p className="mt-2 text-[0.68rem] font-bold text-muted">
+                  {t("storageCloudKitSignedInAs")}
+                </p>
+                <p className="mt-0.5 truncate text-sm font-black text-ink">
+                  {drive.accountName || drive.accountEmail || t("storageGoogleDriveConnected")}
+                </p>
+                {drive.accountEmail && drive.accountName ? (
+                  <p className="mt-1 truncate text-xs font-bold text-muted">{drive.accountEmail}</p>
+                ) : null}
+                {!isDriveProvider ? (
+                  <p className="mt-3 rounded-studio bg-limepop/45 p-2 text-[0.68rem] font-bold leading-5 text-ink">
+                    {t("storageGoogleDriveConfirmChoice")}
+                  </p>
+                ) : null}
+              </div>
+            ) : (
+              <div className="grid gap-2">
+                <label className="grid gap-1">
+                  <span className="text-[0.68rem] font-black uppercase tracking-[0.08em] text-muted">
+                    {t("googleCalendarClientIdLabel")}
+                  </span>
+                  <input
+                    value={driveClientIdDraft}
+                    onChange={(event) => setDriveClientIdDraft(event.target.value)}
+                    placeholder="xxxxxxxx.apps.googleusercontent.com"
+                    spellCheck={false}
+                    autoComplete="off"
+                    className="h-11 w-full rounded-full border-0 bg-white px-4 text-sm font-bold text-ink outline-none ring-1 ring-black/[0.06] focus:ring-coral"
+                  />
+                </label>
+                <p className="text-[0.66rem] font-bold leading-5 text-muted">
+                  {t("storageGoogleDriveClientIdHint")}
+                </p>
+                <Button
+                  variant="secondary"
+                  size="md"
+                  disabled={Boolean(busy) || !driveClientIdDraft.trim()}
+                  onClick={() => void connectDrive()}
+                  className="w-full"
+                >
+                  <Link2 size={17} />
+                  {t("storageGoogleDriveConnect")}
+                </Button>
+              </div>
+            )}
+            {driveConnected ? (
+              <div className="grid w-full gap-2">
+                {!isDriveProvider ? (
+                  <Button
+                    variant="secondary"
+                    size="md"
+                    disabled={Boolean(busy) || !driveConfigured}
+                    onClick={() => setSwitchTarget("gdrive")}
+                    className="w-full"
+                  >
+                    <FolderSync size={17} />
+                    {t("storageSwitchAction")}
+                  </Button>
+                ) : preference.status === "account-mismatch" ? (
+                  <>
+                    <p className="flex items-start gap-2 rounded-studio bg-coral/10 p-3 text-xs font-black leading-5 text-coral">
+                      <AlertTriangle className="mt-0.5 shrink-0" size={16} />
+                      <span>{t("storageGoogleDriveAccountMismatch")}</span>
+                    </p>
+                    <Button
+                      variant="secondary"
+                      size="md"
+                      disabled={Boolean(busy)}
+                      onClick={() => void syncNow()}
+                      className="w-full"
+                    >
+                      <RefreshCw className={cn(busy === "sync" && "animate-spin")} size={17} />
+                      {busy === "sync" ? t("storageSyncing") : t("storageSyncNow")}
+                    </Button>
+                  </>
+                ) : preference.status === "conflict" ? (
+                  <>
+                    <Button
+                      variant="secondary"
+                      size="md"
+                      disabled={Boolean(busy)}
+                      onClick={() => setConflictResolution("keep-local")}
+                      className="w-full"
+                    >
+                      <HardDrive size={17} />
+                      {t("storageKeepLocal")}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="md"
+                      disabled={Boolean(busy)}
+                      onClick={() => setConflictResolution("use-cloud")}
+                      className="w-full"
+                    >
+                      <FolderSync size={17} />
+                      {t("storageUseGoogleDrive")}
+                    </Button>
+                  </>
+                ) : driveNeedsReconnect ? (
+                  <Button
+                    variant="secondary"
+                    size="md"
+                    disabled={Boolean(busy)}
+                    onClick={() => void reconnectDrive()}
+                    className="w-full"
+                  >
+                    <RefreshCw size={17} />
+                    {t("storageGoogleDriveReconnect")}
+                  </Button>
+                ) : (
+                  <Button
+                    variant="secondary"
+                    size="md"
+                    disabled={Boolean(busy)}
+                    onClick={() => void syncNow()}
+                    className="w-full"
+                  >
+                    <RefreshCw className={cn(busy === "sync" && "animate-spin")} size={17} />
+                    {busy === "sync" ? t("storageSyncing") : t("storageSyncNow")}
+                  </Button>
+                )}
+                <Button
+                  variant="ghost"
+                  size="md"
+                  disabled={Boolean(busy)}
+                  onClick={() => void disconnectDrive()}
+                  className="w-full"
+                >
+                  <Unplug size={17} />
+                  {t("storageGoogleDriveDisconnect")}
+                </Button>
+                <p className="text-center text-[0.66rem] font-bold leading-5 text-muted">
+                  {t("storageGoogleDriveDisconnectBody")}
+                </p>
+              </div>
+            ) : null}
+          </div>
+        </div>
+
         {notice ? (
           <p
             role={notice.tone === "error" ? "alert" : "status"}
@@ -542,7 +947,11 @@ export function ArchiveStorageSyncCard({ workspaceId }: ArchiveStorageSyncCardPr
         description={
           switchTarget === "cloudkit"
             ? t("storageSwitchToCloudKitBody")
-            : t("storageSwitchToIndexedDbBody")
+            : switchTarget === "gdrive"
+              ? t("storageSwitchToGoogleDriveBody")
+              : isDriveProvider
+                ? t("storageSwitchToIndexedDbFromGoogleDriveBody")
+                : t("storageSwitchToIndexedDbBody")
         }
         warning={t("storageSwitchWarning")}
         cancelLabel={t("cancel")}
@@ -561,18 +970,24 @@ export function ArchiveStorageSyncCard({ workspaceId }: ArchiveStorageSyncCardPr
         open={Boolean(conflictResolution)}
         busy={busy === "resolve"}
         acknowledgementLabel={t("storageSwitchAcknowledgement")}
-        title={t("storageConflictTitle")}
+        title={isDriveProvider ? t("storageGoogleDriveConflictTitle") : t("storageConflictTitle")}
         description={
           conflictResolution === "keep-local"
-            ? t("storageConflictKeepLocalBody")
-            : t("storageConflictUseCloudBody")
+            ? isDriveProvider
+              ? t("storageGoogleDriveConflictKeepLocalBody")
+              : t("storageConflictKeepLocalBody")
+            : isDriveProvider
+              ? t("storageGoogleDriveConflictUseCloudBody")
+              : t("storageConflictUseCloudBody")
         }
         warning={t("storageConflictWarning")}
         cancelLabel={t("cancel")}
         confirmLabel={
           conflictResolution === "keep-local"
             ? t("storageKeepLocal")
-            : t("storageUseCloud")
+            : isDriveProvider
+              ? t("storageUseGoogleDrive")
+              : t("storageUseCloud")
         }
         onCancel={() => setConflictResolution(null)}
         onConfirm={() => {

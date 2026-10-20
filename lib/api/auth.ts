@@ -67,11 +67,13 @@ import {
   restoreWorkspaceStoragePreference,
   setWorkspaceStorageProvider,
   type PortableWorkspaceStoragePreference,
+  type WorkspaceCloudStorageProvider,
   type WorkspaceStoragePreference
 } from "@/lib/storage/storage-preferences";
 import {
+  connectWorkspaceCloud,
   connectWorkspaceCloudKit,
-  disconnectWorkspaceCloudKit,
+  disconnectWorkspaceCloud,
   manualSyncWorkspace,
   pullWorkspaceFromCloudOnLogin,
   resolveWorkspaceCloudConflict,
@@ -83,6 +85,7 @@ import {
   withDatabaseMutationLock
 } from "@/lib/storage/workspace-mutation-lock";
 import { isWorkspaceSyncConflictError } from "@/lib/storage/workspace-write-guard";
+import { forgetGoogleDriveAccessToken } from "@/lib/storage/google-drive/google-drive-client";
 import {
   IndexedDbStorageError,
   captureEncryptedDatabaseSnapshot,
@@ -148,6 +151,7 @@ export type AppleAccountRecoveryPayload = {
 export type LocalAuthErrorCode =
   | "ACCOUNT_EXISTS"
   | "APPLE_CLOUD_REQUIRED"
+  | "CLOUD_AUTH_REQUIRED"
   | "BACKUP_INVALID"
   | "BACKUP_CAPTURE_CHANGED"
   | "BACKUP_REQUIRED"
@@ -1299,8 +1303,11 @@ const activateAppleAccountSession = async (input: {
   workspace: WorkspaceRecoveryMetadata;
 }) => {
   const { account, identity, masterKey, workspace } = input;
+  // Apple ID accounts always keep a cloud copy, but the cloud may be iCloud
+  // or Google Drive: only a local-only preference is forced onto CloudKit so
+  // a Drive choice survives every sign-in.
   const currentPreference = getWorkspaceStoragePreference(workspace.workspaceId);
-  if (currentPreference.provider !== "cloudkit") {
+  if (currentPreference.provider === "indexeddb") {
     setWorkspaceStorageProvider(workspace.workspaceId, "cloudkit");
   }
 
@@ -1322,6 +1329,15 @@ const activateAppleAccountSession = async (input: {
           validateCloudBundleForSession(snapshot, cloudSession)
       });
       if (!recovery.didReplaceLocalBundle) {
+        if (recovery.outcome === "auth-required" && recovery.preference.provider === "gdrive") {
+          // The Google Drive copy cannot be fetched without a fresh Google
+          // token, and there is no session yet to request one from.
+          throw new LocalAuthError(
+            "CLOUD_AUTH_REQUIRED",
+            "This workspace is stored in Google Drive but the device has no usable Google session. Restore the encrypted full-site backup from another device, then reconnect Google Drive.",
+            { cause: localActivationError }
+          );
+        }
         throw localActivationError;
       }
 
@@ -1908,7 +1924,7 @@ export async function login(payload: AuthCredentials) {
         user = await setActiveSession(account, workspace, masterKey);
       } catch (localActivationError) {
         const storagePreference = getWorkspaceStoragePreference(workspace.workspaceId);
-        if (storagePreference.provider !== "cloudkit") {
+        if (storagePreference.provider === "indexeddb") {
           throw localActivationError;
         }
 
@@ -1927,6 +1943,13 @@ export async function login(payload: AuthCredentials) {
         });
 
         if (!recovery.didReplaceLocalBundle) {
+          if (recovery.outcome === "auth-required" && recovery.preference.provider === "gdrive") {
+            throw new LocalAuthError(
+              "CLOUD_AUTH_REQUIRED",
+              "This workspace is stored in Google Drive but the device has no usable Google session. Restore the encrypted full-site backup from another device, then reconnect Google Drive.",
+              { cause: localActivationError }
+            );
+          }
           throw localActivationError;
         }
 
@@ -2037,7 +2060,13 @@ export async function logout() {
   const wasAppleBacked = Boolean(
     activeSession && isStoredAppleAccount(activeSession.account)
   );
+  const workspaceId = activeSession?.workspace.workspaceId ?? null;
   clearLocalSession();
+  if (workspaceId) {
+    // Google access tokens are device-bound and would otherwise outlive the
+    // session for up to an hour on a shared machine.
+    forgetGoogleDriveAccessToken(workspaceId);
+  }
 
   if (wasAppleBacked) {
     // Without this, the persisted ckSession cookie lets the login page resolve
@@ -2107,6 +2136,26 @@ export async function syncActiveWorkspaceCloud(
   });
 }
 
+/**
+ * Switches the active workspace to a cloud provider (iCloud or Google Drive)
+ * while validating downloads with the active key. Google Drive needs a token
+ * obtained inside a user gesture before this is called.
+ */
+export async function connectActiveWorkspaceCloud(
+  provider: WorkspaceCloudStorageProvider,
+  authenticatedUser?: CloudKitUserIdentity
+) {
+  if (!activeSession) {
+    throw new LocalAuthError("NO_ACTIVE_SESSION", "No local workspace is unlocked");
+  }
+
+  const session = activeSession;
+  return connectWorkspaceCloud(session.workspace.workspaceId, provider, {
+    authenticatedUser,
+    validateRemoteBundle: (snapshot) => validateCloudBundleForSession(snapshot, session)
+  });
+}
+
 /** Enables/reconnects CloudKit while validating downloads with the active key. */
 export async function connectActiveWorkspaceCloudKit(
   authenticatedUser?: CloudKitUserIdentity
@@ -2122,8 +2171,11 @@ export async function connectActiveWorkspaceCloudKit(
   });
 }
 
-/** Stops iCloud sync for the active workspace. Apple ID accounts must stay on CloudKit. */
-export async function disconnectActiveWorkspaceCloudKit() {
+/**
+ * Stops cloud sync for the active workspace. Apple ID accounts must keep a
+ * cloud copy (iCloud or Google Drive) and can only switch between the two.
+ */
+export async function disconnectActiveWorkspaceCloud() {
   if (!activeSession) {
     throw new LocalAuthError("NO_ACTIVE_SESSION", "No local workspace is unlocked");
   }
@@ -2131,11 +2183,16 @@ export async function disconnectActiveWorkspaceCloudKit() {
   if (isStoredAppleAccount(activeSession.account)) {
     throw new LocalAuthError(
       "APPLE_CLOUD_REQUIRED",
-      "Apple ID accounts always store their data in the CloudKit private database"
+      "Apple ID accounts always keep their data in a cloud location (iCloud or Google Drive)"
     );
   }
 
-  return disconnectWorkspaceCloudKit(activeSession.workspace.workspaceId);
+  return disconnectWorkspaceCloud(activeSession.workspace.workspaceId);
+}
+
+/** @deprecated Use disconnectActiveWorkspaceCloud; kept for existing callers. */
+export async function disconnectActiveWorkspaceCloudKit() {
+  return disconnectActiveWorkspaceCloud();
 }
 
 /** Resolves a CloudKit conflict without exposing the active workspace key. */
