@@ -4,7 +4,7 @@ import { LocalAuthError } from "@/lib/api/auth";
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowRight, Check, Cloud, LoaderCircle, ShieldCheck } from "lucide-react";
+import { ArrowRight, Check, Cloud, KeyRound, LoaderCircle, ShieldCheck } from "lucide-react";
 import { useCloudKitAuth } from "@/components/providers/cloudkit-auth-provider";
 import { useAuth, useI18n } from "@/components/providers/app-providers";
 import { useCloudKitAccountDisplay } from "@/components/storage/use-cloudkit-account-display";
@@ -14,12 +14,18 @@ import {
   CLOUDKIT_SIGN_OUT_BUTTON_ID,
   type CloudKitUserIdentity
 } from "@/lib/storage/cloudkit/cloudkit-client";
+import {
+  formatWorkspaceCode,
+  isValidWorkspaceCode,
+  sanitizeWorkspaceCodeInput
+} from "@/lib/security/workspace-crypto";
 import { cn } from "@/lib/utils/cn";
 
 type AppleAccountFlow =
   | { phase: "idle" }
   | { phase: "resolving" }
   | { phase: "needs-setup"; suggestedName: string }
+  | { phase: "needs-recovery-key" }
   | { phase: "error"; message: string };
 
 export function AppleCloudKitLoginPanel() {
@@ -29,6 +35,7 @@ export function AppleCloudKitLoginPanel() {
     commitAppleAccountUser,
     inspectAppleAccount,
     provisionAppleAccount,
+    recoverAppleAccount,
     signOut,
     unlockAppleAccountOffline,
     user
@@ -44,6 +51,7 @@ export function AppleCloudKitLoginPanel() {
   const { account, accountTag } = useCloudKitAccountDisplay(identity);
   const [flow, setFlow] = useState<AppleAccountFlow>({ phase: "idle" });
   const [name, setName] = useState("");
+  const [recoveryCode, setRecoveryCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const resolvedIdentityRef = useRef<string | null>(null);
@@ -83,6 +91,11 @@ export function AppleCloudKitLoginPanel() {
       if (resolution.kind === "ready") {
         commitAppleAccountUser(resolution.user);
         router.replace("/dashboard");
+        return;
+      }
+      if (resolution.kind === "needs-recovery-key") {
+        setRecoveryCode("");
+        setFlow({ phase: "needs-recovery-key" });
         return;
       }
       setName(resolution.suggestedName);
@@ -152,6 +165,7 @@ export function AppleCloudKitLoginPanel() {
     setActionError(null);
     if (!identity) {
       resolvedIdentityRef.current = null;
+      setRecoveryCode("");
       setFlow({ phase: "idle" });
       setBusy(false);
       return;
@@ -187,6 +201,53 @@ export function AppleCloudKitLoginPanel() {
         currentIdentityKeyRef.current === identityKey
       ) {
         setActionError(t("loginAppleSetupFailed"));
+      }
+    } finally {
+      if (
+        requestSequence === requestSequenceRef.current &&
+        currentIdentityKeyRef.current === identityKey
+      ) {
+        setBusy(false);
+      }
+    }
+  };
+
+  const completeRecovery = async () => {
+    if (!identity || busy || !isValidWorkspaceCode(recoveryCode)) {
+      return;
+    }
+    const identityKey = identity.userRecordName;
+    if (currentIdentityKeyRef.current !== identityKey) {
+      return;
+    }
+    const requestSequence = ++requestSequenceRef.current;
+    setBusy(true);
+    setActionError(null);
+    try {
+      const result = await recoverAppleAccount({ identity, workspaceCode: recoveryCode });
+      if (
+        requestSequence !== requestSequenceRef.current ||
+        currentIdentityKeyRef.current !== identityKey
+      ) {
+        await signOut();
+        return;
+      }
+      setRecoveryCode("");
+      commitAppleAccountUser(result.user);
+      router.replace("/dashboard");
+    } catch (error) {
+      if (
+        requestSequence === requestSequenceRef.current &&
+        currentIdentityKeyRef.current === identityKey
+      ) {
+        const code = error instanceof LocalAuthError ? error.code : null;
+        setActionError(
+          code === "RECOVERY_KEY_MISMATCH"
+            ? t("loginAppleRecoveryKeyMismatch")
+            : code === "CLOUD_AUTH_REQUIRED"
+              ? t("loginCloudReconnectRequired")
+              : t("loginAppleRecoveryFailed")
+        );
       }
     } finally {
       if (
@@ -330,6 +391,48 @@ export function AppleCloudKitLoginPanel() {
               onClick={() => void completeSetup()}
             >
               {busy ? t("saving") : t("loginAppleContinue")}
+              <ArrowRight size={18} />
+            </Button>
+          </div>
+        ) : null}
+
+        {flow.phase === "needs-recovery-key" ? (
+          <div className="rounded-studio-lg bg-[#f4f0e8] p-4 text-ink">
+            <div className="flex items-start gap-3">
+              <KeyRound className="mt-0.5 shrink-0" size={22} />
+              <div>
+                <h4 className="text-base font-black">{t("loginAppleRecoveryKeyTitle")}</h4>
+                <p className="mt-1 text-xs font-bold leading-5 text-muted">
+                  {t("loginAppleRecoveryKeyBody")}
+                </p>
+              </div>
+            </div>
+            <label className="mt-4 block">
+              <span className="mb-2 block text-xs font-black">{t("workspaceKeyLabel")}</span>
+              <input
+                value={formatWorkspaceCode(recoveryCode)}
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                spellCheck={false}
+                onChange={(event) => setRecoveryCode(sanitizeWorkspaceCodeInput(event.target.value))}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    void completeRecovery();
+                  }
+                }}
+                placeholder="XXXX-XXXX-XXXX-XXXX"
+                className="h-12 w-full rounded-full border-0 bg-white px-4 text-center font-mono text-sm font-black tracking-[0.08em] outline-none ring-1 ring-black/5 focus:ring-2 focus:ring-coral"
+              />
+            </label>
+            <Button
+              type="button"
+              size="lg"
+              className="mt-4 w-full"
+              disabled={busy || !isValidWorkspaceCode(recoveryCode)}
+              onClick={() => void completeRecovery()}
+            >
+              {busy ? t("loading") : t("loginAppleContinue")}
               <ArrowRight size={18} />
             </Button>
           </div>

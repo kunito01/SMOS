@@ -21,9 +21,11 @@ import {
   decryptWorkspaceRecord,
   decryptWorkspaceEnvelope,
   encryptWorkspaceEnvelope,
+  generateWorkspaceCode,
   isValidWorkspaceCode,
   parseEncryptedWorkspaceEnvelope,
   protectMasterKeyWithPassword,
+  protectMasterKeyWithWorkspaceCode,
   unlockAppleAccountRecovery,
   unlockMasterKeyWithPassword,
   unlockWorkspaceRecovery,
@@ -68,7 +70,8 @@ import {
   setWorkspaceStorageProvider,
   type PortableWorkspaceStoragePreference,
   type WorkspaceCloudStorageProvider,
-  type WorkspaceStoragePreference
+  type WorkspaceStoragePreference,
+  updateWorkspaceStoragePreference
 } from "@/lib/storage/storage-preferences";
 import {
   connectWorkspaceCloud,
@@ -77,7 +80,8 @@ import {
   manualSyncWorkspace,
   pullWorkspaceFromCloudOnLogin,
   resolveWorkspaceCloudConflict,
-  type WorkspaceConflictResolution
+  type WorkspaceConflictResolution,
+  cancelWorkspaceCloudUpload
 } from "@/lib/storage/workspace-sync-coordinator";
 import {
   bumpWorkspaceMutationEpoch,
@@ -134,6 +138,15 @@ export type AppleAccountLoginResolution =
       suggestedName: string;
     }
   | {
+      /**
+       * This device holds the account's encrypted workspace but can unlock it
+       * neither from the device vault nor from iCloud; the 16-digit recovery
+       * key created in the Archive opens it.
+       */
+      kind: "needs-recovery-key";
+      accountName: string;
+    }
+  | {
       kind: "ready";
       user: LocalAuthUser;
     };
@@ -162,6 +175,7 @@ export type LocalAuthErrorCode =
   | "INVALID_WORKSPACE_CODE"
   | "NO_ACTIVE_SESSION"
   | "PASSWORD_TOO_SHORT"
+  | "RECOVERY_KEY_EXISTS"
   | "RECOVERY_KEY_MISMATCH"
   | "REGISTRATION_FAILED"
   | "RESTORE_IN_PROGRESS"
@@ -844,6 +858,19 @@ const upsertWorkspaceMember = async (account: StoredLocalAccount) => {
   );
 
   if (index >= 0) {
+    const existing = mockDatabase.users[index];
+    if (
+      existing.id === member.id &&
+      existing.name === member.name &&
+      existing.email === member.email &&
+      existing.avatar === member.avatar &&
+      existing.createdAt === member.createdAt
+    ) {
+      // Login bookkeeping is not a local change. Persisting an unchanged row
+      // would set pendingUpload and turn the next sync into a "both changed"
+      // conflict whenever another device uploaded in the meantime.
+      return;
+    }
     mockDatabase.users[index] = member;
   } else {
     mockDatabase.users.unshift(member);
@@ -1296,24 +1323,195 @@ const requireAppleFingerprint = async (identity: CloudKitUserIdentity) => {
   return fingerprint;
 };
 
+/**
+ * The registry copy of a workspace's metadata may carry a wrap the cloud
+ * profile knows nothing about: a recovery key created on this device. A
+ * cloud-path sign-in must never overwrite it with the fingerprint wrap, so the
+ * registry copy wins unless it demonstrably wraps a different key (a leftover
+ * of an earlier, abandoned provisioning).
+ */
+const preferRegistryWorkspaceMetadata = async (
+  incoming: WorkspaceRecoveryMetadata,
+  fingerprint: string,
+  masterKey: WorkspaceMasterKey
+): Promise<WorkspaceRecoveryMetadata> => {
+  const local = readWorkspaces().find((item) => item.workspaceId === incoming.workspaceId);
+  if (!local || local.wrappedMasterKey.ciphertext === incoming.wrappedMasterKey.ciphertext) {
+    return incoming;
+  }
+  try {
+    const unwrapped = await unlockAppleAccountRecovery(local, fingerprint);
+    try {
+      return masterKeysMatch(unwrapped, masterKey) ? local : incoming;
+    } finally {
+      unwrapped.fill(0);
+    }
+  } catch (error) {
+    if (error instanceof WorkspaceCryptoError) {
+      // Not wrapped with the fingerprint: a recovery-key wrap made here.
+      return local;
+    }
+    throw error;
+  }
+};
+
+// Fingerprints whose iCloud account profile was seen in status "ready" from
+// this device. A device may only enter without consulting iCloud once that
+// is known (or once a sync tag proves a completed first upload); otherwise an
+// interrupted first-time setup would never be finished and a second device
+// would mint a second workspace for the same Apple ID.
+const appleProfileConfirmationsKey = "studio-map-os.apple-profile-confirmed.v1";
+
+const readAppleProfileConfirmations = (): Record<string, string> => {
+  try {
+    const raw = window.localStorage.getItem(appleProfileConfirmationsKey);
+    const parsed: unknown = raw ? JSON.parse(raw) : null;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return {};
+    }
+    return Object.fromEntries(
+      Object.entries(parsed as Record<string, unknown>).filter(
+        (entry): entry is [string, string] => typeof entry[1] === "string"
+      )
+    );
+  } catch {
+    return {};
+  }
+};
+
+const markAppleProfileConfirmed = (fingerprint: string) => {
+  try {
+    const next = { ...readAppleProfileConfirmations(), [fingerprint]: new Date().toISOString() };
+    window.localStorage.setItem(appleProfileConfirmationsKey, JSON.stringify(next));
+  } catch {
+    // Best effort: the next cloud-path sign-in records it again.
+  }
+};
+
+const isAppleProfileConfirmed = (fingerprint: string, workspaceId: string) =>
+  Boolean(readAppleProfileConfirmations()[fingerprint]) ||
+  getWorkspaceStoragePreference(workspaceId).cloudManifestChangeTag !== null;
+
+// A device that already holds the workspace must not wait out CloudKit's
+// retry budget before it may ask for the recovery key or enter from the vault.
+const STORED_ACCOUNT_PROFILE_DEADLINE_MS = 6_000;
+// Bound for the iCloud login pull on a device that already holds the
+// workspace; Drive keeps the regular bound because it is not refusing.
+const LIFELINE_LOGIN_PULL_TIMEOUT_MS = 10_000;
+
+const withDeadline = <T>(operation: Promise<T>, timeoutMs: number) =>
+  new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("The CloudKit profile request timed out.")), timeoutMs);
+    operation.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timer);
+        reject(error);
+      }
+    );
+  });
+
+const lifelineLoginPullTimeout = (workspaceId: string) =>
+  getWorkspaceStoragePreference(workspaceId).provider === "cloudkit"
+    ? LIFELINE_LOGIN_PULL_TIMEOUT_MS
+    : undefined;
+
+type StoredAppleDevice = { account: StoredAppleAccount; workspace: WorkspaceRecoveryMetadata };
+
+/** The account registry entry and workspace metadata this device holds for an Apple ID. */
+const findStoredAppleAccountByFingerprint = (fingerprint: string): StoredAppleDevice | null => {
+  const account = readAccounts()
+    .filter(isStoredAppleAccount)
+    .find((item) => item.appleAccountFingerprint === fingerprint);
+  if (!account) {
+    return null;
+  }
+  const workspace = readWorkspaces().find((item) => item.workspaceId === account.workspaceId);
+  return workspace ? { account, workspace } : null;
+};
+
+/**
+ * Best-effort follow-up after a device entered without consulting iCloud.
+ * When the account profile does answer: make sure this device's workspace is
+ * the one registered to the Apple ID (another device may have re-created it),
+ * finish an interrupted first-time setup, and remember the confirmation.
+ * Silent while Apple refuses the database.
+ */
+const reconcileAppleProfileAfterLifeline = async (
+  identity: CloudKitUserIdentity,
+  fingerprint: string,
+  workspaceId: string
+) => {
+  let profile: CloudKitAppleAccountProfile | null;
+  try {
+    profile = await fetchCloudKitAppleAccountProfile(identity);
+  } catch {
+    return;
+  }
+  if (!profile || profile.appleAccountFingerprint !== fingerprint) {
+    return;
+  }
+  if (activeSession?.workspace.workspaceId !== workspaceId) {
+    return;
+  }
+  if (profile.workspaceId !== workspaceId) {
+    // Uploading this workspace would fork the account; hold the upload and
+    // say so on the storage card instead of staying silent.
+    cancelWorkspaceCloudUpload(workspaceId);
+    updateWorkspaceStoragePreference(workspaceId, {
+      status: "error",
+      lastError:
+        "This device holds a different workspace than the one registered to this Apple ID in iCloud. Export an encrypted backup before syncing."
+    });
+    debugAppleAuth("reconcile: this device's workspace differs from the iCloud profile");
+    return;
+  }
+  if (profile.status === "provisioning") {
+    try {
+      await withAuthMutationLock(() => finalizeAppleProvisioning(profile, identity));
+    } catch {
+      return;
+    }
+  }
+  markAppleProfileConfirmed(fingerprint);
+};
+
 const activateAppleAccountSession = async (input: {
   account: StoredAppleAccount;
   identity: CloudKitUserIdentity;
   masterKey: WorkspaceMasterKey;
   workspace: WorkspaceRecoveryMetadata;
+  /**
+   * Bound for the routine login pull's download (never for the restore of a
+   * missing local bundle). A device that already holds the workspace passes
+   * a short bound so an iCloud database that Apple refuses, or a slow link,
+   * cannot hold the sign-in; the pull then ends as a recorded error and the
+   * foreground and manual syncs retry it.
+   */
+  loginPullTimeoutMs?: number;
 }) => {
-  const { account, identity, masterKey, workspace } = input;
-  // Apple ID accounts always keep a cloud copy, but the cloud may be iCloud
-  // or Google Drive: only a local-only preference is forced onto CloudKit so
-  // a Drive choice survives every sign-in.
-  const currentPreference = getWorkspaceStoragePreference(workspace.workspaceId);
-  if (currentPreference.provider === "indexeddb") {
-    setWorkspaceStorageProvider(workspace.workspaceId, "cloudkit");
-  }
+  const { account, identity, masterKey } = input;
+  let workspace = input.workspace;
 
   let user: LocalAuthUser;
   let recoveredMissingLocalBundle = false;
   try {
+    workspace = await preferRegistryWorkspaceMetadata(
+      input.workspace,
+      account.appleAccountFingerprint,
+      masterKey
+    );
+    // Apple ID accounts always keep a cloud copy, but the cloud may be iCloud
+    // or Google Drive: only a local-only preference is forced onto CloudKit so
+    // a Drive choice survives every sign-in.
+    const currentPreference = getWorkspaceStoragePreference(workspace.workspaceId);
+    if (currentPreference.provider === "indexeddb") {
+      setWorkspaceStorageProvider(workspace.workspaceId, "cloudkit");
+    }
+
     try {
       user = await setActiveSession(account, workspace, masterKey);
     } catch (localActivationError) {
@@ -1353,6 +1551,7 @@ const activateAppleAccountSession = async (input: {
     if (!recoveredMissingLocalBundle) {
       const cloudPull = await pullWorkspaceFromCloudOnLogin(workspace.workspaceId, {
         authenticatedUser: identity,
+        downloadTimeoutMs: input.loginPullTimeoutMs,
         validateRemoteBundle: (snapshot) =>
           validateCloudBundleForSession(snapshot, cloudSession)
       });
@@ -1483,6 +1682,7 @@ const finalizeAppleProvisioning = async (
     }
   }
 
+  markAppleProfileConfirmed(profile.appleAccountFingerprint);
   void requestPersistentBrowserStorage();
   return session.user;
 };
@@ -1494,6 +1694,58 @@ const debugAppleAuth = (step: string) => {
 };
 
 /** Resolves an authenticated Apple identity into first-time setup or login. */
+/**
+ * Lifeline for a device that already joined this Apple account. Apple's web
+ * front end can refuse every private-database request for an account while
+ * Apple sign-in itself keeps working; such a device must still get in. The
+ * master key is taken from this device (the vault first, then the registry
+ * copy wrapped with the account fingerprint) and no CloudKit database request
+ * is made. Returns null when this device holds nothing for the account, so the
+ * caller falls back to the account profile in iCloud.
+ */
+const unlockAppleAccountFromDevice = async (
+  stored: StoredAppleDevice
+): Promise<{
+  account: StoredAppleAccount;
+  masterKey: WorkspaceMasterKey;
+  workspace: WorkspaceRecoveryMetadata;
+} | null> => {
+  const { account, workspace } = stored;
+  const fingerprint = account.appleAccountFingerprint;
+
+  try {
+    const masterKey = await unlockAppleDeviceVaultEntry({
+      appleAccountFingerprint: fingerprint,
+      workspaceId: account.workspaceId
+    });
+    debugAppleAuth("device unlock: vault unlocked");
+    return { account, masterKey, workspace };
+  } catch (error) {
+    if (!(error instanceof AppleDeviceVaultError)) {
+      throw error;
+    }
+    // Any vault problem (missing entry, damaged record, blocked IndexedDB)
+    // falls through to the registry copy rather than locking the user out.
+    debugAppleAuth(`device unlock: vault unavailable (${error.code}) -> registry unwrap`);
+  }
+
+  try {
+    // The registry metadata is wrapped with the same fingerprint the vault
+    // was keyed by, so it is this device's second copy of the key. Once a
+    // recovery code replaces that wrap, this unwrap fails and the caller
+    // continues with the cloud profile.
+    const masterKey = await unlockAppleAccountRecovery(workspace, fingerprint);
+    debugAppleAuth("device unlock: registry metadata unwrapped");
+    return { account, masterKey, workspace };
+  } catch (error) {
+    if (error instanceof WorkspaceCryptoError) {
+      debugAppleAuth(`device unlock: registry unwrap failed (${error.code})`);
+      return null;
+    }
+    throw error;
+  }
+};
+
 async function inspectAppleAccountUnlocked(
   identityInput: CloudKitUserIdentity
 ): Promise<AppleAccountLoginResolution> {
@@ -1504,9 +1756,71 @@ async function inspectAppleAccountUnlocked(
   const identity = await assertCloudKitAuthenticatedUser(identityInput);
   debugAppleAuth("inspect: identity asserted");
   const fingerprint = await requireAppleFingerprint(identity);
-  const profile = await fetchCloudKitAppleAccountProfile(identity);
+
+  const stored = findStoredAppleAccountByFingerprint(fingerprint);
+  const confirmed = stored ? isAppleProfileConfirmed(fingerprint, stored.workspace.workspaceId) : false;
+
+  const enterFromDevice = async (reason: string) => {
+    const fromDevice = stored ? await unlockAppleAccountFromDevice(stored) : null;
+    if (!fromDevice) {
+      return null;
+    }
+    debugAppleAuth(`inspect: entering from this device (${reason})`);
+    const user = await activateAppleAccountSession({
+      ...fromDevice,
+      identity,
+      loginPullTimeoutMs: lifelineLoginPullTimeout(fromDevice.workspace.workspaceId)
+    });
+    debugAppleAuth("inspect: session active (device lifeline)");
+    void reconcileAppleProfileAfterLifeline(identity, fingerprint, fromDevice.workspace.workspaceId);
+    return mockApi({ kind: "ready" as const, user });
+  };
+
+  if (confirmed) {
+    // Lifeline: this device has entered the account's workspace before and
+    // iCloud confirmed the account, so the key comes from the device and the
+    // profile is only reconciled in the background.
+    const ready = await enterFromDevice("profile confirmed earlier");
+    if (ready) {
+      return ready;
+    }
+  }
+
+  let profile: CloudKitAppleAccountProfile | null;
+  try {
+    profile = stored
+      ? await withDeadline(fetchCloudKitAppleAccountProfile(identity), STORED_ACCOUNT_PROFILE_DEADLINE_MS)
+      : await fetchCloudKitAppleAccountProfile(identity);
+  } catch (error) {
+    if (!stored) {
+      throw error;
+    }
+    debugAppleAuth("inspect: profile unavailable for a device that holds the workspace");
+    if (!confirmed) {
+      // Setup was never confirmed, but this device holds the workspace:
+      // entering beats a lock-out while Apple refuses the database. The
+      // background reconciliation finishes the setup once iCloud answers.
+      const ready = await enterFromDevice("profile unavailable, setup unconfirmed");
+      if (ready) {
+        return ready;
+      }
+    }
+    // The vault is gone and the registry copy is wrapped with the recovery
+    // key the user saved; that key opens it.
+    return { kind: "needs-recovery-key", accountName: stored.account.name };
+  }
   debugAppleAuth(`inspect: profile ${profile ? profile.status : "not found"}`);
   if (!profile) {
+    if (stored && !confirmed) {
+      // Interrupted first-time setup: resume it for the existing workspace
+      // (provisioning reuses the local workspace of a known fingerprint).
+      return { kind: "needs-setup", suggestedName: stored.account.name };
+    }
+    if (stored) {
+      // Never offer first-time setup over an existing local workspace: that
+      // would mint a second workspace for the same Apple ID.
+      return { kind: "needs-recovery-key", accountName: stored.account.name };
+    }
     return {
       kind: "needs-setup",
       suggestedName: appleSuggestedName(identity)
@@ -1554,6 +1868,7 @@ async function inspectAppleAccountUnlocked(
       throw error;
     }
   }
+  markAppleProfileConfirmed(fingerprint);
   return mockApi({ kind: "ready" as const, user });
 }
 
@@ -1817,6 +2132,32 @@ async function recoverAppleAccountUnlocked(
 
   const identity = await assertCloudKitAuthenticatedUser(payload.identity);
   const fingerprint = await requireAppleFingerprint(identity);
+
+  // A device that already holds the workspace opens it with the recovery key
+  // alone: no CloudKit database request, which Apple may be refusing.
+  const stored = findStoredAppleAccountByFingerprint(fingerprint);
+  if (stored) {
+    let localMasterKey: WorkspaceMasterKey;
+    try {
+      localMasterKey = await unlockWorkspaceRecovery(stored.workspace, payload.workspaceCode);
+    } catch (error) {
+      if (error instanceof WorkspaceCryptoError) {
+        throw new LocalAuthError("RECOVERY_KEY_MISMATCH", "The 16-digit recovery key is incorrect.", { cause: error });
+      }
+      throw error;
+    }
+    debugAppleAuth("recover: registry metadata unlocked with the recovery key");
+    const user = await activateAppleAccountSession({
+      account: stored.account,
+      identity,
+      masterKey: localMasterKey,
+      workspace: stored.workspace,
+      loginPullTimeoutMs: lifelineLoginPullTimeout(stored.workspace.workspaceId)
+    });
+    void reconcileAppleProfileAfterLifeline(identity, fingerprint, stored.workspace.workspaceId);
+    return mockApi({ token: "apple-cloudkit-workspace-session", user });
+  }
+
   const profile = await fetchCloudKitAppleAccountProfile(identity);
   if (!profile) {
     throw new LocalAuthError("WORKSPACE_NOT_FOUND", "No Studio Map OS profile exists for this Apple ID account.");
@@ -1853,6 +2194,7 @@ async function recoverAppleAccountUnlocked(
     if (profile.status === "provisioning") {
       user = await finalizeAppleProvisioning(profile, identity);
     }
+    markAppleProfileConfirmed(fingerprint);
     return mockApi({ token: "apple-cloudkit-workspace-session", user });
   } catch (error) {
     if (activeSession?.masterKey === masterKey) {
@@ -1875,6 +2217,109 @@ export async function recoverAppleAccount(
   payload: AppleAccountRecoveryPayload
 ): Promise<{ token: string; user: LocalAuthUser }> {
   return withAuthMutationLock(() => recoverAppleAccountUnlocked(payload));
+}
+
+/**
+ * The workspace registry is shared by every tab; the in-memory session keeps
+ * a copy of the metadata from sign-in. Adopt the registry copy whenever it
+ * changed (another tab created or replaced a recovery key), so this tab
+ * verifies codes and seals backups against the wrap that is actually stored.
+ */
+const refreshActiveSessionWorkspaceFromRegistry = (session: ActiveAuthSession) => {
+  const registryCopy = readWorkspaces().find(
+    (item) => item.workspaceId === session.workspace.workspaceId
+  );
+  if (
+    registryCopy &&
+    registryCopy.wrappedMasterKey.ciphertext !== session.workspace.wrappedMasterKey.ciphertext
+  ) {
+    session.workspace = registryCopy;
+  }
+  return session.workspace;
+};
+
+export type AppleWorkspaceRecoveryState = "not-apple" | "needs-key" | "has-key" | "unknown";
+
+const appleWorkspaceRecoveryState = async (
+  account: StoredAppleAccount,
+  workspace: WorkspaceRecoveryMetadata,
+  masterKey: WorkspaceMasterKey
+): Promise<AppleWorkspaceRecoveryState> => {
+  try {
+    const unwrapped = await unlockAppleAccountRecovery(workspace, account.appleAccountFingerprint);
+    try {
+      return masterKeysMatch(unwrapped, masterKey) ? "needs-key" : "unknown";
+    } finally {
+      unwrapped.fill(0);
+    }
+  } catch (error) {
+    if (error instanceof WorkspaceCryptoError) {
+      // Only a wrap that is not the fingerprint's means a recovery key exists.
+      return error.code === "RECOVERY_UNLOCK_FAILED" ? "has-key" : "unknown";
+    }
+    throw error;
+  }
+};
+
+/**
+ * Whether the active Apple ID workspace still relies on the account
+ * fingerprint alone ("needs-key"), already has a 16-digit recovery key
+ * ("has-key"), or cannot be judged because the metadata is unreadable
+ * ("unknown"). Reads the shared registry so every tab agrees.
+ */
+export async function getActiveAppleWorkspaceRecoveryState(): Promise<AppleWorkspaceRecoveryState> {
+  const session = activeSession;
+  if (!session || !isStoredAppleAccount(session.account)) {
+    return "not-apple";
+  }
+  const workspace = refreshActiveSessionWorkspaceFromRegistry(session);
+  return appleWorkspaceRecoveryState(session.account, workspace, session.masterKey);
+}
+
+/**
+ * Gives the active Apple ID workspace a 16-digit recovery key of its own. The
+ * same master key is re-wrapped with the code and that wrap replaces the
+ * registry copy; the device vault and the iCloud profile are untouched, so
+ * every existing way in keeps working. Refuses to mint a second key over an
+ * existing one unless `replace` is set, because the previous key stops
+ * working the moment the registry changes. Returns the code, shown once.
+ */
+export async function createRecoveryKeyForActiveAppleWorkspace(
+  options: { replace?: boolean } = {}
+): Promise<{ workspaceCode: string }> {
+  return withAuthMutationLock(async () => {
+    requireStorage();
+    const session = activeSession;
+    if (!session || !isStoredAppleAccount(session.account)) {
+      throw new LocalAuthError("NO_ACTIVE_SESSION", "No Apple ID workspace is unlocked.");
+    }
+    const registryCopy = refreshActiveSessionWorkspaceFromRegistry(session);
+    const state = await appleWorkspaceRecoveryState(session.account, registryCopy, session.masterKey);
+    if (state === "unknown") {
+      throw new LocalAuthError("STORAGE_CORRUPT", "The workspace recovery metadata could not be read.");
+    }
+    if (state === "has-key" && !options.replace) {
+      throw new LocalAuthError("RECOVERY_KEY_EXISTS", "This workspace already has a recovery key.");
+    }
+    const workspaceCode = generateWorkspaceCode();
+    const metadata = await protectMasterKeyWithWorkspaceCode(
+      session.masterKey,
+      workspaceCode,
+      session.workspace.workspaceId
+    );
+    // Prove the wrap round-trips before anything on disk is replaced.
+    const check = await unlockWorkspaceRecovery(metadata, workspaceCode);
+    try {
+      if (!masterKeysMatch(check, session.masterKey)) {
+        throw new LocalAuthError("STORAGE_CORRUPT", "The recovery key wrap did not round-trip.");
+      }
+    } finally {
+      check.fill(0);
+    }
+    upsertWorkspace(metadata);
+    session.workspace = metadata;
+    return { workspaceCode };
+  });
 }
 
 export async function login(payload: AuthCredentials) {
@@ -2180,14 +2625,20 @@ export async function disconnectActiveWorkspaceCloud() {
     throw new LocalAuthError("NO_ACTIVE_SESSION", "No local workspace is unlocked");
   }
 
-  if (isStoredAppleAccount(activeSession.account)) {
+  const workspaceId = activeSession.workspace.workspaceId;
+  const ownedByAppleAccount =
+    isStoredAppleAccount(activeSession.account) ||
+    readAccounts().some((item) => isStoredAppleAccount(item) && item.workspaceId === workspaceId);
+  if (ownedByAppleAccount) {
+    // A member who joined the Apple workspace by recovery key must not switch
+    // it to local-only either: the invariant belongs to the workspace.
     throw new LocalAuthError(
       "APPLE_CLOUD_REQUIRED",
       "Apple ID accounts always keep their data in a cloud location (iCloud or Google Drive)"
     );
   }
 
-  return disconnectWorkspaceCloud(activeSession.workspace.workspaceId);
+  return disconnectWorkspaceCloud(workspaceId);
 }
 
 /** @deprecated Use disconnectActiveWorkspaceCloud; kept for existing callers. */
@@ -2278,10 +2729,14 @@ export async function verifyActiveWorkspaceRecoveryCode(workspaceCode: string) {
   if (!activeSession) {
     throw new LocalAuthError("NO_ACTIVE_SESSION", "No local workspace is unlocked");
   }
+  // Backups package the registry copy; verify against that same wrap so a
+  // code that another tab replaced is rejected here instead of producing an
+  // export that opens with neither key.
+  const workspace = refreshActiveSessionWorkspaceFromRegistry(activeSession);
 
   let recoveredMasterKey: WorkspaceMasterKey;
   try {
-    recoveredMasterKey = await unlockWorkspaceRecovery(activeSession.workspace, workspaceCode);
+    recoveredMasterKey = await unlockWorkspaceRecovery(workspace, workspaceCode);
   } catch (error) {
     if (
       error instanceof WorkspaceCryptoError &&

@@ -789,6 +789,62 @@ export async function createWorkspaceRecovery(
   }
 }
 
+/**
+ * Wraps an EXISTING master key with a 16-digit workspace code, keeping the
+ * workspace id. This gives a workspace that was unlocked through an identity
+ * provider (an Apple ID account today) a recovery key of its own, so it can be
+ * exported, backed up and opened on a new device like a local workspace. The
+ * caller keeps ownership of `masterKey`; nothing here zeroes it.
+ */
+export async function protectMasterKeyWithWorkspaceCode(
+  masterKey: WorkspaceMasterKey,
+  code: string,
+  workspaceId: string
+): Promise<WorkspaceRecoveryMetadata> {
+  const normalizedCode = normalizeWorkspaceCode(code);
+  if (!isValidWorkspaceCode(normalizedCode)) {
+    throw new WorkspaceCryptoError(
+      "INVALID_WORKSPACE_CODE",
+      `The workspace code must contain exactly ${WORKSPACE_CODE_LENGTH} digits.`
+    );
+  }
+  // Validate everything that can throw before the key is copied, so no
+  // plaintext copy is left behind by a rejected argument.
+  const iv = randomBytes(AES_GCM_IV_BYTES);
+  const metadata: WorkspaceRecoveryMetadata = {
+    schema: RECOVERY_SCHEMA,
+    version: CRYPTO_VERSION,
+    workspaceId: validateWorkspaceId(workspaceId),
+    createdAt: new Date().toISOString(),
+    keyDerivation: createPbkdf2Parameters(),
+    wrappedMasterKey: createEmptyCiphertext(iv)
+  };
+  const keyCopy = copyMasterKey(masterKey);
+
+  try {
+    const wrappingKey = await derivePbkdf2Key(normalizedCode, metadata.keyDerivation);
+    const ciphertext = await getWebCrypto().subtle.encrypt(
+      {
+        name: AES_GCM,
+        iv,
+        additionalData: recoveryAdditionalData(metadata),
+        tagLength: AES_GCM_TAG_BITS
+      },
+      wrappingKey,
+      keyCopy
+    );
+    metadata.wrappedMasterKey.ciphertext = bytesToBase64(new Uint8Array(ciphertext));
+    return metadata;
+  } catch (error) {
+    if (error instanceof WorkspaceCryptoError) {
+      throw error;
+    }
+    throw new WorkspaceCryptoError("ENCRYPTION_FAILED", "The workspace master key could not be protected.");
+  } finally {
+    keyCopy.fill(0);
+  }
+}
+
 export async function unlockWorkspaceRecovery(
   metadata: WorkspaceRecoveryMetadata,
   code: string

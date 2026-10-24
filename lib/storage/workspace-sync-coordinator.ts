@@ -109,6 +109,12 @@ export type WorkspaceCloudSyncOptions = {
   ) => void | Promise<void>;
   /** Restore a verified remote bundle even when the local IndexedDB copy is missing. */
   forceRemoteRestore?: boolean;
+  /**
+   * Bound for the login pull's download. A sign-in that already holds the
+   * workspace locally passes a short bound so a cloud that refuses or crawls
+   * cannot hold the door; the pull then ends as a recorded error.
+   */
+  downloadTimeoutMs?: number;
 };
 
 type WorkspaceSyncErrorCode =
@@ -1371,7 +1377,10 @@ export async function pullWorkspaceFromCloudOnLogin(
       bindCloudKitUser(workspaceId, user);
       bindingEstablished = true;
 
-      const remote = await withTimeout(adapter.download(workspaceId), LOGIN_PULL_TIMEOUT_MS);
+      const remote = await withTimeout(
+        adapter.download(workspaceId),
+        options.downloadTimeoutMs ?? LOGIN_PULL_TIMEOUT_MS
+      );
       const current = getWorkspaceStoragePreference(workspaceId);
 
       if (!cloudBindingStillMatches(workspaceId, user, current)) {
