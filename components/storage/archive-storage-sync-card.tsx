@@ -30,7 +30,6 @@ import {
 } from "@/lib/storage/cloudkit/cloudkit-client";
 import {
   connectGoogleDriveAccount,
-  disconnectGoogleDriveAccount,
   getGoogleDriveTokenUsableUntil,
   hasGoogleDriveAccessToken,
   isGoogleDriveConnected,
@@ -65,7 +64,12 @@ type StorageNotice = {
 export function ArchiveStorageSyncCard({ workspaceId }: ArchiveStorageSyncCardProps) {
   const { language, t } = useI18n();
   const { user } = useAuth();
-  const isAppleAccount = Boolean(user?.isAppleAccount);
+  const cloudRequired = Boolean(user?.cloudRequired);
+  // Ownership belongs to the workspace, not to the account used to enter it:
+  // after a switch to Google the Apple record stays, and an Apple session must
+  // not move the workspace off Drive either.
+  const googleOwned =
+    user?.accountKind === "google" || authApi.getGoogleAccountForWorkspace(workspaceId) !== null;
   const {
     configured: cloudKitConfigured,
     error: cloudKitAuthError,
@@ -430,7 +434,7 @@ export function ArchiveStorageSyncCard({ workspaceId }: ArchiveStorageSyncCardPr
     setBusy("auth");
     setNotice(null);
     try {
-      await disconnectGoogleDriveAccount(workspaceId);
+      await authApi.disconnectActiveWorkspaceGoogleDrive();
       refreshDrive();
       refreshPreference();
     } catch (error) {
@@ -577,9 +581,11 @@ export function ArchiveStorageSyncCard({ workspaceId }: ArchiveStorageSyncCardPr
             warning={t("storageIndexedDbWarning")}
             action={
               preference.provider !== "indexeddb" ? (
-                isAppleAccount ? (
+                cloudRequired ? (
                   <p className="rounded-studio bg-ink/[0.06] p-3 text-xs font-bold leading-5 text-muted">
-                    {t("storageAppleCloudRequired")}
+                    {user?.accountKind === "google"
+                      ? t("storageGoogleCloudRequired")
+                      : t("storageAppleCloudRequired")}
                   </p>
                 ) : (
                   <Button
@@ -669,7 +675,7 @@ export function ArchiveStorageSyncCard({ workspaceId }: ArchiveStorageSyncCardPr
               )}
               {authState.signedIn ? (
                 <div className="grid w-full gap-2">
-                  {!isCloudKitProvider ? (
+                  {!isCloudKitProvider && !googleOwned ? (
                     <Button
                       variant="secondary"
                       size="md"
@@ -906,16 +912,22 @@ export function ArchiveStorageSyncCard({ workspaceId }: ArchiveStorageSyncCardPr
                     {busy === "sync" ? t("storageSyncing") : t("storageSyncNow")}
                   </Button>
                 )}
-                <Button
-                  variant="ghost"
-                  size="md"
-                  disabled={Boolean(busy)}
-                  onClick={() => void disconnectDrive()}
-                  className="w-full"
-                >
-                  <Unplug size={17} />
-                  {t("storageGoogleDriveDisconnect")}
-                </Button>
+                {googleOwned ? (
+                  <p className="rounded-studio bg-ink/[0.06] p-3 text-xs font-bold leading-5 text-muted">
+                    {t("storageGoogleCloudRequired")}
+                  </p>
+                ) : (
+                  <Button
+                    variant="ghost"
+                    size="md"
+                    disabled={Boolean(busy)}
+                    onClick={() => void disconnectDrive()}
+                    className="w-full"
+                  >
+                    <Unplug size={17} />
+                    {t("storageGoogleDriveDisconnect")}
+                  </Button>
+                )}
                 <p className="text-center text-[0.66rem] font-bold leading-5 text-muted">
                   {t("storageGoogleDriveDisconnectBody")}
                 </p>

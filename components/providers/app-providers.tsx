@@ -11,6 +11,8 @@ import type {
   AppleAccountLoginResolution,
   AppleAccountRecoveryPayload,
   AppleAccountSetupPayload,
+  GoogleAccountLoginResolution,
+  GoogleSignInPayload,
   LocalAuthUser,
   RegisterPayload,
   RegisterResult
@@ -33,6 +35,8 @@ type AuthContextValue = {
   provisionAppleAccount: (payload: AppleAccountSetupPayload) => Promise<RegisterResult>;
   recoverAppleAccount: (payload: AppleAccountRecoveryPayload) => Promise<{ token: string; user: LocalAuthUser }>;
   unlockAppleAccountOffline: () => Promise<{ user: LocalAuthUser } | null>;
+  signInWithGoogle: (payload: GoogleSignInPayload) => Promise<GoogleAccountLoginResolution>;
+  unlockGoogleAccountLocally: (options?: { allowWithoutToken?: boolean }) => Promise<{ user: LocalAuthUser } | null>;
   commitAppleAccountUser: (user: LocalAuthUser) => void;
   signInDevelopmentTestAccount: () => Promise<void>;
   signUp: (payload: RegisterPayload) => Promise<RegisterResult>;
@@ -122,6 +126,12 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
       },
       unlockAppleAccountOffline: async () => {
         return authApi.unlockAppleAccountOffline();
+      },
+      signInWithGoogle: async (payload: GoogleSignInPayload) => {
+        return authApi.signInWithGoogle(payload);
+      },
+      unlockGoogleAccountLocally: async (options?: { allowWithoutToken?: boolean }) => {
+        return authApi.unlockGoogleAccountLocally(options);
       },
       commitAppleAccountUser: (nextUser: LocalAuthUser) => setUser(nextUser),
       signInDevelopmentTestAccount: async () => {

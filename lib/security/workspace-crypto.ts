@@ -845,6 +845,57 @@ export async function protectMasterKeyWithWorkspaceCode(
   }
 }
 
+/**
+ * Wraps an EXISTING master key with an account-derived secret (an identity
+ * fingerprint of at least 32 characters), keeping the workspace id. This is
+ * how a workspace becomes reachable through a second identity provider
+ * (Apple ID → Google) without changing its master key. The caller keeps
+ * ownership of `masterKey`.
+ */
+export async function wrapMasterKeyWithAccountSecret(
+  masterKey: WorkspaceMasterKey,
+  secret: string,
+  workspaceId: string
+): Promise<WorkspaceRecoveryMetadata> {
+  assertAccountUnlockSecret(secret);
+  const iv = randomBytes(AES_GCM_IV_BYTES);
+  const metadata: WorkspaceRecoveryMetadata = {
+    schema: RECOVERY_SCHEMA,
+    version: CRYPTO_VERSION,
+    workspaceId: validateWorkspaceId(workspaceId),
+    createdAt: new Date().toISOString(),
+    keyDerivation: createPbkdf2Parameters(),
+    wrappedMasterKey: createEmptyCiphertext(iv)
+  };
+  const keyCopy = copyMasterKey(masterKey);
+
+  try {
+    const wrappingKey = await derivePbkdf2Key(secret, metadata.keyDerivation);
+    const ciphertext = await getWebCrypto().subtle.encrypt(
+      {
+        name: AES_GCM,
+        iv,
+        additionalData: recoveryAdditionalData(metadata),
+        tagLength: AES_GCM_TAG_BITS
+      },
+      wrappingKey,
+      keyCopy
+    );
+    metadata.wrappedMasterKey.ciphertext = bytesToBase64(new Uint8Array(ciphertext));
+    return metadata;
+  } catch (error) {
+    if (error instanceof WorkspaceCryptoError) {
+      throw error;
+    }
+    throw new WorkspaceCryptoError(
+      "ENCRYPTION_FAILED",
+      "The workspace master key could not be protected for the account."
+    );
+  } finally {
+    keyCopy.fill(0);
+  }
+}
+
 export async function unlockWorkspaceRecovery(
   metadata: WorkspaceRecoveryMetadata,
   code: string
@@ -1456,3 +1507,6 @@ export async function decryptWorkspaceRecord<T = unknown>(
     masterKey.fill(0);
   }
 }
+
+/** Unlocks metadata wrapped with an account-derived secret (an Apple or Google fingerprint). */
+export const unlockAccountRecovery = unlockAppleAccountRecovery;

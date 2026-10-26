@@ -76,7 +76,8 @@ export const storageTranslations = {
     storageGoogleDriveConnectFailed: "Google 账户连接失败",
     storageGoogleDriveSyncFailed: "Google Drive 同步失败",
     storageGoogleDriveTokenExpired: "Google 授权已过期，请重新连接后继续同步。",
-    storageSwitchToIndexedDbFromGoogleDriveBody: "将停止 Google Drive 自动同步，但保留本机加密资料和 Drive 中已有的副本。"
+    storageSwitchToIndexedDbFromGoogleDriveBody: "将停止 Google Drive 自动同步，但保留本机加密资料和 Drive 中已有的副本。",
+    storageGoogleCloudRequired: "Google 账户的资料必须储存在 Google Drive，不能改为仅本机储存。"
   },
   en: {
     storageChoiceTitle: "Choose where your data is stored",
@@ -155,7 +156,8 @@ export const storageTranslations = {
     storageGoogleDriveConnectFailed: "Google account connection failed",
     storageGoogleDriveSyncFailed: "Google Drive sync failed",
     storageGoogleDriveTokenExpired: "The Google authorization expired. Reconnect to resume syncing.",
-    storageSwitchToIndexedDbFromGoogleDriveBody: "Automatic Google Drive sync will stop. The encrypted local data and the existing Drive copy will both remain."
+    storageSwitchToIndexedDbFromGoogleDriveBody: "Automatic Google Drive sync will stop. The encrypted local data and the existing Drive copy will both remain.",
+    storageGoogleCloudRequired: "Google accounts always keep their data in Google Drive and cannot switch to local-only storage."
   },
   ja: {
     storageChoiceTitle: "データの保存先を選択",
@@ -234,7 +236,8 @@ export const storageTranslations = {
     storageGoogleDriveConnectFailed: "Google アカウントの接続に失敗しました",
     storageGoogleDriveSyncFailed: "Google ドライブの同期に失敗しました",
     storageGoogleDriveTokenExpired: "Google の認証が期限切れです。再接続すると同期を再開できます。",
-    storageSwitchToIndexedDbFromGoogleDriveBody: "Google ドライブの自動同期を停止します。端末内データと既存のドライブのコピーは残ります。"
+    storageSwitchToIndexedDbFromGoogleDriveBody: "Google ドライブの自動同期を停止します。端末内データと既存のドライブのコピーは残ります。",
+    storageGoogleCloudRequired: "Google アカウントのデータは常に Google ドライブに保存され、ローカルのみの保存へは切り替えられません。"
   },
   es: {
     storageChoiceTitle: "Elige dónde guardar tus datos",
@@ -313,7 +316,8 @@ export const storageTranslations = {
     storageGoogleDriveConnectFailed: "No se pudo conectar la cuenta de Google",
     storageGoogleDriveSyncFailed: "Falló la sincronización con Google Drive",
     storageGoogleDriveTokenExpired: "La autorización de Google ha caducado. Vuelve a conectar para reanudar la sincronización.",
-    storageSwitchToIndexedDbFromGoogleDriveBody: "Se detendrá la sincronización automática con Google Drive. Se conservarán la copia local cifrada y la copia de Drive."
+    storageSwitchToIndexedDbFromGoogleDriveBody: "Se detendrá la sincronización automática con Google Drive. Se conservarán la copia local cifrada y la copia de Drive.",
+    storageGoogleCloudRequired: "Las cuentas de Google siempre guardan sus datos en Google Drive y no pueden cambiar a almacenamiento solo local."
   },
   pt: {
     storageChoiceTitle: "Escolha onde armazenar seus dados",
@@ -392,7 +396,8 @@ export const storageTranslations = {
     storageGoogleDriveConnectFailed: "Falha ao conectar a conta do Google",
     storageGoogleDriveSyncFailed: "Falha na sincronização com o Google Drive",
     storageGoogleDriveTokenExpired: "A autorização do Google expirou. Reconecte para retomar a sincronização.",
-    storageSwitchToIndexedDbFromGoogleDriveBody: "A sincronização automática com o Google Drive será interrompida. As cópias local e do Drive permanecerão."
+    storageSwitchToIndexedDbFromGoogleDriveBody: "A sincronização automática com o Google Drive será interrompida. As cópias local e do Drive permanecerão.",
+    storageGoogleCloudRequired: "Contas do Google sempre guardam os dados no Google Drive e não podem mudar para armazenamento apenas local."
   },
   de: {
     storageChoiceTitle: "Speicherort für Daten wählen",
@@ -471,7 +476,8 @@ export const storageTranslations = {
     storageGoogleDriveConnectFailed: "Verbindung mit dem Google-Konto fehlgeschlagen",
     storageGoogleDriveSyncFailed: "Google-Drive-Sync fehlgeschlagen",
     storageGoogleDriveTokenExpired: "Die Google-Autorisierung ist abgelaufen. Verbinde dich erneut, um den Sync fortzusetzen.",
-    storageSwitchToIndexedDbFromGoogleDriveBody: "Der automatische Google-Drive-Sync stoppt. Lokale und vorhandene Drive-Kopie bleiben erhalten."
+    storageSwitchToIndexedDbFromGoogleDriveBody: "Der automatische Google-Drive-Sync stoppt. Lokale und vorhandene Drive-Kopie bleiben erhalten.",
+    storageGoogleCloudRequired: "Google-Konten speichern ihre Daten immer in Google Drive und können nicht auf rein lokale Speicherung wechseln."
   },
   fr: {
     storageChoiceTitle: "Choisir où stocker vos données",
@@ -550,7 +556,8 @@ export const storageTranslations = {
     storageGoogleDriveConnectFailed: "Échec de la connexion du compte Google",
     storageGoogleDriveSyncFailed: "Échec de la synchronisation Google Drive",
     storageGoogleDriveTokenExpired: "L’autorisation Google a expiré. Reconnectez-vous pour reprendre la synchronisation.",
-    storageSwitchToIndexedDbFromGoogleDriveBody: "La synchro automatique Google Drive s’arrête. Les copies locale et Drive restent conservées."
+    storageSwitchToIndexedDbFromGoogleDriveBody: "La synchro automatique Google Drive s’arrête. Les copies locale et Drive restent conservées.",
+    storageGoogleCloudRequired: "Les comptes Google stockent toujours leurs données dans Google Drive et ne peuvent pas passer à un stockage local uniquement."
   },
   ru: {
     storageChoiceTitle: "Выберите место хранения данных",
@@ -629,7 +636,8 @@ export const storageTranslations = {
     storageGoogleDriveConnectFailed: "Не удалось подключить аккаунт Google",
     storageGoogleDriveSyncFailed: "Синхронизация с Google Drive не удалась",
     storageGoogleDriveTokenExpired: "Срок авторизации Google истёк. Переподключитесь, чтобы продолжить синхронизацию.",
-    storageSwitchToIndexedDbFromGoogleDriveBody: "Автосинхронизация с Google Drive остановится. Локальная копия и копия в Drive сохранятся."
+    storageSwitchToIndexedDbFromGoogleDriveBody: "Автосинхронизация с Google Drive остановится. Локальная копия и копия в Drive сохранятся.",
+    storageGoogleCloudRequired: "Аккаунты Google всегда хранят данные в Google Drive и не могут перейти на только локальное хранение."
   },
   tr: {
     storageChoiceTitle: "Verilerin nerede saklanacağını seçin",
@@ -708,7 +716,8 @@ export const storageTranslations = {
     storageGoogleDriveConnectFailed: "Google hesabı bağlanamadı",
     storageGoogleDriveSyncFailed: "Google Drive eşzamanlaması başarısız oldu",
     storageGoogleDriveTokenExpired: "Google yetkisinin süresi doldu. Eşzamanlamaya devam etmek için yeniden bağlanın.",
-    storageSwitchToIndexedDbFromGoogleDriveBody: "Otomatik Google Drive eşzamanlaması durur. Yerel ve mevcut Drive kopyaları korunur."
+    storageSwitchToIndexedDbFromGoogleDriveBody: "Otomatik Google Drive eşzamanlaması durur. Yerel ve mevcut Drive kopyaları korunur.",
+    storageGoogleCloudRequired: "Google hesapları verilerini her zaman Google Drive'da saklar ve yalnızca yerel depolamaya geçemez."
   },
   ko: {
     storageChoiceTitle: "데이터 저장 위치 선택",
@@ -787,7 +796,8 @@ export const storageTranslations = {
     storageGoogleDriveConnectFailed: "Google 계정 연결 실패",
     storageGoogleDriveSyncFailed: "Google Drive 동기화 실패",
     storageGoogleDriveTokenExpired: "Google 인증이 만료되었습니다. 다시 연결하면 동기화가 재개됩니다.",
-    storageSwitchToIndexedDbFromGoogleDriveBody: "자동 Google Drive 동기화를 중지합니다. 로컬 사본과 기존 Drive 사본은 모두 유지됩니다."
+    storageSwitchToIndexedDbFromGoogleDriveBody: "자동 Google Drive 동기화를 중지합니다. 로컬 사본과 기존 Drive 사본은 모두 유지됩니다.",
+    storageGoogleCloudRequired: "Google 계정의 데이터는 항상 Google Drive에 저장되며 로컬 전용 저장으로 전환할 수 없습니다."
   },
   th: {
     storageChoiceTitle: "เลือกตำแหน่งจัดเก็บข้อมูล",
@@ -866,7 +876,8 @@ export const storageTranslations = {
     storageGoogleDriveConnectFailed: "เชื่อมต่อบัญชี Google ไม่สำเร็จ",
     storageGoogleDriveSyncFailed: "ซิงค์ Google Drive ไม่สำเร็จ",
     storageGoogleDriveTokenExpired: "การอนุญาตของ Google หมดอายุแล้ว โปรดเชื่อมต่อใหม่เพื่อซิงค์ต่อ",
-    storageSwitchToIndexedDbFromGoogleDriveBody: "จะหยุดซิงค์ Google Drive อัตโนมัติ แต่คงสำเนาในเครื่องและใน Drive ไว้"
+    storageSwitchToIndexedDbFromGoogleDriveBody: "จะหยุดซิงค์ Google Drive อัตโนมัติ แต่คงสำเนาในเครื่องและใน Drive ไว้",
+    storageGoogleCloudRequired: "บัญชี Google จะเก็บข้อมูลใน Google Drive เสมอ และไม่สามารถเปลี่ยนเป็นการเก็บเฉพาะในเครื่องได้"
   }
 } as const;
 

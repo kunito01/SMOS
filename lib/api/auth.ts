@@ -26,11 +26,13 @@ import {
   parseEncryptedWorkspaceEnvelope,
   protectMasterKeyWithPassword,
   protectMasterKeyWithWorkspaceCode,
+  unlockAccountRecovery,
   unlockAppleAccountRecovery,
   unlockMasterKeyWithPassword,
   unlockWorkspaceRecovery,
   validatePasswordProtectedMasterKey,
   validateWorkspaceRecoveryMetadata,
+  wrapMasterKeyWithAccountSecret,
   type EncryptedWorkspaceEnvelope,
   type PasswordProtectedMasterKey,
   type WorkspaceMasterKey,
@@ -89,7 +91,34 @@ import {
   withDatabaseMutationLock
 } from "@/lib/storage/workspace-mutation-lock";
 import { isWorkspaceSyncConflictError } from "@/lib/storage/workspace-write-guard";
-import { forgetGoogleDriveAccessToken } from "@/lib/storage/google-drive/google-drive-client";
+import {
+  disconnectGoogleDriveAccount,
+  forgetGoogleDriveAccessToken,
+  requireGoogleDriveAccessToken,
+  seedGoogleDriveConnection
+} from "@/lib/storage/google-drive/google-drive-client";
+import type { GoogleStoredToken } from "@/lib/integrations/google-auth";
+import { CloudProviderError } from "@/lib/storage/cloud-provider-error";
+import {
+  fetchGoogleUserInfo,
+  forgetGoogleSignInToken,
+  googleAccountFingerprint,
+  hasUsableGoogleSignInToken,
+  markGoogleSignedIn,
+  markGoogleSignedOut,
+  readGoogleSignInSettings,
+  readGoogleSignInToken,
+  resolveGoogleClientId,
+  type GoogleUserInfo
+} from "@/lib/integrations/google-signin";
+import {
+  GOOGLE_ACCOUNT_PROFILE_SCHEMA,
+  googleAccountOwnerDigest,
+  listGoogleAccountProfiles,
+  readGoogleAccountProfile,
+  writeGoogleAccountProfile,
+  type GoogleAccountProfile
+} from "@/lib/storage/google-account-profile";
 import {
   IndexedDbStorageError,
   captureEncryptedDatabaseSnapshot,
@@ -116,11 +145,16 @@ export type RegisterPayload = AuthCredentials & {
   workspaceBackup?: EncryptedWorkspaceEnvelope;
 };
 
+export type LocalAccountKind = "password" | "apple" | "google";
+
 export type LocalAuthUser = User & {
   workspaceId: string;
   workspaceRole: LocalWorkspaceRole;
-  /** True when the unlocked account signs in with Apple and must store data in CloudKit. */
+  /** True when the unlocked account signs in with Apple ID. */
   isAppleAccount: boolean;
+  accountKind: LocalAccountKind;
+  /** Identity-provider accounts (Apple ID, Google) always keep a cloud copy. */
+  cloudRequired: boolean;
 };
 
 export type RegisterResult = {
@@ -165,6 +199,9 @@ export type LocalAuthErrorCode =
   | "ACCOUNT_EXISTS"
   | "APPLE_CLOUD_REQUIRED"
   | "CLOUD_AUTH_REQUIRED"
+  | "CLOUD_REQUIRED"
+  | "GOOGLE_PROFILE_MISMATCH"
+  | "MIGRATION_INCOMPLETE"
   | "BACKUP_INVALID"
   | "BACKUP_CAPTURE_CHANGED"
   | "BACKUP_REQUIRED"
@@ -209,7 +246,30 @@ export type StoredAppleAccount = {
   workspaceRole: "owner";
 };
 
-export type StoredLocalAccount = StoredPasswordAccount | StoredAppleAccount;
+/**
+ * A Google account: "sign in is unlock". The master key reaches this device
+ * through the device vault (re-entry on this device) or, at a live sign-in,
+ * through the account wrap in the Drive profile, unlocked with a fingerprint
+ * derived from the Google subject id. The record holds only a digest of that
+ * fingerprint (lookup and vault key); the digest cannot open the Drive wrap.
+ * The vault is a device-local convenience copy that sign-out deletes. The
+ * workspace registry keeps the recovery-key wrap from the Drive profile, so
+ * every device shares one recovery key and backups work as for a local
+ * account.
+ */
+export type StoredGoogleAccount = {
+  id: string;
+  avatar: string;
+  authMethod: "google";
+  googleAccountDigest: string;
+  createdAt: string;
+  email: string;
+  name: string;
+  workspaceId: string;
+  workspaceRole: "owner";
+};
+
+export type StoredLocalAccount = StoredPasswordAccount | StoredAppleAccount | StoredGoogleAccount;
 
 export const fullSiteBackupSchema = "studio-map-os.full-site-device-backup" as const;
 const legacyFullSiteBackupVersion = 1 as const;
@@ -414,8 +474,50 @@ const isStoredAppleAccount = (value: unknown): value is StoredAppleAccount =>
   typeof value.workspaceId === "string" &&
   value.workspaceRole === "owner";
 
+const isStoredGoogleAccount = (value: unknown): value is StoredGoogleAccount => {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, [
+      "id",
+      "avatar",
+      "authMethod",
+      "googleAccountDigest",
+      "createdAt",
+      "email",
+      "name",
+      "workspaceId",
+      "workspaceRole"
+    ]) ||
+    typeof value.id !== "string" ||
+    typeof value.avatar !== "string" ||
+    value.authMethod !== "google" ||
+    typeof value.googleAccountDigest !== "string" ||
+    !/^[0-9a-f]{40}$/.test(value.googleAccountDigest) ||
+    !isCanonicalIsoDate(value.createdAt) ||
+    typeof value.email !== "string" ||
+    typeof value.name !== "string" ||
+    typeof value.workspaceId !== "string" ||
+    value.workspaceRole !== "owner"
+  ) {
+    return false;
+  }
+  return true;
+};
+
 const isStoredLocalAccount = (value: unknown): value is StoredLocalAccount =>
-  isStoredPasswordAccount(value) || isStoredAppleAccount(value);
+  isStoredPasswordAccount(value) || isStoredAppleAccount(value) || isStoredGoogleAccount(value);
+
+/**
+ * A record written by a newer build for an account kind this build does not
+ * know. It is carried through untouched instead of condemning the whole
+ * registry, so an older cached build never locks every account out.
+ */
+const isForeignAccountRecord = (value: unknown): value is Record<string, unknown> =>
+  isRecord(value) &&
+  typeof value.authMethod === "string" &&
+  value.authMethod !== "apple-cloudkit" &&
+  value.authMethod !== "google" &&
+  typeof value.id === "string";
 
 const isWorkspaceRecoveryMetadata = (value: unknown): value is WorkspaceRecoveryMetadata => {
   try {
@@ -457,7 +559,25 @@ const writeArray = <T>(key: string, value: T[]) => {
   window.localStorage.setItem(key, JSON.stringify(value));
 };
 
-const readAccounts = () => readArray(accountsStorageKey, isStoredLocalAccount);
+const readAccountRegistry = () =>
+  readArray(
+    accountsStorageKey,
+    (value): value is StoredLocalAccount | Record<string, unknown> =>
+      isStoredLocalAccount(value) || isForeignAccountRecord(value)
+  );
+const readAccounts = () => readAccountRegistry().filter(isStoredLocalAccount);
+/** Writes the known accounts and keeps records of unknown (newer) kinds in place. */
+const writeAccounts = (accounts: StoredLocalAccount[]) => {
+  let foreign: Record<string, unknown>[] = [];
+  try {
+    foreign = readAccountRegistry().filter(
+      (item): item is Record<string, unknown> => !isStoredLocalAccount(item)
+    );
+  } catch {
+    foreign = [];
+  }
+  writeArray(accountsStorageKey, [...accounts, ...foreign]);
+};
 const readWorkspaces = () => readArray(workspacesStorageKey, isWorkspaceRecoveryMetadata);
 
 const normalizeEmail = (email: string) => email.trim().toLowerCase();
@@ -694,7 +814,7 @@ const restoreLocalDeviceStorage = async (
 ) => {
   await replaceEncryptedDatabaseSnapshot(snapshot.indexedDb);
   bumpDatabaseSnapshotWorkspaceEpochs(replacedIndexedDb, snapshot.indexedDb);
-  writeArray(accountsStorageKey, snapshot.accounts);
+  writeAccounts(snapshot.accounts);
   writeArray(workspacesStorageKey, snapshot.workspaces);
   replaceWorkspaceStoragePreferences(snapshot.storagePreferences);
   restoreStoredValue(languageStorageKey, snapshot.language);
@@ -735,6 +855,7 @@ async function replaceLocalDeviceWithFullSiteBackupUnlocked(
   try {
     await replaceEncryptedDatabaseSnapshot(backup.indexedDb);
     bumpDatabaseSnapshotWorkspaceEpochs(previous.indexedDb, backup.indexedDb);
+    // The backup replaces the device: records of other kinds do not survive.
     writeArray(accountsStorageKey, backup.authentication.accounts);
     writeArray(workspacesStorageKey, backup.authentication.workspaces);
     replaceWorkspaceStoragePreferencesFromBackup(backup.storagePreferences);
@@ -819,7 +940,13 @@ const toAuthUser = (account: StoredLocalAccount, workspace: WorkspaceRecoveryMet
   createdAt: account.createdAt,
   workspaceId: workspace.workspaceId,
   workspaceRole: account.workspaceRole,
-  isAppleAccount: isStoredAppleAccount(account)
+  isAppleAccount: isStoredAppleAccount(account),
+  accountKind: isStoredAppleAccount(account)
+    ? "apple"
+    : isStoredGoogleAccount(account)
+      ? "google"
+      : "password",
+  cloudRequired: !isStoredPasswordAccount(account)
 });
 
 const createBusinessUser = (account: StoredLocalAccount): User => ({
@@ -1177,7 +1304,7 @@ async function registerUnlocked(payload: RegisterPayload): Promise<RegisterResul
 
     try {
       upsertWorkspace(workspace);
-      writeArray(accountsStorageKey, [...previousAccounts, account]);
+      writeAccounts([...previousAccounts, account]);
       await activateMockDatabaseWorkspace(workspace.workspaceId, masterKey, {
         allowCreate: payload.workspaceMode === "create" || startedEmptyWorkspace,
         allowRecoveryOverwrite: Boolean(backupToRestore) || startedEmptyWorkspace,
@@ -1227,7 +1354,7 @@ async function registerUnlocked(payload: RegisterPayload): Promise<RegisterResul
       deactivateMockDatabaseWorkspace();
 
       const rollbackSteps: Array<() => void | Promise<void>> = [
-        () => writeArray(accountsStorageKey, previousAccounts),
+        () => writeAccounts(previousAccounts),
         () => writeArray(workspacesStorageKey, previousWorkspaces),
         () => restoreMockDatabaseWorkspaceStorage(workspaceStorageSnapshot),
         () => restoreWorkspaceStoragePreference(registeredWorkspaceId, previousStoragePreference)
@@ -1309,7 +1436,7 @@ const upsertStoredAppleAccount = (account: StoredAppleAccount) => {
       (!isStoredAppleAccount(item) ||
         item.appleAccountFingerprint !== account.appleAccountFingerprint)
   );
-  writeArray(accountsStorageKey, [...next, account]);
+  writeAccounts([...next, account]);
 };
 
 const requireAppleFingerprint = async (identity: CloudKitUserIdentity) => {
@@ -2100,7 +2227,7 @@ async function provisionAppleAccountUnlocked(
         appleAccountFingerprint: fingerprint,
         workspaceId: workspace.workspaceId
       }).catch(() => false);
-      writeArray(accountsStorageKey, previousAccounts);
+      writeAccounts(previousAccounts);
       writeArray(workspacesStorageKey, previousWorkspaces);
       await restoreMockDatabaseWorkspaceStorage(workspaceStorageSnapshot).catch(() => undefined);
       restoreWorkspaceStoragePreference(workspace.workspaceId, previousPreference);
@@ -2204,7 +2331,7 @@ async function recoverAppleAccountUnlocked(
     } else {
       masterKey.fill(0);
     }
-    writeArray(accountsStorageKey, previousAccounts);
+    writeAccounts(previousAccounts);
     writeArray(workspacesStorageKey, previousWorkspaces);
     restoreWorkspaceStoragePreference(profile.workspaceId, previousPreference);
     await restoreMockDatabaseWorkspaceStorage(workspaceStorageSnapshot).catch(() => undefined);
@@ -2269,11 +2396,130 @@ const appleWorkspaceRecoveryState = async (
  */
 export async function getActiveAppleWorkspaceRecoveryState(): Promise<AppleWorkspaceRecoveryState> {
   const session = activeSession;
-  if (!session || !isStoredAppleAccount(session.account)) {
+  if (!session) {
+    return "not-apple";
+  }
+  if (isStoredGoogleAccount(session.account)) {
+    // A Google workspace always carries a recovery-key wrap (the switch
+    // required one, and a new device receives it with the profile).
+    refreshActiveSessionWorkspaceFromRegistry(session);
+    return "has-key";
+  }
+  if (!isStoredAppleAccount(session.account)) {
     return "not-apple";
   }
   const workspace = refreshActiveSessionWorkspaceFromRegistry(session);
   return appleWorkspaceRecoveryState(session.account, workspace, session.masterKey);
+}
+
+/**
+ * A Google-owned workspace shares one recovery key across devices through
+ * the Drive profile, so a new key is written there BEFORE the local registry
+ * changes. Any failure aborts the replacement and the old key stays valid.
+ */
+const pushRecoveryWrapToGoogleProfile = async (
+  workspaceId: string,
+  metadata: WorkspaceRecoveryMetadata,
+  required: boolean
+): Promise<boolean> => {
+  let token: string;
+  try {
+    token = requireGoogleDriveAccessToken(workspaceId).accessToken;
+  } catch (error) {
+    if (!required) {
+      return false;
+    }
+    throw new LocalAuthError(
+      "CLOUD_AUTH_REQUIRED",
+      "Reconnect Google Drive first: the recovery key is shared through the Google Drive profile.",
+      { cause: error }
+    );
+  }
+  const stored = await readGoogleAccountProfile(token, workspaceId);
+  if (!stored) {
+    if (!required) {
+      return false;
+    }
+    throw new LocalAuthError(
+      "GOOGLE_PROFILE_MISMATCH",
+      "Google Drive holds no account profile for this workspace."
+    );
+  }
+  try {
+    await writeGoogleAccountProfile(
+      token,
+      {
+        ...stored.profile,
+        wraps: { ...stored.profile.wraps, code: metadata },
+        updatedAt: new Date().toISOString()
+      },
+      { expectedTag: stored.tag }
+    );
+  } catch (error) {
+    // The write may have committed even though the answer was lost: look
+    // before reporting a failure, so Drive and this device never disagree.
+    const after = await readGoogleAccountProfile(token, workspaceId).catch(() => null);
+    if (after?.profile.wraps.code?.wrappedMasterKey.ciphertext !== metadata.wrappedMasterKey.ciphertext) {
+      throw error;
+    }
+  }
+  return true;
+};
+
+// A new recovery key waits here until the user confirms it is saved; only
+// then is it written anywhere. Closing the tab before that changes nothing.
+let pendingRecoveryKey: {
+  workspaceId: string;
+  accountId: string;
+  baseCiphertext: string;
+  metadata: WorkspaceRecoveryMetadata;
+} | null = null;
+
+/** Drops a recovery key that was shown but never confirmed. */
+export function discardPendingRecoveryKey() {
+  pendingRecoveryKey = null;
+}
+
+/**
+ * Makes the shown recovery key the workspace's key. For a workspace owned by
+ * a Google account the Drive profile is updated first (every device shares
+ * the key through it); a failure leaves the previous key fully valid.
+ */
+export async function confirmRecoveryKeyForActiveAppleWorkspace(): Promise<void> {
+  return withAuthMutationLock(async () => {
+    requireStorage();
+    const session = activeSession;
+    const pending = pendingRecoveryKey;
+    if (
+      !session ||
+      !pending ||
+      pending.workspaceId !== session.workspace.workspaceId ||
+      pending.accountId !== session.account.id
+    ) {
+      throw new LocalAuthError("NO_ACTIVE_SESSION", "This recovery key expired. Create a new one.");
+    }
+    const current = refreshActiveSessionWorkspaceFromRegistry(session);
+    if (current.wrappedMasterKey.ciphertext !== pending.baseCiphertext) {
+      pendingRecoveryKey = null;
+      throw new LocalAuthError(
+        "RECOVERY_KEY_EXISTS",
+        "The recovery key changed in another window. Check it before creating a new one."
+      );
+    }
+    const required =
+      isStoredGoogleAccount(session.account) || getGoogleAccountForWorkspace(pending.workspaceId) !== null;
+    const preference = getWorkspaceStoragePreference(pending.workspaceId);
+    const shared =
+      required || preference.provider === "gdrive"
+        ? await pushRecoveryWrapToGoogleProfile(pending.workspaceId, pending.metadata, required)
+        : false;
+    upsertWorkspace(pending.metadata);
+    session.workspace = pending.metadata;
+    if (shared) {
+      markRecoveryWrapShared(pending.workspaceId, pending.metadata);
+    }
+    pendingRecoveryKey = null;
+  });
 }
 
 /**
@@ -2290,11 +2536,13 @@ export async function createRecoveryKeyForActiveAppleWorkspace(
   return withAuthMutationLock(async () => {
     requireStorage();
     const session = activeSession;
-    if (!session || !isStoredAppleAccount(session.account)) {
-      throw new LocalAuthError("NO_ACTIVE_SESSION", "No Apple ID workspace is unlocked.");
+    if (!session || (!isStoredAppleAccount(session.account) && !isStoredGoogleAccount(session.account))) {
+      throw new LocalAuthError("NO_ACTIVE_SESSION", "No Apple ID or Google workspace is unlocked.");
     }
     const registryCopy = refreshActiveSessionWorkspaceFromRegistry(session);
-    const state = await appleWorkspaceRecoveryState(session.account, registryCopy, session.masterKey);
+    const state = isStoredAppleAccount(session.account)
+      ? await appleWorkspaceRecoveryState(session.account, registryCopy, session.masterKey)
+      : "has-key";
     if (state === "unknown") {
       throw new LocalAuthError("STORAGE_CORRUPT", "The workspace recovery metadata could not be read.");
     }
@@ -2316,10 +2564,782 @@ export async function createRecoveryKeyForActiveAppleWorkspace(
     } finally {
       check.fill(0);
     }
-    upsertWorkspace(metadata);
-    session.workspace = metadata;
+    // Nothing is written yet: the key is shown first and becomes valid only
+    // when the user confirms it is saved.
+    pendingRecoveryKey = {
+      workspaceId: session.workspace.workspaceId,
+      accountId: session.account.id,
+      baseCiphertext: registryCopy.wrappedMasterKey.ciphertext,
+      metadata
+    };
     return { workspaceCode };
   });
+}
+
+// ---------------------------------------------------------------------------
+// Google accounts: "sign in is unlock" through the Google identity, with the
+// account profile (both wraps of the master key) in the Drive app data folder.
+// ---------------------------------------------------------------------------
+
+export type GoogleAccountLoginResolution =
+  | { kind: "ready"; user: LocalAuthUser }
+  | { kind: "needs-setup"; email: string; displayName: string };
+
+export type GoogleSignInPayload = { token: GoogleStoredToken; clientId: string };
+
+// Bound for the Drive pull when a device enters from its vault with a live
+// token: entry must not hang on a slow link, sync catches up afterwards.
+const LOCAL_ENTRY_PULL_TIMEOUT_MS = 20_000;
+
+const findStoredGoogleAccountByDigest = (digest: string) =>
+  readAccounts()
+    .filter(isStoredGoogleAccount)
+    .find((item) => item.googleAccountDigest === digest) ?? null;
+
+const googlePrivateEmail = (digest: string) => `google.${digest.slice(0, 16)}@private.studio-map.local`;
+
+/**
+ * The email a Google record stores. It is for display and lookup only, so
+ * when another account on this device already uses the address (a password
+ * account registered with the same Gmail address), the record falls back to
+ * a private address instead of refusing the sign-in.
+ */
+const googleRecordEmail = (email: string, digest: string) => {
+  const normalized = normalizeEmail(email);
+  if (!normalized) {
+    return googlePrivateEmail(digest);
+  }
+  const clash = readAccounts().some(
+    (item) => !isStoredGoogleAccount(item) && normalizeEmail(item.email) === normalized
+  );
+  return clash ? googlePrivateEmail(digest) : normalized;
+};
+
+// Per workspace: the recovery wrap this device last shared with the Drive
+// profile (pushed or adopted). It tells "the user replaced the key on another
+// device" apart from "the user created a key of their own on this device".
+const googleRecoverySyncKey = "studio-map-os.google-recovery-sync.v1";
+
+const readSharedRecoveryWraps = (): Record<string, string> => {
+  try {
+    const parsed: unknown = JSON.parse(window.localStorage.getItem(googleRecoverySyncKey) ?? "null");
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return {};
+    }
+    return Object.fromEntries(
+      Object.entries(parsed as Record<string, unknown>).filter(
+        (entry): entry is [string, string] => typeof entry[1] === "string"
+      )
+    );
+  } catch {
+    return {};
+  }
+};
+
+const markRecoveryWrapShared = (workspaceId: string, metadata: WorkspaceRecoveryMetadata) => {
+  try {
+    window.localStorage.setItem(
+      googleRecoverySyncKey,
+      JSON.stringify({ ...readSharedRecoveryWraps(), [workspaceId]: metadata.wrappedMasterKey.ciphertext })
+    );
+  } catch {
+    // Without the marker a later replacement elsewhere is simply not adopted here.
+  }
+};
+
+/**
+ * Which recovery wrap this device keeps when the Drive profile carries the
+ * shared one. A key the user created on this device is never overwritten:
+ * the profile's wrap is adopted only when this device has none, holds only
+ * the Apple fingerprint wrap (not a user key), or was in step with the
+ * profile before (so the difference is a deliberate replacement elsewhere).
+ * Every wrap is a wrap of the same master key; this only decides which code
+ * this device verifies exports and recovery against.
+ */
+const reconcileRecoveryWrap = async (
+  workspaceId: string,
+  shared: WorkspaceRecoveryMetadata | null
+): Promise<WorkspaceRecoveryMetadata | null> => {
+  const local = readWorkspaces().find((item) => item.workspaceId === workspaceId) ?? null;
+  if (!shared) {
+    return local;
+  }
+  if (!local || local.wrappedMasterKey.ciphertext === shared.wrappedMasterKey.ciphertext) {
+    return shared;
+  }
+  const appleFingerprints = readAccounts()
+    .filter(isStoredAppleAccount)
+    .filter((item) => item.workspaceId === workspaceId)
+    .map((item) => item.appleAccountFingerprint);
+  for (const fingerprint of appleFingerprints) {
+    try {
+      const unwrapped = await unlockAppleAccountRecovery(local, fingerprint);
+      unwrapped.fill(0);
+      return shared;
+    } catch (error) {
+      if (!(error instanceof WorkspaceCryptoError)) {
+        throw error;
+      }
+    }
+  }
+  if (readSharedRecoveryWraps()[workspaceId] === local.wrappedMasterKey.ciphertext) {
+    return shared;
+  }
+  return local;
+};
+
+/** The Google account record bound to a workspace on this device, if any. */
+export function getGoogleAccountForWorkspace(workspaceId: string): { email: string; name: string } | null {
+  try {
+    const account = readAccounts()
+      .filter(isStoredGoogleAccount)
+      .find((item) => item.workspaceId === workspaceId);
+    return account ? { email: account.email, name: account.name } : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * What the login page can show for "continue on this device" without any
+ * network. Null after an explicit sign-out: that closed the local entry.
+ */
+export function getStoredGoogleAccountSummary(): { email: string; name: string } | null {
+  try {
+    const settings = readGoogleSignInSettings();
+    if (settings.signedOut) {
+      return null;
+    }
+    const accounts = readAccounts().filter(isStoredGoogleAccount);
+    const account =
+      accounts.find((item) => normalizeEmail(item.email) === normalizeEmail(settings.email)) ??
+      (accounts.length === 1 ? accounts[0] : undefined);
+    return account ? { email: account.email, name: account.name } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The registry rules for a Google record, without writing anything. */
+const assertStoredGoogleAccountAllowed = (account: StoredGoogleAccount) => {
+  const accounts = readAccounts();
+  const conflicting = accounts.find(
+    (item) =>
+      item.id === account.id ||
+      (isStoredGoogleAccount(item) && item.googleAccountDigest === account.googleAccountDigest) ||
+      (!isStoredGoogleAccount(item) && normalizeEmail(item.email) === normalizeEmail(account.email))
+  );
+  if (conflicting && !isStoredGoogleAccount(conflicting)) {
+    throw new LocalAuthError(
+      "ACCOUNT_EXISTS",
+      "Another account on this device already uses this email address."
+    );
+  }
+  if (
+    conflicting &&
+    (conflicting.id !== account.id ||
+      conflicting.workspaceId !== account.workspaceId ||
+      conflicting.googleAccountDigest !== account.googleAccountDigest)
+  ) {
+    throw new LocalAuthError(
+      "WORKSPACE_MISMATCH",
+      "This device already links the Google account to another Studio Map OS workspace."
+    );
+  }
+  return accounts;
+};
+
+const upsertStoredGoogleAccount = (account: StoredGoogleAccount) => {
+  const accounts = assertStoredGoogleAccountAllowed(account);
+  const next = accounts.filter(
+    (item) =>
+      item.id !== account.id &&
+      !(isStoredGoogleAccount(item) && item.googleAccountDigest === account.googleAccountDigest)
+  );
+  writeAccounts([...next, account]);
+};
+
+const createStoredGoogleAccountFromProfile = (
+  profile: GoogleAccountProfile,
+  digest: string,
+  info: GoogleUserInfo
+): StoredGoogleAccount => ({
+  id: profile.accountId,
+  avatar: "",
+  authMethod: "google",
+  googleAccountDigest: digest,
+  createdAt: isCanonicalIsoDate(profile.createdAt) ? profile.createdAt : new Date().toISOString(),
+  email: googleRecordEmail(info.email || profile.email, digest),
+  name: profile.displayName || info.name || "Studio Map OS",
+  workspaceId: profile.workspaceId,
+  workspaceRole: "owner"
+});
+
+/**
+ * Opens a Google-backed workspace on this device. Drive is connected first
+ * (a new device restores its bundle from there, and sync starts without a
+ * second popup), then the registry, the account record, the member row and
+ * the device vault are brought up to date.
+ */
+const activateGoogleAccountSession = async (input: {
+  account: StoredGoogleAccount;
+  masterKey: WorkspaceMasterKey;
+  workspace: WorkspaceRecoveryMetadata;
+  /** The recovery wrap the Drive profile carries, when it was read. */
+  sharedRecoveryWrap: WorkspaceRecoveryMetadata | null;
+  token: GoogleStoredToken;
+  clientId: string;
+}) => {
+  const { account, masterKey, token, clientId, workspace } = input;
+  let user: LocalAuthUser;
+  let recoveredMissingLocalBundle = false;
+  const storedPreference = getStoredWorkspaceStoragePreference(workspace.workspaceId);
+  let switchedProvider = false;
+  let seeded = false;
+  try {
+    // Drive is best effort here: a device that already holds the workspace
+    // must get in even while Google's API is unreachable (the storage card
+    // reports the sync state). Only a token for a different account than the
+    // one this workspace is bound to is a hard stop.
+    try {
+      await seedGoogleDriveConnection(workspace.workspaceId, token, clientId);
+      seeded = true;
+    } catch (error) {
+      if (error instanceof CloudProviderError && error.code === "ACCOUNT_MISMATCH") {
+        throw error;
+      }
+      debugAppleAuth("google: Drive could not be connected at sign-in; continuing locally");
+    }
+    if (getWorkspaceStoragePreference(workspace.workspaceId).provider !== "gdrive") {
+      setWorkspaceStorageProvider(workspace.workspaceId, "gdrive");
+      // This device has no shared history with the Drive copy yet. Clearing
+      // the pending flag and the tag makes the login pull compare the two
+      // bundles: identical settles silently, different becomes the usual
+      // keep-local / use-Drive choice. Local edits are never overwritten.
+      updateWorkspaceStoragePreference(workspace.workspaceId, {
+        pendingUpload: false,
+        cloudManifestChangeTag: null
+      });
+      switchedProvider = true;
+    }
+
+    try {
+      user = await setActiveSession(account, workspace, masterKey);
+    } catch (localActivationError) {
+      user = toAuthUser(account, workspace);
+      activeSession?.masterKey.fill(0);
+      activeSession = { account, masterKey, user, workspace };
+      const cloudSession = activeSession;
+      const recovery = await pullWorkspaceFromCloudOnLogin(workspace.workspaceId, {
+        forceRemoteRestore: true,
+        validateRemoteBundle: (snapshot) => validateCloudBundleForSession(snapshot, cloudSession)
+      });
+      if (!recovery.didReplaceLocalBundle) {
+        throw new LocalAuthError(
+          "WORKSPACE_NOT_FOUND",
+          `This device has no local copy of the workspace and the Google Drive copy could not be downloaded (${recovery.outcome}). Check the connection and sign in again.`,
+          { cause: localActivationError }
+        );
+      }
+      await activateMockDatabaseWorkspace(workspace.workspaceId, masterKey);
+      recoveredMissingLocalBundle = true;
+    }
+
+    const cloudSession = activeSession;
+    if (!cloudSession || cloudSession.workspace.workspaceId !== workspace.workspaceId) {
+      throw new LocalAuthError("NO_ACTIVE_SESSION", "No Google workspace is unlocked.");
+    }
+    if (!recoveredMissingLocalBundle) {
+      const cloudPull = await pullWorkspaceFromCloudOnLogin(workspace.workspaceId, {
+        validateRemoteBundle: (snapshot) => validateCloudBundleForSession(snapshot, cloudSession)
+      });
+      if (cloudPull.didReplaceLocalBundle) {
+        await activateMockDatabaseWorkspace(workspace.workspaceId, masterKey);
+      }
+    }
+
+    upsertWorkspace(workspace);
+    if (
+      input.sharedRecoveryWrap &&
+      input.sharedRecoveryWrap.wrappedMasterKey.ciphertext === workspace.wrappedMasterKey.ciphertext
+    ) {
+      markRecoveryWrapShared(workspace.workspaceId, workspace);
+    }
+    upsertStoredGoogleAccount(account);
+    await upsertWorkspaceMember(account);
+    await createOrUpdateAppleDeviceVaultEntry({
+      appleAccountFingerprint: account.googleAccountDigest,
+      workspaceId: workspace.workspaceId,
+      masterKey
+    });
+    markGoogleSignedIn({ email: account.email, displayName: account.name });
+    rememberLastEmail(account.email);
+    void requestPersistentBrowserStorage();
+    return user;
+  } catch (error) {
+    activeSession?.masterKey.fill(0);
+    masterKey.fill(0);
+    activeSession = null;
+    deactivateMockDatabaseWorkspace();
+    if (switchedProvider) {
+      // A failed Google attempt must not take away the cloud this device
+      // used before (its sign-in and recovery paths depend on it).
+      restoreWorkspaceStoragePreference(workspace.workspaceId, storedPreference);
+    }
+    if (seeded) {
+      // No session survives this attempt, so no Drive-capable token may either.
+      forgetGoogleDriveAccessToken(workspace.workspaceId);
+    }
+    throw error;
+  }
+};
+
+async function signInWithGoogleUnlocked(payload: GoogleSignInPayload): Promise<GoogleAccountLoginResolution> {
+  requireStorage();
+  requireCompletedRestoreState();
+
+  const info = await fetchGoogleUserInfo(payload.token);
+  const fingerprint = await googleAccountFingerprint(info.sub);
+  const digest = await googleAccountOwnerDigest(fingerprint);
+  const stored = findStoredGoogleAccountByDigest(digest);
+  const storedWorkspace = stored
+    ? readWorkspaces().find((item) => item.workspaceId === stored.workspaceId)
+    : undefined;
+
+  if (stored && storedWorkspace) {
+    // The Drive profile carries the current recovery wrap (replacing a key
+    // updates it first), so a live sign-in adopts it. Reading it is best
+    // effort while the vault can open the workspace.
+    let profile: Awaited<ReturnType<typeof readGoogleAccountProfile>> = null;
+    let profileReadFailed: unknown = null;
+    try {
+      profile = await readGoogleAccountProfile(payload.token.accessToken, stored.workspaceId);
+    } catch (error) {
+      profileReadFailed = error;
+    }
+    const usableProfile =
+      profile && profile.profile.ownerDigest === digest && profile.profile.status === "ready"
+        ? profile
+        : null;
+
+    // The device vault is the local copy of the key; only when it is gone
+    // does the account wrap in the Drive profile unlock the workspace.
+    let masterKey: WorkspaceMasterKey | null = null;
+    try {
+      masterKey = await unlockAppleDeviceVaultEntry({
+        appleAccountFingerprint: digest,
+        workspaceId: stored.workspaceId
+      });
+    } catch (error) {
+      if (!(error instanceof AppleDeviceVaultError)) {
+        throw error;
+      }
+    }
+    if (!masterKey) {
+      if (profileReadFailed) {
+        throw profileReadFailed;
+      }
+      if (!profile || profile.profile.ownerDigest !== digest) {
+        throw new LocalAuthError(
+          "GOOGLE_PROFILE_MISMATCH",
+          "Google Drive holds no account profile for this workspace and Google account."
+        );
+      }
+      try {
+        masterKey = await unlockAccountRecovery(profile.profile.wraps.account, fingerprint);
+      } catch (error) {
+        if (error instanceof WorkspaceCryptoError) {
+          throw new LocalAuthError(
+            "GOOGLE_PROFILE_MISMATCH",
+            "The account profile in Google Drive cannot be unlocked by this Google account.",
+            { cause: error }
+          );
+        }
+        throw error;
+      }
+    }
+    const sharedRecoveryWrap = usableProfile?.profile.wraps.code ?? null;
+    const user = await activateGoogleAccountSession({
+      account: {
+        ...stored,
+        email: googleRecordEmail(info.email || stored.email, digest),
+        name: stored.name || info.name || "Studio Map OS"
+      },
+      masterKey,
+      workspace: (await reconcileRecoveryWrap(stored.workspaceId, sharedRecoveryWrap)) ?? storedWorkspace,
+      sharedRecoveryWrap,
+      token: payload.token,
+      clientId: payload.clientId
+    });
+    return mockApi({ kind: "ready" as const, user });
+  }
+  if (stored) {
+    // The account record survived but its workspace metadata did not: the
+    // profile in Drive is the better copy, so let it replace the record.
+    writeAccounts(readAccounts().filter((item) => item.id !== stored.id));
+  }
+
+  // A device that has never opened this account: the profile in Drive carries
+  // both wraps, and the workspace bundle follows from the same folder.
+  const owned = (await listGoogleAccountProfiles(payload.token.accessToken)).filter(
+    (item) => item.profile.ownerDigest === digest
+  );
+  const profiles = owned.filter((item) => item.profile.status === "ready");
+  if (profiles.length === 0) {
+    if (owned.length > 0) {
+      throw new LocalAuthError(
+        "MIGRATION_INCOMPLETE",
+        "Switching to Google sign-in did not finish. Open the device that started it and run the switch again."
+      );
+    }
+    return mockApi({ kind: "needs-setup" as const, email: info.email, displayName: info.name });
+  }
+  profiles.sort((left, right) => right.profile.updatedAt.localeCompare(left.profile.updatedAt));
+  const chosen = profiles[0].profile;
+  if (!chosen.wraps.code) {
+    // Every device must share the recovery key; never fall back to putting
+    // the account wrap into the local registry.
+    throw new LocalAuthError(
+      "MIGRATION_INCOMPLETE",
+      "The account profile in Google Drive has no recovery key. Run the switch again on the device that started it."
+    );
+  }
+  const recoveryWrap = chosen.wraps.code;
+  let masterKey: WorkspaceMasterKey;
+  try {
+    masterKey = await unlockAccountRecovery(chosen.wraps.account, fingerprint);
+  } catch (error) {
+    if (error instanceof WorkspaceCryptoError) {
+      throw new LocalAuthError(
+        "GOOGLE_PROFILE_MISMATCH",
+        "The account profile in Google Drive cannot be unlocked by this Google account.",
+        { cause: error }
+      );
+    }
+    throw error;
+  }
+  const account = createStoredGoogleAccountFromProfile(chosen, digest, info);
+  try {
+    // Refuse before downloading the whole workspace, not after.
+    assertStoredGoogleAccountAllowed(account);
+  } catch (error) {
+    masterKey.fill(0);
+    throw error;
+  }
+  const user = await activateGoogleAccountSession({
+    account,
+    masterKey,
+    workspace: (await reconcileRecoveryWrap(chosen.workspaceId, recoveryWrap)) ?? recoveryWrap,
+    sharedRecoveryWrap: recoveryWrap,
+    token: payload.token,
+    clientId: payload.clientId
+  });
+  return mockApi({ kind: "ready" as const, user });
+}
+
+/** Signs in with a Google token obtained inside a click (see requestGoogleSignIn). */
+export async function signInWithGoogle(payload: GoogleSignInPayload): Promise<GoogleAccountLoginResolution> {
+  return withAuthMutationLock(() => signInWithGoogleUnlocked(payload));
+}
+
+/**
+ * Entry without asking Google: the device vault holds the key for a Google
+ * account that signed in here before and has not signed out. With a live
+ * sign-in token the Drive connection is seeded and the usual login pull runs
+ * (bounded); without one the session is local until the user reconnects.
+ */
+async function unlockGoogleAccountLocallyUnlocked(options: {
+  allowWithoutToken?: boolean;
+}): Promise<{ user: LocalAuthUser } | null> {
+  requireStorage();
+  requireCompletedRestoreState();
+
+  const settings = readGoogleSignInSettings();
+  if (settings.signedOut) {
+    return null;
+  }
+  const token = readGoogleSignInToken();
+  const tokenUsable = token !== null && hasUsableGoogleSignInToken();
+  if (!tokenUsable && !options.allowWithoutToken) {
+    return null;
+  }
+  const accounts = readAccounts().filter(isStoredGoogleAccount);
+  const account =
+    accounts.find((item) => normalizeEmail(item.email) === normalizeEmail(settings.email)) ??
+    (accounts.length === 1 ? accounts[0] : null);
+  if (!account) {
+    return null;
+  }
+  const workspace = readWorkspaces().find((item) => item.workspaceId === account.workspaceId);
+  if (!workspace) {
+    return null;
+  }
+
+  let masterKey: WorkspaceMasterKey;
+  try {
+    masterKey = await unlockAppleDeviceVaultEntry({
+      appleAccountFingerprint: account.googleAccountDigest,
+      workspaceId: account.workspaceId
+    });
+  } catch (error) {
+    if (error instanceof AppleDeviceVaultError) {
+      return null;
+    }
+    throw error;
+  }
+
+  let user: LocalAuthUser;
+  try {
+    user = await setActiveSession(account, workspace, masterKey);
+  } catch (error) {
+    masterKey.fill(0);
+    throw error;
+  }
+  rememberLastEmail(account.email);
+
+  if (tokenUsable && token) {
+    // Best effort: a reachable Drive lets the session sync right away; a
+    // failure here is recorded on the storage card, never a lock-out.
+    const session = activeSession;
+    let replaced = false;
+    try {
+      await seedGoogleDriveConnection(
+        workspace.workspaceId,
+        token,
+        settings.clientId || resolveGoogleClientId()
+      );
+      const pull = await pullWorkspaceFromCloudOnLogin(workspace.workspaceId, {
+        downloadTimeoutMs: LOCAL_ENTRY_PULL_TIMEOUT_MS,
+        validateRemoteBundle: (snapshot) =>
+          session ? validateCloudBundleForSession(snapshot, session) : undefined
+      });
+      replaced = pull.didReplaceLocalBundle;
+      // A recovery key replaced on another device reaches this one here too.
+      const profile = await readGoogleAccountProfile(token.accessToken, workspace.workspaceId);
+      const shared =
+        profile && profile.profile.ownerDigest === account.googleAccountDigest && profile.profile.status === "ready"
+          ? profile.profile.wraps.code
+          : null;
+      const kept = await reconcileRecoveryWrap(workspace.workspaceId, shared);
+      if (shared && kept && kept.wrappedMasterKey.ciphertext === shared.wrappedMasterKey.ciphertext) {
+        upsertWorkspace(kept);
+        markRecoveryWrapShared(workspace.workspaceId, kept);
+        if (activeSession && activeSession.workspace.workspaceId === workspace.workspaceId) {
+          activeSession.workspace = kept;
+        }
+      }
+    } catch {
+      // Sync stays pending until the user reconnects Google.
+    }
+    if (replaced && activeSession) {
+      // The IndexedDB bundle changed under the open session: the in-memory
+      // database must follow, or the next save would overwrite the newer copy.
+      try {
+        await activateMockDatabaseWorkspace(workspace.workspaceId, activeSession.masterKey);
+      } catch (error) {
+        activeSession.masterKey.fill(0);
+        activeSession = null;
+        deactivateMockDatabaseWorkspace();
+        throw error;
+      }
+    }
+  }
+  return mockApi({ user });
+}
+
+export async function unlockGoogleAccountLocally(
+  options: { allowWithoutToken?: boolean } = {}
+): Promise<{ user: LocalAuthUser } | null> {
+  return withAuthMutationLock(() => unlockGoogleAccountLocallyUnlocked(options));
+}
+
+/**
+ * Hands the active Apple ID workspace to a Google account. The same master
+ * key is wrapped once more with the Google fingerprint; the profile with both
+ * wraps goes to the Drive app data folder before anything local changes; the
+ * Apple account record stays, so Apple sign-in keeps working on this device
+ * until it is turned off.
+ */
+async function migrateAppleAccountToGoogleUnlocked(
+  payload: GoogleSignInPayload
+): Promise<{ user: LocalAuthUser; email: string; workspaceReplaced: boolean }> {
+  requireStorage();
+  const session = activeSession;
+  if (!session || !isStoredAppleAccount(session.account)) {
+    throw new LocalAuthError("NO_ACTIVE_SESSION", "Sign in with Apple ID first.");
+  }
+  const appleAccount = session.account;
+  const workspaceId = session.workspace.workspaceId;
+  const registryWorkspace = refreshActiveSessionWorkspaceFromRegistry(session);
+  const recoveryState = await appleWorkspaceRecoveryState(appleAccount, registryWorkspace, session.masterKey);
+  if (recoveryState !== "has-key") {
+    throw new LocalAuthError(
+      "MIGRATION_INCOMPLETE",
+      "Create the recovery key for this workspace before switching to Google sign-in."
+    );
+  }
+  if (getWorkspaceStoragePreference(workspaceId).provider !== "gdrive") {
+    throw new LocalAuthError(
+      "MIGRATION_INCOMPLETE",
+      "Switch the workspace storage to Google Drive before switching to Google sign-in."
+    );
+  }
+
+  const info = await fetchGoogleUserInfo(payload.token);
+  const fingerprint = await googleAccountFingerprint(info.sub);
+  const ownerDigest = await googleAccountOwnerDigest(fingerprint);
+  const existingGoogle = findStoredGoogleAccountByDigest(ownerDigest);
+  if (existingGoogle && existingGoogle.workspaceId !== workspaceId) {
+    throw new LocalAuthError(
+      "WORKSPACE_MISMATCH",
+      "This Google account already owns a different workspace on this device."
+    );
+  }
+  // The popup may have picked a different Google account than the one this
+  // workspace's Drive copy belongs to; that is refused before any write.
+  await seedGoogleDriveConnection(workspaceId, payload.token, payload.clientId);
+  // One Google identity owns one workspace, in Drive as on the device. A
+  // profile that never became ready elsewhere is an abandoned attempt.
+  const ownedProfiles = (await listGoogleAccountProfiles(payload.token.accessToken)).filter(
+    (item) => item.profile.ownerDigest === ownerDigest
+  );
+  if (
+    ownedProfiles.some(
+      (item) => item.profile.workspaceId !== workspaceId && item.profile.status === "ready"
+    )
+  ) {
+    throw new LocalAuthError(
+      "WORKSPACE_MISMATCH",
+      "This Google account already owns another Studio Map OS workspace in Google Drive."
+    );
+  }
+  const existing = ownedProfiles.find((item) => item.profile.workspaceId === workspaceId) ?? null;
+
+  let accountProtection: WorkspaceRecoveryMetadata;
+  if (existing) {
+    if (existing.profile.ownerDigest !== ownerDigest) {
+      throw new LocalAuthError(
+        "GOOGLE_PROFILE_MISMATCH",
+        "A different Google account already owns this workspace in Google Drive."
+      );
+    }
+    // Adopt the wrap Drive already holds, after proving it is the same key.
+    let unwrapped: WorkspaceMasterKey;
+    try {
+      unwrapped = await unlockAccountRecovery(existing.profile.wraps.account, fingerprint);
+    } catch (error) {
+      throw new LocalAuthError(
+        "GOOGLE_PROFILE_MISMATCH",
+        "The account profile in Google Drive cannot be unlocked by this Google account.",
+        { cause: error }
+      );
+    }
+    try {
+      if (!masterKeysMatch(unwrapped, session.masterKey)) {
+        throw new LocalAuthError(
+          "GOOGLE_PROFILE_MISMATCH",
+          "The account profile in Google Drive belongs to a different copy of this workspace."
+        );
+      }
+    } finally {
+      unwrapped.fill(0);
+    }
+    accountProtection = existing.profile.wraps.account;
+  } else {
+    accountProtection = await wrapMasterKeyWithAccountSecret(session.masterKey, fingerprint, workspaceId);
+    const check = await unlockAccountRecovery(accountProtection, fingerprint);
+    try {
+      if (!masterKeysMatch(check, session.masterKey)) {
+        throw new LocalAuthError("STORAGE_CORRUPT", "The Google account wrap did not round-trip.");
+      }
+    } finally {
+      check.fill(0);
+    }
+  }
+
+  const now = new Date().toISOString();
+  const accountId = existingGoogle?.id ?? existing?.profile.accountId ?? createId("account");
+  const email = googleRecordEmail(info.email, ownerDigest);
+  const googleAccount: StoredGoogleAccount = {
+    id: accountId,
+    avatar: appleAccount.avatar,
+    authMethod: "google",
+    googleAccountDigest: ownerDigest,
+    createdAt: existing && isCanonicalIsoDate(existing.profile.createdAt) ? existing.profile.createdAt : now,
+    email,
+    name: appleAccount.name,
+    workspaceId,
+    workspaceRole: "owner"
+  };
+  // Every local rule that could refuse the record runs before anything is
+  // written to Drive, so a refusal never strands a remote profile.
+  assertStoredGoogleAccountAllowed(googleAccount);
+
+  // Drive must hold this exact workspace before any profile points to it.
+  const sync = await connectWorkspaceCloud(workspaceId, "gdrive", {
+    validateRemoteBundle: (snapshot) => validateCloudBundleForSession(snapshot, session)
+  });
+  if (sync.outcome !== "synced") {
+    throw new LocalAuthError(
+      "MIGRATION_INCOMPLETE",
+      sync.preference.lastError ||
+        `The Google Drive copy is not in sync (${sync.outcome}). Resolve that first, then try again.`
+    );
+  }
+  // The sync may have downloaded another device's newer copy into IndexedDB.
+  // The open in-memory database must follow before anything is saved, or the
+  // member update below would write the stale copy back over it.
+  const workspaceReplaced = sync.didReplaceLocalBundle;
+  if (workspaceReplaced) {
+    await activateMockDatabaseWorkspace(workspaceId, session.masterKey);
+  }
+
+  // A switch on a second device keeps the key every device already shares.
+  const sharedRecoveryWrap = existing?.profile.wraps.code ?? registryWorkspace;
+  const profile: GoogleAccountProfile = {
+    schema: GOOGLE_ACCOUNT_PROFILE_SCHEMA,
+    formatVersion: 1,
+    status: "ready",
+    accountId,
+    ownerDigest,
+    displayName: appleAccount.name,
+    email,
+    workspaceId,
+    workspaceRole: "owner",
+    wraps: { account: accountProtection, code: sharedRecoveryWrap },
+    migratedFrom: "apple-cloudkit",
+    createdAt: googleAccount.createdAt,
+    updatedAt: now
+  };
+  // The profile goes out "ready" in one write, after Drive is in sync. Only
+  // then does this device record the Google account, so a failure anywhere
+  // before leaves the switch available to run again.
+  await writeGoogleAccountProfile(payload.token.accessToken, profile, {
+    expectedTag: existing?.tag ?? null
+  });
+
+  if (sharedRecoveryWrap.wrappedMasterKey.ciphertext === registryWorkspace.wrappedMasterKey.ciphertext) {
+    markRecoveryWrapShared(workspaceId, registryWorkspace);
+  }
+  upsertStoredGoogleAccount(googleAccount);
+  await upsertWorkspaceMember(googleAccount);
+  await createOrUpdateAppleDeviceVaultEntry({
+    appleAccountFingerprint: ownerDigest,
+    workspaceId,
+    masterKey: session.masterKey
+  });
+
+  session.account = googleAccount;
+  session.user = toAuthUser(googleAccount, session.workspace);
+  rememberLastEmail(email);
+  markGoogleSignedIn({ email: normalizeEmail(info.email) || email, displayName: googleAccount.name });
+  return mockApi({ user: session.user, email, workspaceReplaced });
+}
+
+export async function migrateAppleAccountToGoogle(
+  payload: GoogleSignInPayload
+): Promise<{ user: LocalAuthUser; email: string; workspaceReplaced: boolean }> {
+  return withAuthMutationLock(() => migrateAppleAccountToGoogleUnlocked(payload));
 }
 
 export async function login(payload: AuthCredentials) {
@@ -2501,19 +3521,58 @@ const clearLocalSession = () => {
   }
 };
 
+/** Identity records on this device that open the given workspace. */
+const identityRecordsForWorkspace = (workspaceId: string | null) => {
+  if (!workspaceId) {
+    return { google: [] as StoredGoogleAccount[], apple: false };
+  }
+  try {
+    const accounts = readAccounts();
+    return {
+      google: accounts.filter(isStoredGoogleAccount).filter((item) => item.workspaceId === workspaceId),
+      apple: accounts.some((item) => isStoredAppleAccount(item) && item.workspaceId === workspaceId)
+    };
+  } catch {
+    return { google: [] as StoredGoogleAccount[], apple: false };
+  }
+};
+
+/**
+ * An explicit sign-out must not leave a silent way back in, whichever account
+ * was used to enter: the Google vault entries for the workspace go and the
+ * next Google entry needs Google again.
+ */
+const closeGoogleSilentEntry = async (google: StoredGoogleAccount[]) => {
+  if (google.length === 0) {
+    return;
+  }
+  markGoogleSignedOut();
+  for (const item of google) {
+    await deleteAppleDeviceVaultEntry({
+      appleAccountFingerprint: item.googleAccountDigest,
+      workspaceId: item.workspaceId
+    }).catch(() => false);
+  }
+};
+
 export async function logout() {
   const wasAppleBacked = Boolean(
     activeSession && isStoredAppleAccount(activeSession.account)
   );
   const workspaceId = activeSession?.workspace.workspaceId ?? null;
+  const records = identityRecordsForWorkspace(workspaceId);
   clearLocalSession();
   if (workspaceId) {
     // Google access tokens are device-bound and would otherwise outlive the
     // session for up to an hour on a shared machine.
     forgetGoogleDriveAccessToken(workspaceId);
   }
+  // The sign-in token reaches Drive and identifies the account; it never
+  // outlives a sign-out, whatever account was in use.
+  forgetGoogleSignInToken();
+  await closeGoogleSilentEntry(records.google);
 
-  if (wasAppleBacked) {
+  if (wasAppleBacked || records.apple) {
     // Without this, the persisted ckSession cookie lets the login page resolve
     // the Apple identity again and silently re-enter the workspace, making
     // logout a no-op on shared machines. The device vault stays intact, so the
@@ -2530,8 +3589,14 @@ export async function logoutAppleSession() {
     return false;
   }
 
-  // CloudKit itself reported the sign-out, so only local state needs clearing.
+  // CloudKit itself reported the sign-out. A workspace that also has a
+  // Google record must not stay one silent step away on the login page.
+  const workspaceId = activeSession.workspace.workspaceId;
+  const records = identityRecordsForWorkspace(workspaceId);
   clearLocalSession();
+  forgetGoogleDriveAccessToken(workspaceId);
+  forgetGoogleSignInToken();
+  await closeGoogleSilentEntry(records.google);
   return true;
 }
 
@@ -2595,10 +3660,35 @@ export async function connectActiveWorkspaceCloud(
   }
 
   const session = activeSession;
-  return connectWorkspaceCloud(session.workspace.workspaceId, provider, {
+  const workspaceId = session.workspace.workspaceId;
+  const ownedByGoogleAccount =
+    isStoredGoogleAccount(session.account) ||
+    readAccounts().some((item) => isStoredGoogleAccount(item) && item.workspaceId === workspaceId);
+  if (ownedByGoogleAccount && provider !== "gdrive") {
+    // The Google profile points every device at Drive; another cloud would
+    // silently fork the workspace.
+    throw new LocalAuthError("CLOUD_REQUIRED", "Google accounts always keep their data in Google Drive");
+  }
+  return connectWorkspaceCloud(workspaceId, provider, {
     authenticatedUser,
     validateRemoteBundle: (snapshot) => validateCloudBundleForSession(snapshot, session)
   });
+}
+
+/**
+ * Disconnects this device's Google Drive account for the active workspace.
+ * A workspace owned by a Google account (whichever account entered it) must
+ * keep its Drive binding: the profile points every device at that Drive.
+ */
+export async function disconnectActiveWorkspaceGoogleDrive() {
+  if (!activeSession) {
+    throw new LocalAuthError("NO_ACTIVE_SESSION", "No local workspace is unlocked");
+  }
+  const workspaceId = activeSession.workspace.workspaceId;
+  if (isStoredGoogleAccount(activeSession.account) || getGoogleAccountForWorkspace(workspaceId)) {
+    throw new LocalAuthError("CLOUD_REQUIRED", "Google accounts always keep their data in Google Drive");
+  }
+  await disconnectGoogleDriveAccount(workspaceId);
 }
 
 /** Enables/reconnects CloudKit while validating downloads with the active key. */
@@ -2626,6 +3716,15 @@ export async function disconnectActiveWorkspaceCloud() {
   }
 
   const workspaceId = activeSession.workspace.workspaceId;
+  const ownedByGoogleAccount =
+    isStoredGoogleAccount(activeSession.account) ||
+    readAccounts().some((item) => isStoredGoogleAccount(item) && item.workspaceId === workspaceId);
+  if (ownedByGoogleAccount) {
+    throw new LocalAuthError(
+      "CLOUD_REQUIRED",
+      "Google accounts always keep their data in Google Drive"
+    );
+  }
   const ownedByAppleAccount =
     isStoredAppleAccount(activeSession.account) ||
     readAccounts().some((item) => isStoredAppleAccount(item) && item.workspaceId === workspaceId);

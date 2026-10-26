@@ -408,6 +408,47 @@ export const connectGoogleDriveAccount = async (
   return toIdentity(settings);
 };
 
+/**
+ * Adopts a token obtained by Google sign-in (its scopes include Drive app
+ * data) as this workspace's Drive connection, so sync starts without a second
+ * popup. The account is verified exactly like a Drive-only token would be.
+ */
+export const seedGoogleDriveConnection = async (
+  workspaceId: string,
+  token: GoogleStoredToken,
+  clientId: string
+): Promise<GoogleDriveIdentity> => {
+  const settings = readGoogleDriveSettings(workspaceId);
+  const nextClientId = clientId.trim();
+  if (settings.accountId && nextClientId && settings.clientId && settings.clientId !== nextClientId) {
+    // Each OAuth client has its own app data folder: switching clients here
+    // would quietly fork this workspace's Drive copy.
+    throw new CloudProviderError(
+      "gdrive",
+      "ACCOUNT_MISMATCH",
+      "This workspace syncs to Google Drive through a different OAuth client ID. Sign in with that client ID."
+    );
+  }
+  const account = await fetchGoogleDriveAccount(token);
+  if (settings.accountId && settings.accountId !== account.accountId) {
+    throw new CloudProviderError(
+      "gdrive",
+      "ACCOUNT_MISMATCH",
+      `Signed in as ${account.accountEmail || "another Google account"}, but this workspace's Drive copy belongs to ${settings.accountEmail || "a different Google account"}.`
+    );
+  }
+  const next = writeGoogleDriveSettings(workspaceId, {
+    clientId: clientId.trim() || settings.clientId,
+    ...account,
+    consentGranted: true,
+    connectedAt: settings.connectedAt || new Date().toISOString()
+  });
+  writeGoogleToken(tokenKey(workspaceId), token);
+  verifiedTokens.set(workspaceId, token.accessToken);
+  publishGoogleDriveStatus();
+  return toIdentity(next);
+};
+
 /** Forgets the connection on this device and revokes its token. The Drive copy is kept. */
 export const disconnectGoogleDriveAccount = async (workspaceId: string) => {
   const settings = readGoogleDriveSettings(workspaceId);
