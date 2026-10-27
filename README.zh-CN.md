@@ -44,12 +44,12 @@
 
 Studio Map OS 将品牌、项目组、项目、人员、软件工具、成本、时间表、发布节点和归档统一到一个可视化工作区中，帮助独立创作者管理多个并行项目，而不必把创作过程压缩成普通的任务清单。
 
-当前版本是一个可安装的本地优先 PWA：业务数据保存在本机，经 Web Crypto 加密后写入 IndexedDB；Manifest、Service Worker、离线回退页、应用图标和独立打包流程均已接入。本地账户、恢复密钥与备份流程均在浏览器端完成；Apple / iCloud 登录可选地通过用户的 CloudKit 私有数据库同步加密工作区数据，但项目不包含自建远程业务后端或由应用管理的服务器认证。
+当前版本是一个可安装的本地优先 PWA：业务数据保存在本机，经 Web Crypto 加密后写入 IndexedDB；Manifest、Service Worker、离线回退页、应用图标和独立打包流程均已接入。本地账户、恢复密钥与备份流程均在浏览器端完成；Google 登录会解锁工作区，将加密副本保存在用户 Google Drive 的隐藏应用专属空间，并可把项目日期推送到 Google 日历，但项目不包含自建远程业务后端或由应用管理的服务器认证。
 
 ## V 1.2 更新重点
 
-- **两条独立账户路径**：继续使用完全本地的 IndexedDB 账户，或单独使用 Apple / iCloud 登录；两条路径互不依赖。
-- **加密 CloudKit 同步**：保留设备端加密副本，同时将密文同步到用户的 CloudKit 私有数据库，并提供账户绑定、写入锁、change tag 校验以及明确的本机/云端冲突选择。
+- **两条独立账户路径**：继续使用完全本地的 IndexedDB 账户，或使用 Google 登录；两条路径互不依赖。
+- **加密 Google Drive 同步**：保留设备端加密副本，同时将密文同步到用户 Google Drive 的隐藏应用专属空间，并提供账户绑定、写入锁、版本校验以及明确的本机/云端冲突选择。同一次 Google 登录还会把项目阶段、交付节点和发布版本推送到一个专属的 Google 日历。
 - **更安全的设备恢复**：使用一次性显示的 16 位恢复密钥、设备绑定且不可导出的 Web Crypto 密钥、整机/工作区/项目加密备份和受保护的跨设备恢复流程。
 - **可视化工作流编辑器**：创建可复用工作流画板，支持节点连线、颜色、附件、缩放、项目关联、自动保存和独立 HTML 分享。
 - **更完整的项目交付**：把工作流关联到项目，管理 Demo 与正式发布节点、收款和时间表，并导出可分享的 HTML 项目报告。
@@ -96,7 +96,7 @@ Studio Map OS 已 **MCP ready**。运行在你电脑上的任何 [Model Context 
 - **25 个工作区工具**：列出和查看项目，创建或更新项目、状态、时间表和任务，整体平移进度，读取公司、项目组、资源库、成本汇总和年度结算，管理愿望清单、USAGE 与 TestFlight 提醒。
 - **动态工具列表**：中继向应用索取工具清单，新功能无需重新配置智能体即可出现。
 - **默认安全**：配对令牌保护本地端口；破坏性工具（`archive_project`、`delete_project`）必须带 `confirm: true` 才会执行；每次调用都记录在档案馆的操作日志里。
-- **云同步感知**：每次调用前应用先拉取最新的 CloudKit 副本，调用后立即上传，你的其他设备会在下次回到前台时同步到。
+- **云同步感知**：每次调用前应用先拉取最新的 Google Drive 副本，调用后立即上传，你的其他设备会在下次回到前台时同步到。
 
 在 **档案馆 → Agent 接入** 中开启，复制配对令牌，然后把中继注册到你的智能体（下面以 Claude Code 为例，其他客户端使用同一卡片上显示的 JSON 片段）：
 
@@ -133,7 +133,7 @@ Studio Map OS 已具备完整的 PWA 接入结构：
 - 可生成包含独立 Next.js 服务、静态资源和启动脚本的便携 PWA 压缩包。
 
 > [!NOTE]
-> 开发模式会禁用 Service Worker，避免旧缓存干扰调试。本地 Apple ID 认证必须使用唯一的 HTTPS 来源 [https://localhost:3305](https://localhost:3305)；不支持 HTTP 或其他本地端口。
+> 开发模式会禁用 Service Worker，避免旧缓存干扰调试。Google 登录只能在 OAuth 客户端的 **已获授权的 JavaScript 来源** 中列出的来源上使用，例如 `https://kunito01.github.io` 和 `http://localhost:3306`。
 
 ## 快速开始
 
@@ -172,7 +172,7 @@ npm run dev -- --port 3305
 npm run build
 ```
 
-请通过已经部署的 HTTPS 站点验证生产版 PWA。本地测试 Apple ID 认证时，只能使用上面的 HTTPS 开发服务器并打开 [https://localhost:3305/login](https://localhost:3305/login)；不支持纯 HTTP 或其他本地端口。
+请通过已经部署的 HTTPS 站点验证生产版 PWA。如需在本地测试 Google 登录，请从已获 OAuth 客户端授权的来源打开开发服务器。
 
 ### 生成便携 PWA 包
 
@@ -180,14 +180,14 @@ npm run build
 npm run package:pwa
 ```
 
-打包结果会写入 `output/pwa/studio-map-os-pwa/`。其中包含独立服务、PWA 静态资源，以及适用于 Windows（`START_STUDIO_MAP_OS.bat`）、macOS（`START_STUDIO_MAP_OS.command`）和 Linux/macOS 终端（`START_STUDIO_MAP_OS.sh`）的启动脚本。这些脚本本身不会提供 Apple ID 兼容的 HTTPS 来源；本地 Apple ID 认证必须使用 [https://localhost:3305](https://localhost:3305)。
+打包结果会写入 `output/pwa/studio-map-os-pwa/`。其中包含独立服务、PWA 静态资源，以及适用于 Windows（`START_STUDIO_MAP_OS.bat`）、macOS（`START_STUDIO_MAP_OS.command`）和 Linux/macOS 终端（`START_STUDIO_MAP_OS.sh`）的启动脚本。只有把这些启动脚本的来源加入 OAuth 客户端的已获授权的 JavaScript 来源后，才能通过它们使用 Google 登录。
 
 ## 主要路由
 
 | 路由 | 用途 |
 | --- | --- |
 | `/register` | 创建本地账户和工作区，或通过加密备份加入已有工作区 |
-| `/login` | 解锁本地账户、使用 Apple / iCloud 登录或恢复整站设备备份 |
+| `/login` | 解锁本地账户、使用 Google 登录或恢复整站设备备份 |
 | `/offline` | Service Worker 在文档导航失败时显示的离线回退页 |
 | `/dashboard` | 工作室总览、范围筛选、指标和项目地图 |
 | `/companies` | 品牌与项目组管理 |
@@ -199,7 +199,7 @@ npm run package:pwa
 | `/costs` | 工作室级成本汇总与显示货币设置 |
 | `/libraries` | 人员、软件订阅与成本模板资源库 |
 | `/workflow` | 可复用可视化工作流画板、附件、项目关联和 HTML 分享 |
-| `/archive` | 已归档项目、加密备份以及本机/CloudKit 储存控制 |
+| `/archive` | 已归档项目、加密备份、本机/Google Drive 储存控制以及 Google 日历推送 |
 | `/share/?token=...` | 本地只读项目快照 |
 
 ## 数据与安全模型

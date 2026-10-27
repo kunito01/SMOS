@@ -21,11 +21,21 @@ const TOKEN_EXPIRY_MARGIN_MS = 60_000;
 export type GoogleStoredToken = {
   accessToken: string;
   expiresAt: number;
+  /** Space-separated scopes Google actually granted (users can untick some). */
+  scope?: string;
 };
+
+/** Google Calendar access limited to the calendars this app creates. */
+export const GOOGLE_CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.app.created";
+
+/** Whether a token carries a scope; unknown (older tokens) counts as no. */
+export const googleTokenHasScope = (token: GoogleStoredToken, scope: string) =>
+  typeof token.scope === "string" && token.scope.split(/\s+/).includes(scope);
 
 type TokenResponse = {
   access_token?: string;
   expires_in?: number;
+  scope?: string;
   error?: string;
   error_description?: string;
 };
@@ -83,7 +93,11 @@ export const readGoogleToken = (storageKey: string): GoogleStoredToken | null =>
     }
     // Treat tokens within a minute of expiry as expired so a request never dies mid-flight.
     return parsed.expiresAt - TOKEN_EXPIRY_MARGIN_MS > Date.now()
-      ? { accessToken: parsed.accessToken, expiresAt: parsed.expiresAt }
+      ? {
+          accessToken: parsed.accessToken,
+          expiresAt: parsed.expiresAt,
+          ...(typeof parsed.scope === "string" ? { scope: parsed.scope } : {})
+        }
       : null;
   } catch {
     return null;
@@ -228,9 +242,10 @@ export const requestGoogleToken = async (request: GoogleTokenRequest): Promise<G
           );
           return;
         }
-        const token = {
+        const token: GoogleStoredToken = {
           accessToken: response.access_token,
-          expiresAt: Date.now() + (response.expires_in ?? 3600) * 1000
+          expiresAt: Date.now() + (response.expires_in ?? 3600) * 1000,
+          ...(typeof response.scope === "string" ? { scope: response.scope } : {})
         };
         writeGoogleToken(request.storageKey, token);
         request.onGranted?.(token);

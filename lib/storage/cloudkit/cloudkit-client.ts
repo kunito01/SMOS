@@ -1,3 +1,5 @@
+import { isAppleSignInEnabled } from "@/lib/auth/sign-in-options";
+
 const CLOUDKIT_SCRIPT_URL = "https://cdn.apple-cloudkit.com/ck/2/cloudkit.js";
 const CLOUDKIT_SCRIPT_ID = "studio-map-os-cloudkit-js";
 const CLOUDKIT_SCRIPT_TIMEOUT_MS = 20_000;
@@ -371,6 +373,10 @@ export async function getCloudKitAccountFingerprint(
 }
 
 export function getCloudKitConfigurationStatus(): CloudKitConfigurationStatus {
+  if (!isAppleSignInEnabled()) {
+    // Apple ID is retired: never load CloudKit JS or call Apple's services.
+    return { configured: false, missing: [], invalidEnvironment: false };
+  }
   const missing: Array<"containerIdentifier" | "apiToken" | "environment"> = [];
 
   if (!containerIdentifier) {

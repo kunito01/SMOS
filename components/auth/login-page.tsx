@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { ArrowRight, CheckCircle2, LockKeyhole, Upload } from "lucide-react";
 import { AppleCloudKitLoginPanel } from "@/components/auth/apple-cloudkit-login-panel";
 import { GoogleLoginPanel } from "@/components/auth/google-login-panel";
+import { isAppleSignInEnabled } from "@/lib/auth/sign-in-options";
 import { PixelHeroScene } from "@/components/auth/pixel-hero-scene";
 import { PasswordField } from "@/components/auth/password-field";
 import { WorkspaceKeyDialog } from "@/components/auth/workspace-key-dialog";
@@ -26,6 +27,11 @@ const restoredLoginNoticeStorageKey = "studio-map-os.full-site-restored-login-no
 const restoreFailedLoginNoticeStorageKey = "studio-map-os.full-site-restore-failed-login-notice";
 
 export function LoginPage() {
+  // Decided after mount: the prerendered page has no account registry to look at.
+  const [showAppleSignIn, setShowAppleSignIn] = useState(false);
+  useEffect(() => {
+    setShowAppleSignIn(isAppleSignInEnabled());
+  }, []);
   const router = useRouter();
   const { isReady, signIn, signInDevelopmentTestAccount, user } = useAuth();
   const { t } = useI18n();
@@ -246,7 +252,7 @@ export function LoginPage() {
 
             <GoogleLoginPanel />
 
-            {process.env.NEXT_PUBLIC_APPLE_SIGNIN !== "off" ? <AppleCloudKitLoginPanel /> : null}
+            {showAppleSignIn ? <AppleCloudKitLoginPanel /> : null}
 
             <div className="mt-5 space-y-4">
               {process.env.NODE_ENV === "development" ? (

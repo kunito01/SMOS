@@ -2,6 +2,8 @@
 
 import { useEffect } from "react";
 import { useAuth } from "@/components/providers/app-providers";
+import { adoptVerifiedSignInTokenForCalendar } from "@/lib/integrations/google-services";
+import { getWorkspaceStoragePreference } from "@/lib/storage/storage-preferences";
 import {
   DATABASE_PERSISTED_EVENT,
   hasGoogleAccessToken,
@@ -19,10 +21,24 @@ import {
 export function GoogleCalendarAutoSync() {
   const { user } = useAuth();
   const workspaceId = user?.workspaceId;
+  const signsInWithGoogle = user?.accountKind === "google";
 
   useEffect(() => {
     if (!workspaceId) {
       return;
+    }
+
+    // Google accounts: Calendar rides on the sign-in. Adopt its token and,
+    // the first time, bind the "Studio Map OS" calendar without a popup (the
+    // token is cached, so interactive mode does not open any Google UI).
+    if (signsInWithGoogle && adoptVerifiedSignInTokenForCalendar(workspaceId)) {
+      const current = readGoogleCalendarSettings(workspaceId);
+      // While a storage conflict blocks writes the binding cannot be saved;
+      // binding then would only leave an orphan calendar behind.
+      const writable = getWorkspaceStoragePreference(workspaceId).status !== "conflict";
+      if (writable && !current.pushDisabled && !isGoogleCalendarConnected(current)) {
+        void syncGoogleCalendar(workspaceId, { mode: "interactive" });
+      }
     }
 
     const settings = readGoogleCalendarSettings(workspaceId);
@@ -54,7 +70,7 @@ export function GoogleCalendarAutoSync() {
       window.clearTimeout(timer);
       window.removeEventListener(DATABASE_PERSISTED_EVENT, onPersisted);
     };
-  }, [workspaceId]);
+  }, [signsInWithGoogle, workspaceId]);
 
   return null;
 }

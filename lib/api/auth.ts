@@ -97,7 +97,7 @@ import {
   requireGoogleDriveAccessToken,
   seedGoogleDriveConnection
 } from "@/lib/storage/google-drive/google-drive-client";
-import type { GoogleStoredToken } from "@/lib/integrations/google-auth";
+import { writeGoogleToken, type GoogleStoredToken } from "@/lib/integrations/google-auth";
 import { CloudProviderError } from "@/lib/storage/cloud-provider-error";
 import {
   fetchGoogleUserInfo,
@@ -3567,9 +3567,12 @@ export async function logout() {
     // session for up to an hour on a shared machine.
     forgetGoogleDriveAccessToken(workspaceId);
   }
-  // The sign-in token reaches Drive and identifies the account; it never
-  // outlives a sign-out, whatever account was in use.
+  // The sign-in token reaches Drive and Calendar and identifies the account;
+  // neither it nor the Calendar copy outlives a sign-out.
   forgetGoogleSignInToken();
+  if (workspaceId) {
+    writeGoogleToken(`studio-map-os.google-calendar-token:${workspaceId}`, null);
+  }
   await closeGoogleSilentEntry(records.google);
 
   if (wasAppleBacked || records.apple) {

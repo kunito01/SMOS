@@ -2,14 +2,16 @@
 
 import { useEffect, useState } from "react";
 import { CalendarDays, Link2, RefreshCw, Unplug } from "lucide-react";
-import { useI18n } from "@/components/providers/app-providers";
+import { useAuth, useI18n } from "@/components/providers/app-providers";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { SectionHeader } from "@/components/ui/section-header";
 import { formatLocalizedDate } from "@/lib/i18n/formatters";
 import {
   connectGoogleCalendar,
+  disableGoogleCalendarPush,
   disconnectGoogleCalendar,
+  enableGoogleCalendarPush,
   getGoogleCalendarLinkForClient,
   getGoogleCalendarStatus,
   hasGoogleAccessToken,
@@ -21,6 +23,11 @@ import {
   writeGoogleCalendarSettings,
   type GoogleCalendarStatus
 } from "@/lib/integrations/google-calendar";
+import {
+  adoptVerifiedSignInTokenForCalendar,
+  reconnectGoogleServices
+} from "@/lib/integrations/google-services";
+import { getWorkspaceStoragePreference } from "@/lib/storage/storage-preferences";
 import { cn } from "@/lib/utils/cn";
 
 type GoogleCalendarSyncCardProps = {
@@ -29,6 +36,10 @@ type GoogleCalendarSyncCardProps = {
 
 export function GoogleCalendarSyncCard({ workspaceId }: GoogleCalendarSyncCardProps) {
   const { language, t } = useI18n();
+  const { user } = useAuth();
+  // Google accounts: Calendar rides on the Google sign-in (same token, same
+  // consent), so there is no client ID to enter and nothing to connect.
+  const viaSignIn = user?.accountKind === "google";
   const [settings, setSettings] = useState(() => readGoogleCalendarSettings(workspaceId));
   const [clientIdDraft, setClientIdDraft] = useState(settings.clientId);
   const [status, setStatus] = useState<GoogleCalendarStatus>(() => getGoogleCalendarStatus());
@@ -59,7 +70,7 @@ export function GoogleCalendarSyncCard({ workspaceId }: GoogleCalendarSyncCardPr
   const connected = isGoogleCalendarConnected(settings);
 
   useEffect(() => {
-    if (connected) {
+    if (connected || viaSignIn) {
       setBoundElsewhere(false);
       return;
     }
@@ -74,7 +85,7 @@ export function GoogleCalendarSyncCard({ workspaceId }: GoogleCalendarSyncCardPr
     return () => {
       cancelled = true;
     };
-  }, [clientIdDraft, connected, workspaceId]);
+  }, [clientIdDraft, connected, viaSignIn, workspaceId]);
 
   const eventCount = status.eventCount ?? Object.keys(settings.syncedEvents).length;
   const needsReconnect = connected && (status.state === "reconnect" || !hasToken);
@@ -97,8 +108,40 @@ export function GoogleCalendarSyncCard({ workspaceId }: GoogleCalendarSyncCardPr
   };
 
   const connect = () => run(() => connectGoogleCalendar(workspaceId, clientIdDraft));
-  const syncNow = () => run(() => syncGoogleCalendar(workspaceId, { mode: "interactive" }));
   const disconnect = () => run(() => disconnectGoogleCalendar(workspaceId));
+
+  // Google accounts: one Google popup refreshes Drive and Calendar together.
+  // The popup must open inside the click, so it is the first await.
+  // The only possible popup is the reconnect itself, the first await of the
+  // click. The follow-up sync runs on the cached token, never asking Google
+  // again outside the click.
+  const refreshViaSignIn = async (): Promise<GoogleCalendarStatus> => {
+    if (!adoptVerifiedSignInTokenForCalendar(workspaceId)) {
+      await reconnectGoogleServices(workspaceId);
+    }
+    if (!hasGoogleAccessToken(workspaceId)) {
+      return { state: "reconnect", message: t("googleCalendarScopeMissing") };
+    }
+    return syncGoogleCalendar(workspaceId, { mode: "interactive" });
+  };
+  const syncNow = () =>
+    run(() =>
+      viaSignIn && needsReconnect
+        ? refreshViaSignIn()
+        : syncGoogleCalendar(workspaceId, { mode: "interactive" })
+    );
+  const turnOn = () =>
+    run(async () => {
+      if (getWorkspaceStoragePreference(workspaceId).status === "conflict") {
+        return { state: "error" as const, message: t("storageConflictBlockedBody") };
+      }
+      enableGoogleCalendarPush(workspaceId);
+      return refreshViaSignIn();
+    });
+  const turnOff = () =>
+    run(async () => {
+      disableGoogleCalendarPush(workspaceId);
+    });
 
   const statusLabel = (() => {
     if (!connected) {
@@ -129,6 +172,9 @@ export function GoogleCalendarSyncCard({ workspaceId }: GoogleCalendarSyncCardPr
     <Card tone="glass" className="overflow-hidden bg-white/[0.76] p-5 sm:p-6">
       <SectionHeader eyebrow={t("googleCalendarEyebrow")} title={t("googleCalendarTitle")} />
       <p className="mt-3 max-w-2xl text-sm font-semibold leading-6 text-muted">{t("googleCalendarBody")}</p>
+      {viaSignIn ? (
+        <p className="mt-2 max-w-2xl text-xs font-bold leading-5 text-muted">{t("googleCalendarViaSignIn")}</p>
+      ) : null}
 
       <div className="mt-4 flex flex-wrap items-center gap-2">
         <span className={cn("inline-flex min-h-8 items-center gap-2 rounded-full px-3 text-xs font-black", statusTone)}>
@@ -148,7 +194,7 @@ export function GoogleCalendarSyncCard({ workspaceId }: GoogleCalendarSyncCardPr
         ) : null}
       </div>
 
-      {!connected ? (
+      {!connected && !viaSignIn ? (
         <div className="mt-4 grid gap-2">
           <label className="grid gap-2">
             <span className="text-xs font-black uppercase tracking-[0.1em] text-muted">{t("googleCalendarClientIdLabel")}</span>
@@ -174,9 +220,15 @@ export function GoogleCalendarSyncCard({ workspaceId }: GoogleCalendarSyncCardPr
               <RefreshCw size={16} className={status.state === "syncing" ? "animate-spin" : undefined} />
               {needsReconnect ? t("googleCalendarReconnect") : t("googleCalendarSyncNow")}
             </Button>
-            <Button type="button" size="sm" variant="ghost" disabled={busy} onClick={() => void disconnect()}>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              disabled={busy}
+              onClick={() => void (viaSignIn ? turnOff() : disconnect())}
+            >
               <Unplug size={16} />
-              {t("googleCalendarDisconnect")}
+              {viaSignIn ? t("googleCalendarTurnOff") : t("googleCalendarDisconnect")}
             </Button>
             <label className="ml-auto flex cursor-pointer items-center gap-2 text-xs font-black text-ink/70">
               <input
@@ -190,6 +242,11 @@ export function GoogleCalendarSyncCard({ workspaceId }: GoogleCalendarSyncCardPr
               {t("googleCalendarAutoSync")}
             </label>
           </>
+        ) : viaSignIn ? (
+          <Button type="button" size="sm" disabled={busy} onClick={() => void turnOn()}>
+            <Link2 size={16} />
+            {t("googleCalendarTurnOn")}
+          </Button>
         ) : (
           <Button type="button" size="sm" disabled={busy || !clientIdDraft.trim()} onClick={() => void connect()}>
             <Link2 size={16} />

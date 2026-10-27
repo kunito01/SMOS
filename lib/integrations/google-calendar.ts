@@ -3,7 +3,9 @@
 import { integrationsApi, projectsApi } from "@/lib/api";
 import { getActiveMockDatabaseWorkspaceId } from "@/lib/api/mock-persistence";
 import {
+  GOOGLE_CALENDAR_SCOPE,
   GoogleAuthError,
+  googleTokenHasScope,
   preloadGoogleIdentity,
   readGoogleToken,
   requestGoogleToken,
@@ -11,6 +13,11 @@ import {
   writeGoogleToken,
   type GoogleStoredToken
 } from "@/lib/integrations/google-auth";
+import {
+  readGoogleSignInSettings,
+  readGoogleSignInToken,
+  resolveGoogleClientId
+} from "@/lib/integrations/google-signin";
 
 import {
   forgetGoogleDriveAccessToken,
@@ -36,7 +43,7 @@ import { projectPath, withBasePath } from "@/lib/utils/app-routes";
  * stay on the device.
  */
 
-export const GOOGLE_CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.app.created";
+export { GOOGLE_CALENDAR_SCOPE };
 const CALENDAR_API = "https://www.googleapis.com/calendar/v3";
 const CALENDAR_SUMMARY = "Studio Map OS";
 const SETTINGS_KEY_PREFIX = "studio-map-os.google-calendar:";
@@ -55,6 +62,8 @@ export type GoogleCalendarSettings = {
   lastSyncAt: string;
   /** Event id → content hash of what was last written, used for incremental sync. */
   syncedEvents: Record<string, string>;
+  /** The user turned Calendar push off; Google sign-in must not turn it back on. */
+  pushDisabled: boolean;
 };
 
 export type GoogleCalendarSyncState = "idle" | "syncing" | "synced" | "reconnect" | "error";
@@ -77,7 +86,8 @@ const defaultSettings = (): GoogleCalendarSettings => ({
   consentGranted: false,
   autoSync: true,
   lastSyncAt: "",
-  syncedEvents: {}
+  syncedEvents: {},
+  pushDisabled: false
 });
 
 const settingsKey = (workspaceId: string) => `${SETTINGS_KEY_PREFIX}${workspaceId}`;
@@ -109,7 +119,8 @@ export const readGoogleCalendarSettings = (workspaceId: string): GoogleCalendarS
                 (entry): entry is [string, string] => typeof entry[1] === "string"
               )
             )
-          : {}
+          : {},
+      pushDisabled: parsed.pushDisabled === true
     };
   } catch {
     return fallback;
@@ -272,6 +283,12 @@ const resolveCalendarBinding = async (workspaceId: string, clientId: string, tok
   const link = await integrationsApi.getGoogleCalendarLink(clientId);
   const candidate = link?.calendarId || settings.calendarId;
   const calendarId = await ensureGoogleCalendar(token, candidate);
+  if (calendarId !== settings.calendarId) {
+    // Remember the calendar before the workspace binding is saved: if saving
+    // is refused (a storage conflict blocks writes), the next attempt reuses
+    // this calendar instead of creating yet another one.
+    writeGoogleCalendarSettings(workspaceId, { calendarId });
+  }
   const connectedAt = link?.connectedAt || settings.connectedAt || new Date().toISOString();
 
   if (!link || link.calendarId !== calendarId) {
@@ -630,3 +647,52 @@ export const disconnectGoogleCalendar = async (workspaceId: string) => {
 /** Whether another device already bound a calendar for this client id (so Connect will reuse it). */
 export const getGoogleCalendarLinkForClient = (clientId: string) =>
   clientId ? integrationsApi.getGoogleCalendarLink(clientId) : Promise.resolve(null);
+
+/**
+ * Lets Calendar push ride on the Google sign-in: the sign-in token already
+ * carries the Calendar scope (when the user granted it), so it becomes this
+ * workspace's Calendar token and no separate connection is needed. Returns
+ * whether a usable token is now cached for Calendar.
+ */
+export const adoptGoogleSignInTokenForCalendar = (
+  workspaceId: string,
+  token: GoogleStoredToken | null = readGoogleSignInToken()
+) => {
+  if (!token || !googleTokenHasScope(token, GOOGLE_CALENDAR_SCOPE)) {
+    return hasGoogleAccessToken(workspaceId);
+  }
+  const current = readToken(workspaceId);
+  if (!current || current.expiresAt < token.expiresAt) {
+    writeToken(workspaceId, token);
+  }
+  const settings = readGoogleCalendarSettings(workspaceId);
+  const clientId = readGoogleSignInSettings().clientId || resolveGoogleClientId() || settings.clientId;
+  writeGoogleCalendarSettings(workspaceId, {
+    ...(clientId ? { clientId } : {}),
+    consentGranted: true
+  });
+  return true;
+};
+
+/** Turns Calendar push back on after the user switched it off. */
+export const enableGoogleCalendarPush = (workspaceId: string) =>
+  writeGoogleCalendarSettings(workspaceId, { pushDisabled: false });
+
+/**
+ * Turns Calendar push off for an account that signs in with Google. The OAuth
+ * grant is the sign-in's, so it is never revoked here; the calendar binding
+ * stays in the workspace so turning push back on reuses the same calendar.
+ */
+export const disableGoogleCalendarPush = (workspaceId: string) => {
+  writeToken(workspaceId, null);
+  const settings = readGoogleCalendarSettings(workspaceId);
+  writeGoogleCalendarSettings(workspaceId, {
+    clientId: settings.clientId,
+    calendarId: "",
+    connectedAt: "",
+    lastSyncAt: "",
+    syncedEvents: {},
+    pushDisabled: true
+  });
+  publishStatus({ state: "idle" });
+};

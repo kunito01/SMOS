@@ -44,12 +44,12 @@
 
 Studio Map OS connects brands, project groups, projects, people, software, costs, timelines, release checkpoints, and archives in one visual workspace. It helps independent creators operate several parallel projects without flattening the creative process into a generic task list.
 
-The current version is an installable, local-first PWA. Business data stays on the device, is encrypted with Web Crypto, and is persisted in IndexedDB. The Web App Manifest, Service Worker, offline fallback, application icons, and standalone packaging workflow are integrated. Local accounts, recovery keys, and backups are handled in the browser. Apple / iCloud sign-in can optionally synchronize encrypted workspace data through the user’s private CloudKit database; no custom remote business backend or app-managed server authentication is included.
+The current version is an installable, local-first PWA. Business data stays on the device, is encrypted with Web Crypto, and is persisted in IndexedDB. The Web App Manifest, Service Worker, offline fallback, application icons, and standalone packaging workflow are integrated. Local accounts, recovery keys, and backups are handled in the browser. Google sign-in unlocks the workspace, keeps an encrypted copy in the hidden app data folder of the user’s Google Drive, and can push project dates to Google Calendar; no custom remote business backend or app-managed server authentication is included.
 
 ## What’s new in V 1.2
 
-- **Two independent account paths** — keep using fully local IndexedDB accounts, or sign in separately with Apple / iCloud without making either path depend on the other.
-- **Encrypted CloudKit sync** — retain the encrypted device copy while syncing ciphertext through the user’s private CloudKit database, with account binding, mutation locks, change-tag checks, and explicit local/cloud conflict resolution.
+- **Two independent account paths** — keep using fully local IndexedDB accounts, or sign in with Google without making either path depend on the other.
+- **Encrypted Google Drive sync** — retain the encrypted device copy while syncing ciphertext to the hidden app data folder of the user’s Google Drive, with account binding, mutation locks, version checks, and explicit local/cloud conflict resolution. The same Google sign-in also pushes project phases, deliverables, and releases to a dedicated Google Calendar.
 - **Safer device recovery** — use a one-time 16-digit recovery key, a device-bound non-exportable Web Crypto key, encrypted full-device/workspace/project backups, and guarded cross-device restore flows.
 - **Visual workflow builder** — create reusable workflow boards with connected nodes, colors, attachments, zoom controls, project links, automatic saving, and standalone HTML sharing.
 - **Richer project delivery** — attach workflows to projects, manage demo and official release checkpoints, configure payments and timelines, and export shareable HTML project reports.
@@ -96,7 +96,7 @@ Studio Map OS is **MCP ready**. Any [Model Context Protocol](https://modelcontex
 - **25 workspace tools** — list and inspect projects, create or update projects, status, timelines, and tasks, shift a whole schedule, read companies, groups, libraries, cost summaries, and fiscal-year reports, and manage wish-list, USAGE, and TestFlight reminders.
 - **Dynamic tool list** — the relay asks the app for its tools, so new capabilities appear without reconfiguring the agent.
 - **Safe by default** — a pairing token guards the local socket, destructive tools (`archive_project`, `delete_project`) refuse to run without `confirm: true`, and every call is recorded in the action log on the Archive page.
-- **Cloud aware** — before each call the app pulls the latest CloudKit copy, and right after it uploads the change, so your other devices pick it up on their next foreground sync.
+- **Cloud aware** — before each call the app pulls the latest Google Drive copy, and right after it uploads the change, so your other devices pick it up on their next foreground sync.
 
 Turn it on under **Archive → Agent access**, copy the pairing token, and register the relay with your agent (Claude Code shown; other clients use the JSON snippet displayed on the same card):
 
@@ -133,7 +133,7 @@ Studio Map OS includes a complete PWA integration structure:
 - A portable PWA bundle containing the standalone Next.js server, static assets, and a launch script.
 
 > [!NOTE]
-> Development mode disables the Service Worker to prevent stale caches from interfering with development. Local Apple ID authentication must use the exact HTTPS origin [https://localhost:3305](https://localhost:3305); HTTP and alternate local ports are not supported.
+> Development mode disables the Service Worker to prevent stale caches from interfering with development. Google sign-in only works on origins listed under **Authorized JavaScript origins** of the OAuth client, for example `https://kunito01.github.io` and `http://localhost:3306`.
 
 ## Getting started
 
@@ -172,7 +172,7 @@ Existing local accounts can sign in at [https://localhost:3305/login](https://lo
 npm run build
 ```
 
-Verify the production PWA through the deployed HTTPS site. For local Apple ID authentication, use the HTTPS development server above and open [https://localhost:3305/login](https://localhost:3305/login). Plain HTTP and alternate local ports are not supported.
+Verify the production PWA through the deployed HTTPS site. To test Google sign-in locally, open the development server from an origin that is authorized for the OAuth client.
 
 ### Create a portable PWA bundle
 
@@ -180,14 +180,14 @@ Verify the production PWA through the deployed HTTPS site. For local Apple ID au
 npm run package:pwa
 ```
 
-The bundle is written to `output/pwa/studio-map-os-pwa/`. It includes the standalone server, PWA assets, and launch scripts for Windows (`START_STUDIO_MAP_OS.bat`), macOS (`START_STUDIO_MAP_OS.command`), and Linux/macOS terminals (`START_STUDIO_MAP_OS.sh`). These launchers do not provide an Apple ID-compatible HTTPS origin by themselves; local Apple ID authentication must use [https://localhost:3305](https://localhost:3305).
+The bundle is written to `output/pwa/studio-map-os-pwa/`. It includes the standalone server, PWA assets, and launch scripts for Windows (`START_STUDIO_MAP_OS.bat`), macOS (`START_STUDIO_MAP_OS.command`), and Linux/macOS terminals (`START_STUDIO_MAP_OS.sh`). Google sign-in from these launchers works only after their origin is added to the OAuth client’s authorized JavaScript origins.
 
 ## Main routes
 
 | Route | Purpose |
 | --- | --- |
 | `/register` | Create a local account and workspace, or join one with an encrypted backup |
-| `/login` | Unlock a local account, continue with Apple / iCloud, or restore a full-device backup |
+| `/login` | Unlock a local account, sign in with Google, or restore a full-device backup |
 | `/offline` | Document fallback when Service Worker navigation fails |
 | `/dashboard` | Studio overview, scopes, metrics, and project maps |
 | `/companies` | Brand and project-group management |
@@ -199,7 +199,7 @@ The bundle is written to `output/pwa/studio-map-os-pwa/`. It includes the standa
 | `/costs` | Studio-level cost totals and display-currency settings |
 | `/libraries` | People, software subscriptions, and cost-template libraries |
 | `/workflow` | Reusable visual workflow boards, attachments, project links, and HTML sharing |
-| `/archive` | Archived projects, encrypted backups, and local/CloudKit storage controls |
+| `/archive` | Archived projects, encrypted backups, local/Google Drive storage controls, and Google Calendar push |
 | `/share/?token=...` | Local read-only project snapshot |
 
 ## Data and security model

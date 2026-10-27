@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  GOOGLE_CALENDAR_SCOPE,
   GoogleAuthError,
   googleFetch,
   googleTokenUsableUntil,
@@ -20,7 +21,8 @@ import { GOOGLE_DRIVE_SCOPE } from "@/lib/storage/google-drive/google-drive-clie
  * runs, so everything here is keyed by device, not by workspace.
  */
 
-export const GOOGLE_SIGN_IN_SCOPE = `openid email profile ${GOOGLE_DRIVE_SCOPE}`;
+// One consent covers sign-in, Drive storage and Calendar push.
+export const GOOGLE_SIGN_IN_SCOPE = `openid email profile ${GOOGLE_DRIVE_SCOPE} ${GOOGLE_CALENDAR_SCOPE}`;
 export const GOOGLE_SIGN_IN_TOKEN_KEY = "studio-map-os.google-signin-token.v1";
 const SETTINGS_KEY = "studio-map-os.google-signin.v1";
 const CLIENT_ID_KEY = "studio-map-os.google-client-id";

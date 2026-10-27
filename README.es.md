@@ -44,12 +44,12 @@
 
 Studio Map OS conecta marcas, grupos de proyectos, proyectos, personas, software, costes, cronogramas, hitos de lanzamiento y archivos en un único espacio de trabajo visual. Ayuda a los creadores independientes a gestionar varios proyectos en paralelo sin reducir el proceso creativo a una lista de tareas genérica.
 
-La versión actual es una PWA instalable y local-first. Los datos de negocio permanecen en el dispositivo, se cifran con Web Crypto y se almacenan de forma persistente en IndexedDB. Están integrados el Web App Manifest, el Service Worker, la página alternativa sin conexión, los iconos de la aplicación y el flujo de empaquetado independiente. Las cuentas locales, las claves de recuperación y las copias de seguridad se gestionan en el navegador. El inicio de sesión con Apple / iCloud puede sincronizar de forma opcional los datos cifrados del espacio de trabajo mediante la base privada de CloudKit del usuario; no se incluye un backend empresarial remoto propio ni autenticación de servidor gestionada por la aplicación.
+La versión actual es una PWA instalable y local-first. Los datos de negocio permanecen en el dispositivo, se cifran con Web Crypto y se almacenan de forma persistente en IndexedDB. Están integrados el Web App Manifest, el Service Worker, la página alternativa sin conexión, los iconos de la aplicación y el flujo de empaquetado independiente. Las cuentas locales, las claves de recuperación y las copias de seguridad se gestionan en el navegador. El inicio de sesión con Google desbloquea el espacio de trabajo, guarda una copia cifrada en la carpeta oculta de datos de la app del Google Drive del usuario y puede enviar las fechas de los proyectos a Google Calendar; no se incluye un backend empresarial remoto propio ni autenticación de servidor gestionada por la aplicación.
 
 ## Novedades de V 1.2
 
-- **Dos vías de cuenta independientes** — sigue usando cuentas IndexedDB totalmente locales o inicia sesión por separado con Apple / iCloud, sin que ninguna vía dependa de la otra.
-- **Sincronización cifrada con CloudKit** — conserva la copia cifrada del dispositivo y sincroniza solo texto cifrado con la base de datos privada de CloudKit, con vinculación de cuenta, bloqueos de escritura, comprobación de change tags y resolución explícita de conflictos.
+- **Dos vías de cuenta independientes** — sigue usando cuentas IndexedDB totalmente locales o inicia sesión con Google, sin que ninguna vía dependa de la otra.
+- **Sincronización cifrada con Google Drive** — conserva la copia cifrada del dispositivo y sincroniza solo texto cifrado con la carpeta oculta de datos de la app del Google Drive del usuario, con vinculación de cuenta, bloqueos de escritura, comprobación de versiones y resolución explícita de conflictos. El mismo inicio de sesión con Google también envía las fases, los entregables y los lanzamientos de los proyectos a un calendario dedicado de Google Calendar.
 - **Recuperación de dispositivos más segura** — utiliza una clave de recuperación de 16 dígitos que se muestra una sola vez, una clave Web Crypto no exportable vinculada al dispositivo y copias cifradas del dispositivo, espacio de trabajo y proyecto.
 - **Editor visual de flujos de trabajo** — crea tableros reutilizables con nodos conectados, colores, archivos adjuntos, zoom, vínculos a proyectos, guardado automático y uso compartido mediante HTML independiente.
 - **Entregas de proyecto más completas** — vincula flujos a proyectos, gestiona hitos de Demo y lanzamiento oficial, pagos y cronogramas, y exporta informes HTML compartibles.
@@ -96,7 +96,7 @@ Studio Map OS está **listo para MCP**. Cualquier cliente de [Model Context Prot
 - **25 herramientas del espacio de trabajo** — listar e inspeccionar proyectos, crear o actualizar proyectos, estados, cronogramas y tareas, desplazar un calendario completo, consultar empresas, grupos, bibliotecas, resúmenes de costes e informes por ejercicio fiscal, y gestionar la lista de deseos y los recordatorios de USAGE y TestFlight.
 - **Lista de herramientas dinámica** — el relé pide las herramientas a la aplicación, así que las nuevas capacidades aparecen sin reconfigurar el agente.
 - **Seguro por defecto** — un token de emparejamiento protege el socket local, las herramientas destructivas (`archive_project`, `delete_project`) no se ejecutan sin `confirm: true` y cada llamada queda registrada en el historial de acciones de la página Archivo.
-- **Consciente de la nube** — antes de cada llamada la aplicación descarga la copia más reciente de CloudKit y justo después sube el cambio, de modo que tus otros dispositivos lo reciben en su siguiente sincronización en primer plano.
+- **Consciente de la nube** — antes de cada llamada la aplicación descarga la copia más reciente de Google Drive y justo después sube el cambio, de modo que tus otros dispositivos lo reciben en su siguiente sincronización en primer plano.
 
 Actívalo en **Archivo → Acceso de agentes**, copia el token de emparejamiento y registra el relé en tu agente (se muestra Claude Code; otros clientes usan el fragmento JSON que aparece en la misma tarjeta):
 
@@ -133,7 +133,7 @@ Studio Map OS incluye una estructura completa de integración PWA:
 - Un paquete PWA portátil que contiene el servidor independiente de Next.js, los recursos estáticos y un script de inicio.
 
 > [!NOTE]
-> El modo de desarrollo desactiva el Service Worker para evitar que las cachés obsoletas interfieran con el desarrollo. La autenticación local con Apple ID debe usar exactamente el origen HTTPS [https://localhost:3305](https://localhost:3305); no se admiten HTTP ni otros puertos locales.
+> El modo de desarrollo desactiva el Service Worker para evitar que las cachés obsoletas interfieran con el desarrollo. El inicio de sesión con Google solo funciona en los orígenes incluidos en **Orígenes autorizados de JavaScript** (*Authorized JavaScript origins*) del cliente OAuth, por ejemplo `https://kunito01.github.io` y `http://localhost:3306`.
 
 ## Primeros pasos
 
@@ -172,7 +172,7 @@ Las cuentas locales existentes pueden iniciar sesión en [https://localhost:3305
 npm run build
 ```
 
-Verifica la PWA de producción mediante el sitio HTTPS desplegado. Para la autenticación local con Apple ID, usa únicamente el servidor de desarrollo HTTPS anterior y abre [https://localhost:3305/login](https://localhost:3305/login). No se admiten HTTP ni otros puertos locales.
+Verifica la PWA de producción mediante el sitio HTTPS desplegado. Para probar el inicio de sesión con Google en local, abre el servidor de desarrollo desde un origen autorizado en el cliente OAuth.
 
 ### Creación de un paquete PWA portátil
 
@@ -180,14 +180,14 @@ Verifica la PWA de producción mediante el sitio HTTPS desplegado. Para la auten
 npm run package:pwa
 ```
 
-El paquete se escribe en `output/pwa/studio-map-os-pwa/`. Incluye el servidor independiente, los recursos PWA y scripts de inicio para Windows (`START_STUDIO_MAP_OS.bat`), macOS (`START_STUDIO_MAP_OS.command`) y terminales Linux/macOS (`START_STUDIO_MAP_OS.sh`). Estos iniciadores no proporcionan por sí solos un origen HTTPS compatible con Apple ID; la autenticación local con Apple ID debe usar [https://localhost:3305](https://localhost:3305).
+El paquete se escribe en `output/pwa/studio-map-os-pwa/`. Incluye el servidor independiente, los recursos PWA y scripts de inicio para Windows (`START_STUDIO_MAP_OS.bat`), macOS (`START_STUDIO_MAP_OS.command`) y terminales Linux/macOS (`START_STUDIO_MAP_OS.sh`). El inicio de sesión con Google desde estos iniciadores solo funciona después de añadir su origen a los orígenes autorizados de JavaScript del cliente OAuth.
 
 ## Rutas principales
 
 | Ruta | Finalidad |
 | --- | --- |
 | `/register` | Crear una cuenta local y un espacio de trabajo, o unirse a uno mediante una copia de seguridad cifrada |
-| `/login` | Desbloquear una cuenta local, usar Apple / iCloud o restaurar una copia completa del dispositivo |
+| `/login` | Desbloquear una cuenta local, iniciar sesión con Google o restaurar una copia completa del dispositivo |
 | `/offline` | Página alternativa para documentos cuando falla la navegación del Service Worker |
 | `/dashboard` | Vista general del estudio, ámbitos, métricas y mapas de proyectos |
 | `/companies` | Gestión de marcas y grupos de proyectos |
@@ -199,7 +199,7 @@ El paquete se escribe en `output/pwa/studio-map-os-pwa/`. Incluye el servidor in
 | `/costs` | Totales de costes de todo el estudio y ajustes de la divisa de visualización |
 | `/libraries` | Bibliotecas de personas, suscripciones de software y plantillas de costes |
 | `/workflow` | Tableros visuales reutilizables, archivos adjuntos, vínculos a proyectos y uso compartido en HTML |
-| `/archive` | Proyectos archivados, copias cifradas y controles de almacenamiento local/CloudKit |
+| `/archive` | Proyectos archivados, copias cifradas y controles de almacenamiento local/Google Drive y envío a Google Calendar |
 | `/share/?token=...` | Instantánea local del proyecto en modo de solo lectura |
 
 ## Modelo de datos y seguridad

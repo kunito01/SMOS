@@ -22,6 +22,8 @@ import { DeleteConfirmDialog } from "@/components/ui/delete-confirm-dialog";
 import { SectionHeader } from "@/components/ui/section-header";
 import { useCloudKitAccountDisplay } from "@/components/storage/use-cloudkit-account-display";
 import { authApi } from "@/lib/api";
+import { isAppleSignInEnabled } from "@/lib/auth/sign-in-options";
+import { reconnectGoogleServices } from "@/lib/integrations/google-services";
 import { formatLocalizedDate } from "@/lib/i18n/formatters";
 import { preloadGoogleIdentity } from "@/lib/integrations/google-auth";
 import {
@@ -137,6 +139,9 @@ export function ArchiveStorageSyncCard({ workspaceId }: ArchiveStorageSyncCardPr
   const driveNeedsReconnect = driveConnected && !driveHasToken;
   const isDriveProvider = preference.provider === "gdrive";
   const isCloudKitProvider = preference.provider === "cloudkit";
+  // Apple ID is retired: the iCloud option only stays visible on a device that
+  // still stores this workspace in iCloud, so it can move to Google Drive.
+  const showICloudBox = isAppleSignInEnabled() || isCloudKitProvider;
 
   const refreshPreference = useCallback(() => {
     const next = getWorkspaceStoragePreference(workspaceId);
@@ -252,12 +257,18 @@ export function ArchiveStorageSyncCard({ workspaceId }: ArchiveStorageSyncCardPr
   );
 
   /** Must run inside a click handler: Google's popup needs the user gesture. */
+  const signsInWithGoogle = user?.accountKind === "google";
   const ensureDriveToken = useCallback(async () => {
     if (!hasGoogleDriveAccessToken(workspaceId)) {
-      await requestGoogleDriveAccessToken(workspaceId, "interactive");
+      if (signsInWithGoogle) {
+        // One popup refreshes Drive and Calendar together.
+        await reconnectGoogleServices(workspaceId);
+      } else {
+        await requestGoogleDriveAccessToken(workspaceId, "interactive");
+      }
     }
     refreshDrive();
-  }, [refreshDrive, workspaceId]);
+  }, [refreshDrive, signsInWithGoogle, workspaceId]);
 
   const switchProvider = useCallback(
     async (target: WorkspaceStorageProvider) => {
@@ -604,6 +615,7 @@ export function ArchiveStorageSyncCard({ workspaceId }: ArchiveStorageSyncCardPr
           />
         </div>
 
+        {showICloudBox ? (
         <div className="mt-4 grid gap-4 rounded-studio-lg bg-ink/[0.055] p-4 lg:grid-cols-[minmax(0,1fr)_minmax(15rem,0.45fr)]">
           <div className="min-w-0">
             <div className="flex items-start gap-3">
@@ -755,6 +767,7 @@ export function ArchiveStorageSyncCard({ workspaceId }: ArchiveStorageSyncCardPr
             </div>
           ) : null}
         </div>
+        ) : null}
 
         <div className="mt-4 grid gap-4 rounded-studio-lg bg-ink/[0.055] p-4 lg:grid-cols-[minmax(0,1fr)_minmax(15rem,0.45fr)]">
           <div className="min-w-0">

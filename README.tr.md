@@ -44,12 +44,12 @@
 
 Studio Map OS; markaları, proje gruplarını, projeleri, kişileri, yazılımları, maliyetleri, zaman çizelgelerini, yayın kontrol noktalarını ve arşivleri tek bir görsel çalışma alanında birleştirir. Bağımsız üreticilerin, yaratıcı süreci sıradan bir görev listesine indirgemeden birden fazla paralel projeyi yönetmesine yardımcı olur.
 
-Mevcut sürüm, kurulabilir ve Local-First bir PWA'dır. İş verileri cihazda kalır, Web Crypto ile şifrelenir ve IndexedDB'de saklanır. Web App Manifest, Service Worker, çevrimdışı geri dönüş sayfası, uygulama simgeleri ve bağımsız paketleme iş akışı entegre edilmiştir. Yerel hesaplar, kurtarma anahtarları ve yedekler tarayıcıda yönetilir. Apple / iCloud oturumu, şifreli çalışma alanı verilerini isteğe bağlı olarak kullanıcının özel CloudKit veritabanı üzerinden eşitleyebilir; özel bir uzak iş backend'i veya uygulama tarafından yönetilen sunucu kimlik doğrulaması projeye dâhil değildir.
+Mevcut sürüm, kurulabilir ve Local-First bir PWA'dır. İş verileri cihazda kalır, Web Crypto ile şifrelenir ve IndexedDB'de saklanır. Web App Manifest, Service Worker, çevrimdışı geri dönüş sayfası, uygulama simgeleri ve bağımsız paketleme iş akışı entegre edilmiştir. Yerel hesaplar, kurtarma anahtarları ve yedekler tarayıcıda yönetilir. Google ile oturum açmak çalışma alanının kilidini açar, şifreli bir kopyayı kullanıcının Google Drive'ındaki gizli uygulama veri klasöründe tutar ve proje tarihlerini Google Takvim'e gönderebilir; özel bir uzak iş backend'i veya uygulama tarafından yönetilen sunucu kimlik doğrulaması projeye dâhil değildir.
 
 ## V 1.2 yenilikleri
 
-- **Birbirinden bağımsız iki hesap yolu** — tamamen yerel IndexedDB hesaplarını kullanmaya devam edin veya Apple / iCloud ile ayrı olarak oturum açın; iki yol birbirine bağlı değildir.
-- **Şifreli CloudKit eşitlemesi** — cihazdaki şifreli kopyayı koruyup özel CloudKit veritabanıyla yalnızca şifreli metni eşitleyin; hesap bağlama, yazma kilitleri, change tag kontrolü ve açık yerel/bulut çakışma çözümü kullanın.
+- **Birbirinden bağımsız iki hesap yolu** — tamamen yerel IndexedDB hesaplarını kullanmaya devam edin veya Google ile oturum açın; iki yol birbirine bağlı değildir.
+- **Şifreli Google Drive eşitlemesi** — cihazdaki şifreli kopyayı koruyup yalnızca şifreli metni kullanıcının Google Drive'ındaki gizli uygulama veri klasörüyle eşitleyin; hesap bağlama, yazma kilitleri, sürüm kontrolü ve açık yerel/bulut çakışma çözümü kullanın. Aynı Google oturumu proje aşamalarını, teslimatları ve yayınları Google Takvim'deki ayrı bir takvime de gönderir.
 - **Daha güvenli cihaz kurtarma** — yalnızca bir kez gösterilen 16 haneli kurtarma anahtarı, cihaza bağlı dışa aktarılamayan Web Crypto anahtarı ve şifreli cihaz, çalışma alanı ve proje yedeklerini kullanın.
 - **Görsel iş akışı oluşturucu** — bağlı düğümler, renkler, ekler, yakınlaştırma, proje bağlantıları, otomatik kaydetme ve bağımsız HTML paylaşımıyla yeniden kullanılabilir panolar oluşturun.
 - **Daha kapsamlı proje teslimi** — iş akışlarını projelere bağlayın; Demo ve resmî yayın noktalarını, ödemeleri ve zaman çizelgelerini yönetin; paylaşılabilir HTML proje raporları dışa aktarın.
@@ -96,7 +96,7 @@ Studio Map OS **MCP'ye hazırdır**. Bilgisayarınızda çalışan herhangi bir 
 - **25 çalışma alanı aracı** — projeleri listeleme ve inceleme; proje, durum, zaman çizelgesi ve görev oluşturma veya güncelleme; tüm takvimi kaydırma; şirketleri, grupları, kitaplıkları, maliyet özetlerini ve mali yıl raporlarını okuma; istek listesi ile USAGE ve TestFlight hatırlatmalarını yönetme.
 - **Dinamik araç listesi** — aktarıcı araçları uygulamadan ister; yeni yetenekler ajanı yeniden yapılandırmadan görünür.
 - **Varsayılan olarak güvenli** — eşleştirme belirteci yerel soketi korur, yıkıcı araçlar (`archive_project`, `delete_project`) `confirm: true` olmadan çalışmaz ve her çağrı Arşiv sayfasındaki işlem günlüğüne yazılır.
-- **Bulut bilinçli** — her çağrıdan önce uygulama en güncel CloudKit kopyasını çeker ve hemen ardından değişikliği yükler; böylece diğer cihazlarınız bir sonraki ön plan eşitlemesinde değişikliği alır.
+- **Bulut bilinçli** — her çağrıdan önce uygulama en güncel Google Drive kopyasını çeker ve hemen ardından değişikliği yükler; böylece diğer cihazlarınız bir sonraki ön plan eşitlemesinde değişikliği alır.
 
 **Arşiv → Ajan erişimi** altında etkinleştirin, eşleştirme belirtecini kopyalayın ve aktarıcıyı ajanınıza kaydedin (Claude Code gösterilmiştir; diğer istemciler aynı kartta görüntülenen JSON parçasını kullanır):
 
@@ -133,7 +133,7 @@ Studio Map OS, eksiksiz bir PWA entegrasyon yapısı içerir:
 - Bağımsız Next.js sunucusunu, statik varlıkları ve bir başlatma betiğini içeren taşınabilir PWA paketi.
 
 > [!NOTE]
-> Geliştirme modu, eski önbelleklerin geliştirmeyi etkilemesini önlemek için Service Worker'ı devre dışı bırakır. Yerel Apple ID kimlik doğrulaması tam olarak [https://localhost:3305](https://localhost:3305) HTTPS kaynağını kullanmalıdır; HTTP ve diğer yerel bağlantı noktaları desteklenmez.
+> Geliştirme modu, eski önbelleklerin geliştirmeyi etkilemesini önlemek için Service Worker'ı devre dışı bırakır. Google ile oturum açma yalnızca OAuth istemcisinin **Authorized JavaScript origins** listesinde yer alan kaynaklarda çalışır; örneğin `https://kunito01.github.io` ve `http://localhost:3306`.
 
 ## Başlarken
 
@@ -172,7 +172,7 @@ Mevcut yerel hesaplar [https://localhost:3305/login](https://localhost:3305/logi
 npm run build
 ```
 
-Üretim PWA'sını dağıtılmış HTTPS sitesi üzerinden doğrulayın. Yerel Apple ID kimlik doğrulaması için yalnızca yukarıdaki HTTPS geliştirme sunucusunu kullanın ve [https://localhost:3305/login](https://localhost:3305/login) adresini açın. HTTP ve diğer yerel bağlantı noktaları desteklenmez.
+Üretim PWA'sını dağıtılmış HTTPS sitesi üzerinden doğrulayın. Google ile oturum açmayı yerel olarak test etmek için geliştirme sunucusunu OAuth istemcisi için yetkilendirilmiş bir kaynaktan açın.
 
 ### Taşınabilir PWA Paketi Oluşturma
 
@@ -180,14 +180,14 @@ npm run build
 npm run package:pwa
 ```
 
-Paket `output/pwa/studio-map-os-pwa/` konumuna yazılır. Bağımsız sunucuyu, PWA varlıklarını ve Windows (`START_STUDIO_MAP_OS.bat`), macOS (`START_STUDIO_MAP_OS.command`) ile Linux/macOS terminalleri (`START_STUDIO_MAP_OS.sh`) için başlatma betiklerini içerir. Bu başlatıcılar tek başına Apple ID ile uyumlu bir HTTPS kaynağı sağlamaz; yerel Apple ID kimlik doğrulaması [https://localhost:3305](https://localhost:3305) adresini kullanmalıdır.
+Paket `output/pwa/studio-map-os-pwa/` konumuna yazılır. Bağımsız sunucuyu, PWA varlıklarını ve Windows (`START_STUDIO_MAP_OS.bat`), macOS (`START_STUDIO_MAP_OS.command`) ile Linux/macOS terminalleri (`START_STUDIO_MAP_OS.sh`) için başlatma betiklerini içerir. Bu başlatıcılardan Google ile oturum açma, ancak kaynakları OAuth istemcisinin yetkilendirilmiş JavaScript kaynaklarına eklendikten sonra çalışır.
 
 ## Ana Rotalar
 
 | Rota | Amaç |
 | --- | --- |
 | `/register` | Yerel hesap ve çalışma alanı oluşturun veya şifrelenmiş bir yedekle mevcut bir çalışma alanına katılın |
-| `/login` | Yerel hesabın kilidini açın, Apple / iCloud kullanın veya tam cihaz yedeğini geri yükleyin |
+| `/login` | Yerel hesabın kilidini açın, Google ile oturum açın veya tam cihaz yedeğini geri yükleyin |
 | `/offline` | Service Worker gezinmesi başarısız olduğunda kullanılan belge geri dönüş sayfası |
 | `/dashboard` | Stüdyo genel görünümü, kapsamlar, ölçümler ve proje haritaları |
 | `/companies` | Marka ve proje grubu yönetimi |
@@ -199,7 +199,7 @@ Paket `output/pwa/studio-map-os-pwa/` konumuna yazılır. Bağımsız sunucuyu, 
 | `/costs` | Stüdyo düzeyinde maliyet toplamları ve görüntüleme para birimi ayarları |
 | `/libraries` | Kişi, yazılım aboneliği ve maliyet şablonu kitaplıkları |
 | `/workflow` | Yeniden kullanılabilir görsel iş akışı panoları, ekler, proje bağlantıları ve HTML paylaşımı |
-| `/archive` | Arşivlenmiş projeler, şifreli yedekler ve yerel/CloudKit depolama denetimleri |
+| `/archive` | Arşivlenmiş projeler, şifreli yedekler, yerel/Google Drive depolama denetimleri ve Google Takvim gönderimi |
 | `/share/?token=...` | Yerel salt okunur proje anlık görüntüsü |
 
 ## Veri ve Güvenlik Modeli

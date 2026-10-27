@@ -44,12 +44,12 @@
 
 Studio Map OS verbindet Marken, Projektgruppen, Projekte, Personen, Software, Kosten, Zeitpläne, Veröffentlichungsmeilensteine und Archive in einem visuellen Arbeitsbereich. Es unterstützt unabhängige Kreative dabei, mehrere parallele Projekte zu steuern, ohne den kreativen Prozess auf eine generische Aufgabenliste zu reduzieren.
 
-Die aktuelle Version ist eine installierbare Local-First-PWA. Geschäftsdaten verbleiben auf dem Gerät, werden mit Web Crypto verschlüsselt und in IndexedDB gespeichert. Web App Manifest, Service Worker, Offline-Fallback, Anwendungssymbole und der Workflow für die eigenständige Paketierung sind integriert. Lokale Konten, Wiederherstellungsschlüssel und Backups werden im Browser verwaltet. Die Apple-/iCloud-Anmeldung kann verschlüsselte Arbeitsbereichsdaten optional über die private CloudKit-Datenbank des Benutzers synchronisieren; ein eigenes Remote-Backend für Geschäftsdaten oder eine von der App verwaltete Serverauthentifizierung sind nicht enthalten.
+Die aktuelle Version ist eine installierbare Local-First-PWA. Geschäftsdaten verbleiben auf dem Gerät, werden mit Web Crypto verschlüsselt und in IndexedDB gespeichert. Web App Manifest, Service Worker, Offline-Fallback, Anwendungssymbole und der Workflow für die eigenständige Paketierung sind integriert. Lokale Konten, Wiederherstellungsschlüssel und Backups werden im Browser verwaltet. Die Google-Anmeldung entsperrt den Arbeitsbereich, legt eine verschlüsselte Kopie im versteckten App-Datenordner im Google Drive des Benutzers ab und kann Projekttermine an Google Kalender übertragen; ein eigenes Remote-Backend für Geschäftsdaten oder eine von der App verwaltete Serverauthentifizierung sind nicht enthalten.
 
 ## Neu in V 1.2
 
-- **Zwei unabhängige Kontowege** — vollständig lokale IndexedDB-Konten weiterverwenden oder sich separat mit Apple / iCloud anmelden, ohne dass ein Weg vom anderen abhängt.
-- **Verschlüsselte CloudKit-Synchronisierung** — die verschlüsselte Gerätekopie behalten und ausschließlich Geheimtext mit der privaten CloudKit-Datenbank synchronisieren, einschließlich Kontobindung, Schreibsperren, Change-Tag-Prüfung und klarer Konfliktauflösung.
+- **Zwei unabhängige Kontowege** — vollständig lokale IndexedDB-Konten weiterverwenden oder sich mit Google anmelden, ohne dass ein Weg vom anderen abhängt.
+- **Verschlüsselte Google-Drive-Synchronisierung** — die verschlüsselte Gerätekopie behalten und ausschließlich Geheimtext mit dem versteckten App-Datenordner im Google Drive des Benutzers synchronisieren, einschließlich Kontobindung, Schreibsperren, Versionsprüfung und klarer Konfliktauflösung. Dieselbe Google-Anmeldung überträgt außerdem Projektphasen, Liefergegenstände und Veröffentlichungen in einen eigenen Google Kalender.
 - **Sicherere Gerätewiederherstellung** — einmalig angezeigten 16-stelligen Wiederherstellungsschlüssel, gerätegebundenen nicht exportierbaren Web-Crypto-Schlüssel sowie verschlüsselte Geräte-, Arbeitsbereichs- und Projekt-Backups verwenden.
 - **Visueller Workflow-Builder** — wiederverwendbare Workflow-Boards mit verbundenen Knoten, Farben, Anhängen, Zoom, Projektverknüpfungen, automatischem Speichern und eigenständiger HTML-Freigabe erstellen.
 - **Erweiterte Projektübergabe** — Workflows mit Projekten verknüpfen, Demo- und offizielle Veröffentlichungen, Zahlungen und Zeitpläne verwalten sowie teilbare HTML-Projektberichte exportieren.
@@ -96,7 +96,7 @@ Studio Map OS ist **MCP-ready**. Jeder [Model-Context-Protocol](https://modelcon
 - **25 Arbeitsbereichs-Werkzeuge** — Projekte auflisten und einsehen, Projekte, Status, Zeitpläne und Aufgaben anlegen oder aktualisieren, einen ganzen Zeitplan verschieben, Unternehmen, Gruppen, Bibliotheken, Kostenübersichten und Geschäftsjahresberichte abrufen sowie Wunschliste, USAGE- und TestFlight-Erinnerungen verwalten.
 - **Dynamische Werkzeugliste** — das Relay fragt die App nach ihren Werkzeugen, neue Funktionen erscheinen also ohne Neukonfiguration des Agenten.
 - **Sicher voreingestellt** — ein Pairing-Token schützt den lokalen Socket, destruktive Werkzeuge (`archive_project`, `delete_project`) laufen nur mit `confirm: true`, und jeder Aufruf landet im Aktionsprotokoll auf der Archivseite.
-- **Cloud-bewusst** — vor jedem Aufruf holt die App die neueste CloudKit-Kopie und lädt die Änderung direkt danach hoch, sodass deine anderen Geräte sie bei der nächsten Vordergrund-Synchronisierung übernehmen.
+- **Cloud-bewusst** — vor jedem Aufruf holt die App die neueste Google-Drive-Kopie und lädt die Änderung direkt danach hoch, sodass deine anderen Geräte sie bei der nächsten Vordergrund-Synchronisierung übernehmen.
 
 Aktiviere die Funktion unter **Archiv → Agenten-Zugriff**, kopiere das Pairing-Token und registriere das Relay bei deinem Agenten (gezeigt für Claude Code; andere Clients verwenden den JSON-Schnipsel auf derselben Karte):
 
@@ -133,7 +133,7 @@ Studio Map OS umfasst eine vollständige PWA-Integrationsstruktur:
 - Ein portables PWA-Paket mit dem eigenständigen Next.js-Server, statischen Assets und einem Startskript.
 
 > [!NOTE]
-> Im Entwicklungsmodus ist der Service Worker deaktiviert, damit veraltete Caches die Entwicklung nicht beeinträchtigen. Die lokale Apple-ID-Authentifizierung muss exakt den HTTPS-Ursprung [https://localhost:3305](https://localhost:3305) verwenden; HTTP und andere lokale Ports werden nicht unterstützt.
+> Im Entwicklungsmodus ist der Service Worker deaktiviert, damit veraltete Caches die Entwicklung nicht beeinträchtigen. Die Google-Anmeldung funktioniert nur auf Ursprüngen, die unter **Autorisierte JavaScript-Quellen** des OAuth-Clients eingetragen sind, zum Beispiel `https://kunito01.github.io` und `http://localhost:3306`.
 
 ## Erste Schritte
 
@@ -172,7 +172,7 @@ Bestehende lokale Konten können sich unter [https://localhost:3305/login](https
 npm run build
 ```
 
-Prüfen Sie die Produktions-PWA über die bereitgestellte HTTPS-Website. Verwenden Sie für die lokale Apple-ID-Authentifizierung ausschließlich den oben genannten HTTPS-Entwicklungsserver unter [https://localhost:3305/login](https://localhost:3305/login). HTTP und andere lokale Ports werden nicht unterstützt.
+Prüfen Sie die Produktions-PWA über die bereitgestellte HTTPS-Website. Um die Google-Anmeldung lokal zu testen, öffnen Sie den Entwicklungsserver über einen Ursprung, der für den OAuth-Client autorisiert ist.
 
 ### Portables PWA-Paket erstellen
 
@@ -180,14 +180,14 @@ Prüfen Sie die Produktions-PWA über die bereitgestellte HTTPS-Website. Verwend
 npm run package:pwa
 ```
 
-Das Paket wird nach `output/pwa/studio-map-os-pwa/` geschrieben. Es enthält den eigenständigen Server, PWA-Assets und Startskripte für Windows (`START_STUDIO_MAP_OS.bat`), macOS (`START_STUDIO_MAP_OS.command`) sowie Linux/macOS-Terminals (`START_STUDIO_MAP_OS.sh`). Diese Starter stellen selbst keinen Apple-ID-kompatiblen HTTPS-Ursprung bereit; die lokale Apple-ID-Authentifizierung muss [https://localhost:3305](https://localhost:3305) verwenden.
+Das Paket wird nach `output/pwa/studio-map-os-pwa/` geschrieben. Es enthält den eigenständigen Server, PWA-Assets und Startskripte für Windows (`START_STUDIO_MAP_OS.bat`), macOS (`START_STUDIO_MAP_OS.command`) sowie Linux/macOS-Terminals (`START_STUDIO_MAP_OS.sh`). Die Google-Anmeldung über diese Starter funktioniert erst, nachdem ihr Ursprung zu den autorisierten JavaScript-Quellen des OAuth-Clients hinzugefügt wurde.
 
 ## Hauptrouten
 
 | Route | Zweck |
 | --- | --- |
 | `/register` | Ein lokales Konto und einen Arbeitsbereich erstellen oder einem Arbeitsbereich mit einem verschlüsselten Backup beitreten |
-| `/login` | Ein lokales Konto entsperren, Apple / iCloud verwenden oder ein vollständiges Geräte-Backup wiederherstellen |
+| `/login` | Ein lokales Konto entsperren, sich mit Google anmelden oder ein vollständiges Geräte-Backup wiederherstellen |
 | `/offline` | Dokument-Fallback, wenn die Service-Worker-Navigation fehlschlägt |
 | `/dashboard` | Studioübersicht, Ansichtsbereiche, Kennzahlen und Projektkarten |
 | `/companies` | Marken- und Projektgruppenverwaltung |
@@ -199,7 +199,7 @@ Das Paket wird nach `output/pwa/studio-map-os-pwa/` geschrieben. Es enthält den
 | `/costs` | Studioübergreifende Kostensummen und Einstellungen der Anzeigewährung |
 | `/libraries` | Bibliotheken für Personen, Softwareabonnements und Kostenvorlagen |
 | `/workflow` | Wiederverwendbare visuelle Workflow-Boards, Anhänge, Projektverknüpfungen und HTML-Freigabe |
-| `/archive` | Archivierte Projekte, verschlüsselte Backups und lokale/CloudKit-Speichersteuerung |
+| `/archive` | Archivierte Projekte, verschlüsselte Backups, lokale/Google-Drive-Speichersteuerung und Google-Kalender-Übertragung |
 | `/share/?token=...` | Lokaler schreibgeschützter Projekt-Snapshot |
 
 ## Daten- und Sicherheitsmodell
