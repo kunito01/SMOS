@@ -160,15 +160,18 @@ export const hasGoogleAccessToken = (workspaceId: string) => readToken(workspace
 export const requestGoogleAccessToken = async (
   workspaceId: string,
   clientId: string,
-  mode: "interactive" | "silent"
+  mode: "interactive" | "silent",
+  options: { ignoreCache?: boolean } = {}
 ): Promise<StoredToken> => {
-  const { consentGranted } = readGoogleCalendarSettings(workspaceId);
+  const settings = readGoogleCalendarSettings(workspaceId);
   return requestGoogleToken({
     storageKey: tokenKey(workspaceId),
     clientId,
     scope: GOOGLE_CALENDAR_SCOPE,
     mode,
-    consentGranted,
+    consentGranted: settings.consentGranted || Boolean(settings.connectedAt),
+    ignoreCache: options.ignoreCache,
+    allowStaleOnFailure: options.ignoreCache ? false : undefined,
     onGranted: () => {
       writeGoogleCalendarSettings(workspaceId, { consentGranted: true });
     }
@@ -455,7 +458,11 @@ const assertWorkspaceStillActive = (workspaceId: string) => {
 
 type SyncMode = "interactive" | "silent";
 
-const runSync = async (workspaceId: string, mode: SyncMode): Promise<GoogleCalendarStatus> => {
+const runSync = async (
+  workspaceId: string,
+  mode: SyncMode,
+  authRetried = false
+): Promise<GoogleCalendarStatus> => {
   const settings = readGoogleCalendarSettings(workspaceId);
   if (!settings.clientId || (mode === "silent" && !isGoogleCalendarConnected(settings))) {
     const status: GoogleCalendarStatus = { state: "idle" };
@@ -468,8 +475,11 @@ const runSync = async (workspaceId: string, mode: SyncMode): Promise<GoogleCalen
   try {
     token = await requestGoogleAccessToken(workspaceId, settings.clientId, mode);
   } catch (error) {
+    // A timed-out silent refresh is not a signed-out calendar. Keep the token
+    // and surface a retryable error instead of asking the user to log in again.
+    const transient = error instanceof GoogleAuthError && error.transient;
     const status: GoogleCalendarStatus = {
-      state: "reconnect",
+      state: transient ? "error" : "reconnect",
       message: error instanceof Error ? error.message : String(error),
       eventCount: knownCount
     };
@@ -568,6 +578,22 @@ const runSync = async (workspaceId: string, mode: SyncMode): Promise<GoogleCalen
     return status;
   } catch (error) {
     if (error instanceof GoogleCalendarApiError && error.status === 401) {
+      if (!authRetried) {
+        try {
+          await requestGoogleAccessToken(workspaceId, settings.clientId, "silent", { ignoreCache: true });
+          return runSync(workspaceId, mode, true);
+        } catch (refreshError) {
+          if (refreshError instanceof GoogleAuthError && refreshError.transient) {
+            const status: GoogleCalendarStatus = {
+              state: "error",
+              message: refreshError.message,
+              eventCount: knownCount
+            };
+            publishStatus(status);
+            return status;
+          }
+        }
+      }
       writeToken(workspaceId, null);
       const status: GoogleCalendarStatus = { state: "reconnect", message: error.message, eventCount: knownCount };
       publishStatus(status);

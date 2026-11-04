@@ -24,7 +24,10 @@ import {
   type EncryptedWorkspaceBundleSnapshot
 } from "@/lib/storage/indexed-db";
 import { noteWorkspaceLocalSave } from "@/lib/storage/workspace-sync-coordinator";
-import { assertWorkspaceWritable } from "@/lib/storage/workspace-write-guard";
+import {
+  assertWorkspaceWritable,
+  isWorkspaceSyncConflictError
+} from "@/lib/storage/workspace-write-guard";
 import {
   bumpWorkspaceMutationEpoch,
   getWorkspaceMutationEpoch,
@@ -1317,7 +1320,11 @@ export async function persistMockDatabase(
           removeVerifiedLegacyPlaintextCopies(identity.workspaceId);
         }
       } catch (error) {
+        // A conflict refusal happens before anything is written. Rolling the
+        // in-memory database back here discarded the edit the user had just
+        // made, so a later reconnect had nothing left to save.
         if (
+          !isWorkspaceSyncConflictError(error) &&
           identity.generation === activeWorkspaceGeneration &&
           getWorkspaceMutationEpoch(identity.workspaceId) === expectedMutationEpoch
         ) {

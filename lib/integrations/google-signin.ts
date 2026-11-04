@@ -180,19 +180,25 @@ export const forgetGoogleSignInToken = () => writeGoogleToken(GOOGLE_SIGN_IN_TOK
 export const requestGoogleSignIn = async (options: {
   clientId: string;
   mode: "interactive" | "silent";
+  /** Ask Google again without deleting the cached token first. */
+  ignoreCache?: boolean;
 }): Promise<GoogleStoredToken> => {
   const clientId = options.clientId.trim();
   if (!clientId) {
     throw new GoogleAuthError("The Google OAuth client id is missing.", true);
   }
   const settings = readGoogleSignInSettings();
+  const sameClient = !settings.clientId || settings.clientId === clientId;
   const token = await requestGoogleToken({
     storageKey: GOOGLE_SIGN_IN_TOKEN_KEY,
     clientId,
     scope: GOOGLE_SIGN_IN_SCOPE,
     mode: options.mode,
-    consentGranted: settings.consentGranted && settings.clientId === clientId,
+    // A previous sign-in on this device is enough to try a silent refresh.
+    // `prompt: ""` does not open a popup when Google still needs consent.
+    consentGranted: sameClient && (settings.consentGranted || Boolean(settings.email)),
     hint: settings.email || undefined,
+    ignoreCache: options.ignoreCache,
     onGranted: () => {
       writeGoogleSignInSettings({ clientId, consentGranted: true });
     }

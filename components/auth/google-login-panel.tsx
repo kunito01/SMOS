@@ -10,7 +10,6 @@ import { LocalAuthError, type LocalAuthUser } from "@/lib/api/auth";
 import { GoogleAuthError, preloadGoogleIdentity } from "@/lib/integrations/google-auth";
 import {
   forgetGoogleSignInToken,
-  hasUsableGoogleSignInToken,
   rememberGoogleClientId,
   requestGoogleSignIn,
   resolveGoogleClientId
@@ -43,6 +42,9 @@ export function GoogleLoginPanel() {
 
   const describeError = (error: unknown) => {
     if (error instanceof GoogleAuthError) {
+      if (error.transient) {
+        return `${t("loginGoogleFailed")} (${error.message})`;
+      }
       return t("loginGoogleCancelled");
     }
     if (error instanceof LocalAuthError) {
@@ -74,20 +76,24 @@ export function GoogleLoginPanel() {
 
   useEffect(() => {
     // A device that already holds this Google workspace enters it without a
-    // popup when a usable sign-in token is cached. Runs once per mount.
+    // popup. A lapsed access token is refreshed silently first; a timeout
+    // still enters from the device vault instead of forcing a new login.
+    // Runs once per mount.
     if (autoUnlockAttemptedRef.current || user) {
       return;
     }
     autoUnlockAttemptedRef.current = true;
-    // Without a live token the silent entry cannot start sync; the stored
-    // account is served by the "continue on this device" button instead.
-    if (!hasUsableGoogleSignInToken()) {
+    // An explicit sign-out closes this path. Otherwise re-enter from the
+    // device vault, refreshing the Google token silently when it has lapsed,
+    // so an hourly expiry or a timed-out request does not dump the user on
+    // the login page.
+    if (!authApi.getStoredGoogleAccountSummary()) {
       return;
     }
 
     const requestSequence = ++requestSequenceRef.current;
     setBusy(true);
-    void unlockGoogleAccountLocally({ allowWithoutToken: false })
+    void unlockGoogleAccountLocally({ allowWithoutToken: true })
       .then((result: { user: LocalAuthUser } | null) => {
         if (requestSequence !== requestSequenceRef.current || userRef.current) {
           return;
@@ -142,7 +148,11 @@ export function GoogleLoginPanel() {
       setFlow({ phase: "needs-setup", email: resolution.email });
     } catch (error) {
       logFailure("sign-in", error);
-      if (!(error instanceof GoogleAuthError)) {
+      // A timeout or a Drive/network failure must keep the token. Forgetting
+      // it here is what turned "链接超时" into a forced Google login. Only a
+      // cancelled or rejected popup drops the token so the next click can
+      // pick a different account.
+      if (error instanceof GoogleAuthError && !error.transient) {
         forgetGoogleSignInToken();
       }
       if (requestSequence === requestSequenceRef.current) {

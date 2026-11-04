@@ -97,7 +97,12 @@ import {
   requireGoogleDriveAccessToken,
   seedGoogleDriveConnection
 } from "@/lib/storage/google-drive/google-drive-client";
-import { writeGoogleToken, type GoogleStoredToken } from "@/lib/integrations/google-auth";
+import {
+  GoogleApiError,
+  GoogleAuthError,
+  writeGoogleToken,
+  type GoogleStoredToken
+} from "@/lib/integrations/google-auth";
 import { CloudProviderError } from "@/lib/storage/cloud-provider-error";
 import {
   fetchGoogleUserInfo,
@@ -108,6 +113,7 @@ import {
   markGoogleSignedOut,
   readGoogleSignInSettings,
   readGoogleSignInToken,
+  requestGoogleSignIn,
   resolveGoogleClientId,
   type GoogleUserInfo
 } from "@/lib/integrations/google-signin";
@@ -2759,6 +2765,55 @@ const upsertStoredGoogleAccount = (account: StoredGoogleAccount) => {
   writeAccounts([...next, account]);
 };
 
+/**
+ * A Google account always syncs through Drive. Putting the preference back
+ * does not clear a pending upload or the change tag, so local edits stay
+ * queued instead of turning into a conflict.
+ */
+const pinGoogleWorkspaceToDrive = (workspaceId: string, lastError?: string | null) => {
+  const preference = getWorkspaceStoragePreference(workspaceId);
+  if (preference.provider === "gdrive" && preference.status !== "idle") {
+    if (lastError === undefined) {
+      return preference;
+    }
+    return updateWorkspaceStoragePreference(workspaceId, { lastError });
+  }
+  return updateWorkspaceStoragePreference(workspaceId, {
+    provider: "gdrive",
+    status:
+      preference.status === "conflict"
+        ? "conflict"
+        : preference.status === "account-mismatch"
+          ? "account-mismatch"
+          : "pending",
+    ...(lastError !== undefined ? { lastError } : {})
+  });
+};
+
+const isTransientActivationError = (error: unknown) => {
+  if (error instanceof CloudProviderError) {
+    return error.code === "REQUEST_FAILED" || error.code === "THROTTLED";
+  }
+  if (error instanceof GoogleAuthError) {
+    return error.transient;
+  }
+  if (error instanceof GoogleApiError) {
+    return error.status === 0 || error.status === 429 || error.status >= 500;
+  }
+  if (error instanceof TypeError) {
+    return true;
+  }
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: unknown }).code === "TIMEOUT"
+  ) {
+    return true;
+  }
+  return error instanceof Error && /timed out|timeout|network|failed to fetch|offline/i.test(error.message);
+};
+
 const createStoredGoogleAccountFromProfile = (
   profile: GoogleAccountProfile,
   digest: string,
@@ -2796,6 +2851,7 @@ const activateGoogleAccountSession = async (input: {
   const storedPreference = getStoredWorkspaceStoragePreference(workspace.workspaceId);
   let switchedProvider = false;
   let seeded = false;
+  let localSessionReady = false;
   try {
     // Drive is best effort here: a device that already holds the workspace
     // must get in even while Google's API is unreachable (the storage card
@@ -2811,20 +2867,25 @@ const activateGoogleAccountSession = async (input: {
       debugAppleAuth("google: Drive could not be connected at sign-in; continuing locally");
     }
     if (getWorkspaceStoragePreference(workspace.workspaceId).provider !== "gdrive") {
+      const before = getWorkspaceStoragePreference(workspace.workspaceId);
+      const keepHistory = before.pendingUpload || before.cloudManifestChangeTag !== null;
       setWorkspaceStorageProvider(workspace.workspaceId, "gdrive");
-      // This device has no shared history with the Drive copy yet. Clearing
-      // the pending flag and the tag makes the login pull compare the two
-      // bundles: identical settles silently, different becomes the usual
-      // keep-local / use-Drive choice. Local edits are never overwritten.
-      updateWorkspaceStoragePreference(workspace.workspaceId, {
-        pendingUpload: false,
-        cloudManifestChangeTag: null
-      });
+      // First contact with Drive, and this device has nothing waiting to
+      // upload: compare the two bundles. An existing change tag or a pending
+      // local edit is kept, so a later timeout cannot turn those edits into
+      // a conflict or drop the workspace back to local storage.
+      if (!keepHistory) {
+        updateWorkspaceStoragePreference(workspace.workspaceId, {
+          pendingUpload: false,
+          cloudManifestChangeTag: null
+        });
+      }
       switchedProvider = true;
     }
 
     try {
       user = await setActiveSession(account, workspace, masterKey);
+      localSessionReady = true;
     } catch (localActivationError) {
       user = toAuthUser(account, workspace);
       activeSession?.masterKey.fill(0);
@@ -2843,6 +2904,7 @@ const activateGoogleAccountSession = async (input: {
       }
       await activateMockDatabaseWorkspace(workspace.workspaceId, masterKey);
       recoveredMissingLocalBundle = true;
+      localSessionReady = true;
     }
 
     const cloudSession = activeSession;
@@ -2877,17 +2939,43 @@ const activateGoogleAccountSession = async (input: {
     void requestPersistentBrowserStorage();
     return user;
   } catch (error) {
+    const openSession = activeSession;
+    const sessionReady =
+      localSessionReady &&
+      openSession?.workspace.workspaceId === workspace.workspaceId &&
+      isStoredGoogleAccount(openSession.account);
+    const wrongAccount = error instanceof CloudProviderError && error.code === "ACCOUNT_MISMATCH";
+    // The local workspace is already open. A Drive timeout, a 401 that can
+    // still be refreshed, or a profile write failure must not sign the user
+    // out or throw away the edits they just made.
+    if (sessionReady && openSession && !wrongAccount) {
+      pinGoogleWorkspaceToDrive(
+        workspace.workspaceId,
+        error instanceof Error ? error.message : "Google Drive sync will retry."
+      );
+      return openSession.user;
+    }
+
     activeSession?.masterKey.fill(0);
     masterKey.fill(0);
     activeSession = null;
     deactivateMockDatabaseWorkspace();
     if (switchedProvider) {
-      // A failed Google attempt must not take away the cloud this device
-      // used before (its sign-in and recovery paths depend on it).
-      restoreWorkspaceStoragePreference(workspace.workspaceId, storedPreference);
+      // A failed Google attempt must not take away a cloud this device used
+      // before. IndexedDB is not one of those: a Google account that briefly
+      // reached Drive must not fall back to local storage.
+      if (storedPreference && storedPreference.provider !== "indexeddb") {
+        restoreWorkspaceStoragePreference(workspace.workspaceId, storedPreference);
+      } else {
+        pinGoogleWorkspaceToDrive(
+          workspace.workspaceId,
+          error instanceof Error ? error.message : null
+        );
+      }
     }
-    if (seeded) {
+    if (seeded && !isTransientActivationError(error)) {
       // No session survives this attempt, so no Drive-capable token may either.
+      // A timeout still has a usable token; dropping it is what forced a re-login.
       forgetGoogleDriveAccessToken(workspace.workspaceId);
     }
     throw error;
@@ -3058,10 +3146,25 @@ async function unlockGoogleAccountLocallyUnlocked(options: {
   if (settings.signedOut) {
     return null;
   }
-  const token = readGoogleSignInToken();
-  const tokenUsable = token !== null && hasUsableGoogleSignInToken();
-  if (!tokenUsable && !options.allowWithoutToken) {
-    return null;
+  let token = readGoogleSignInToken();
+  let tokenUsable = token !== null && hasUsableGoogleSignInToken();
+  if (!tokenUsable) {
+    const clientId = settings.clientId || resolveGoogleClientId();
+    if (clientId) {
+      try {
+        // The cached access token lasts about an hour. Google can mint a new
+        // one without a popup while the browser session is still signed in.
+        token = await requestGoogleSignIn({ clientId, mode: "silent" });
+        tokenUsable = hasUsableGoogleSignInToken();
+      } catch (error) {
+        const transient = error instanceof GoogleAuthError && error.transient;
+        if (!options.allowWithoutToken && !transient) {
+          return null;
+        }
+      }
+    } else if (!options.allowWithoutToken) {
+      return null;
+    }
   }
   const accounts = readAccounts().filter(isStoredGoogleAccount);
   const account =
@@ -3096,8 +3199,12 @@ async function unlockGoogleAccountLocallyUnlocked(options: {
     throw error;
   }
   rememberLastEmail(account.email);
+  // A Google account that was showing local storage (a failed sign-in restored
+  // IndexedDB, or the preference record could not be read) goes back to Drive
+  // without discarding queued edits.
+  pinGoogleWorkspaceToDrive(workspace.workspaceId);
 
-  if (tokenUsable && token) {
+  if (token) {
     // Best effort: a reachable Drive lets the session sync right away; a
     // failure here is recorded on the storage card, never a lock-out.
     const session = activeSession;

@@ -9,14 +9,23 @@
  * PWA. Each feature keeps its own cached token under its own storage key and
  * scope; the OAuth grant itself is shared, so a feature only revokes it when
  * no sibling feature is connected any more. A `silent` request never opens
- * Google UI; it either returns a cached token or throws with
- * `interactive = true` so the caller can ask the user for a click.
+ * Google UI. It returns a cached token, or — when this device already granted
+ * consent — asks Google Identity Services for a new one with `prompt: ""`.
+ * A timeout or a network failure is `transient`: callers must keep the cached
+ * token and the signed-in session. Only an explicit rejection asks the user
+ * to click again.
  */
 
 export const GIS_SCRIPT_URL = "https://accounts.google.com/gsi/client";
 const GOOGLE_SIGN_IN_TIMEOUT_MS = 120_000;
 const GIS_LOAD_TIMEOUT_MS = 15_000;
+const SILENT_REFRESH_TIMEOUT_MS = 12_000;
 const TOKEN_EXPIRY_MARGIN_MS = 60_000;
+
+const gisFailureIsTransient = (message: string) =>
+  /timed out|timeout|network|failed to fetch|offline|unavailable|could not be loaded|too long to load/i.test(
+    message
+  );
 
 export type GoogleStoredToken = {
   accessToken: string;
@@ -67,7 +76,9 @@ const canUseBrowser = () => typeof window !== "undefined";
 export class GoogleAuthError extends Error {
   constructor(
     message: string,
-    readonly interactive: boolean
+    readonly interactive: boolean,
+    /** Timeout or transport failure. The cached grant is still in place. */
+    readonly transient: boolean = false
   ) {
     super(message);
     this.name = "GoogleAuthError";
@@ -78,7 +89,7 @@ export class GoogleAuthError extends Error {
 export const googleTokenUsableUntil = (token: GoogleStoredToken) =>
   token.expiresAt - TOKEN_EXPIRY_MARGIN_MS;
 
-export const readGoogleToken = (storageKey: string): GoogleStoredToken | null => {
+const parseStoredToken = (storageKey: string): GoogleStoredToken | null => {
   if (!canUseBrowser()) {
     return null;
   }
@@ -91,17 +102,32 @@ export const readGoogleToken = (storageKey: string): GoogleStoredToken | null =>
     if (typeof parsed.accessToken !== "string" || typeof parsed.expiresAt !== "number") {
       return null;
     }
-    // Treat tokens within a minute of expiry as expired so a request never dies mid-flight.
-    return parsed.expiresAt - TOKEN_EXPIRY_MARGIN_MS > Date.now()
-      ? {
-          accessToken: parsed.accessToken,
-          expiresAt: parsed.expiresAt,
-          ...(typeof parsed.scope === "string" ? { scope: parsed.scope } : {})
-        }
-      : null;
+    return {
+      accessToken: parsed.accessToken,
+      expiresAt: parsed.expiresAt,
+      ...(typeof parsed.scope === "string" ? { scope: parsed.scope } : {})
+    };
   } catch {
     return null;
   }
+};
+
+export const readGoogleToken = (storageKey: string): GoogleStoredToken | null => {
+  const parsed = parseStoredToken(storageKey);
+  if (!parsed) {
+    return null;
+  }
+  // Treat tokens within a minute of expiry as expired so a request never dies mid-flight.
+  return parsed.expiresAt - TOKEN_EXPIRY_MARGIN_MS > Date.now() ? parsed : null;
+};
+
+/** Token Google has not actually expired, including the last minute the strict reader hides. */
+export const readGoogleTokenAllowingNearExpiry = (storageKey: string): GoogleStoredToken | null => {
+  const parsed = parseStoredToken(storageKey);
+  if (!parsed || parsed.expiresAt <= Date.now()) {
+    return null;
+  }
+  return parsed;
 };
 
 export const writeGoogleToken = (storageKey: string, token: GoogleStoredToken | null) => {
@@ -176,42 +202,60 @@ export type GoogleTokenRequest = {
   onGranted?: (token: GoogleStoredToken) => void;
   /** Google account hint so a signed-in user is not asked to pick an account again. */
   hint?: string;
+  /**
+   * Ask Google even when a cached token exists. The previous token stays in
+   * storage until a replacement is actually granted, so a closed or timed-out
+   * popup cannot sign the user out.
+   */
+  ignoreCache?: boolean;
+  /**
+   * When a silent refresh fails, return a cached token that has not actually
+   * expired. Set false after Google has already rejected that token.
+   */
+  allowStaleOnFailure?: boolean;
+};
+
+const storeGrantedToken = (request: GoogleTokenRequest, response: TokenResponse): GoogleStoredToken => {
+  if (!response.access_token) {
+    throw new GoogleAuthError(
+      response.error_description ?? response.error ?? "Google sign-in was cancelled",
+      true,
+      false
+    );
+  }
+  const token: GoogleStoredToken = {
+    accessToken: response.access_token,
+    expiresAt: Date.now() + (response.expires_in ?? 3600) * 1000,
+    ...(typeof response.scope === "string" ? { scope: response.scope } : {})
+  };
+  writeGoogleToken(request.storageKey, token);
+  request.onGranted?.(token);
+  return token;
 };
 
 /**
- * Returns a usable access token for one feature.
- *
- * `silent` never opens Google UI. `interactive` reuses a cached token when
- * there is one and otherwise opens Google's popup, which must therefore run
- * inside a user gesture; only the very first connection shows the consent
- * screen.
+ * Asks Google Identity Services for a token. Does not read or delete the cache:
+ * a failure leaves whatever was stored before.
  */
-export const requestGoogleToken = async (request: GoogleTokenRequest): Promise<GoogleStoredToken> => {
-  const cached = readGoogleToken(request.storageKey);
-  if (cached) {
-    return cached;
-  }
-  if (request.mode === "silent") {
-    throw new GoogleAuthError("Google sign-in required", true);
-  }
-  if (!request.clientId.trim()) {
-    throw new GoogleAuthError("Missing Google OAuth client id", true);
-  }
-
+const requestTokenFromGis = async (
+  request: GoogleTokenRequest,
+  prompt: string,
+  timeoutMs: number
+): Promise<GoogleStoredToken> => {
   // When the script is already present this resolves in a microtask and keeps
   // the user activation; a slow or stuck load fails instead of hanging the UI.
   await Promise.race([
     preloadGoogleIdentity(),
     new Promise<never>((_, reject) =>
       window.setTimeout(
-        () => reject(new GoogleAuthError("Google Identity Services took too long to load", true)),
+        () => reject(new GoogleAuthError("Google Identity Services took too long to load", true, true)),
         GIS_LOAD_TIMEOUT_MS
       )
     )
   ]);
   const oauth2 = window.google?.accounts?.oauth2;
   if (!oauth2) {
-    throw new GoogleAuthError("Google Identity Services unavailable", true);
+    throw new GoogleAuthError("Google Identity Services unavailable", true, true);
   }
 
   return new Promise<GoogleStoredToken>((resolve, reject) => {
@@ -223,46 +267,89 @@ export const requestGoogleToken = async (request: GoogleTokenRequest): Promise<G
       }
     };
     const timeout = window.setTimeout(
-      () => settle(() => reject(new GoogleAuthError("Google sign-in timed out", true))),
-      GOOGLE_SIGN_IN_TIMEOUT_MS
+      () => settle(() => reject(new GoogleAuthError("Google sign-in timed out", true, true))),
+      timeoutMs
     );
     const client = oauth2.initTokenClient({
       client_id: request.clientId.trim(),
       scope: request.scope,
       callback: (response) => {
         window.clearTimeout(timeout);
-        if (!response.access_token) {
-          settle(() =>
-            reject(
-              new GoogleAuthError(
-                response.error_description ?? response.error ?? "Google sign-in was cancelled",
-                true
-              )
-            )
-          );
-          return;
+        try {
+          const token = storeGrantedToken(request, response);
+          settle(() => resolve(token));
+        } catch (error) {
+          settle(() => reject(error));
         }
-        const token: GoogleStoredToken = {
-          accessToken: response.access_token,
-          expiresAt: Date.now() + (response.expires_in ?? 3600) * 1000,
-          ...(typeof response.scope === "string" ? { scope: response.scope } : {})
-        };
-        writeGoogleToken(request.storageKey, token);
-        request.onGranted?.(token);
-        settle(() => resolve(token));
       },
       error_callback: (error) => {
         window.clearTimeout(timeout);
-        settle(() =>
-          reject(new GoogleAuthError(error?.message ?? error?.type ?? "Google sign-in failed", true))
-        );
+        const message = error?.message ?? error?.type ?? "Google sign-in failed";
+        settle(() => reject(new GoogleAuthError(message, true, gisFailureIsTransient(message))));
       }
     });
     client.requestAccessToken({
-      prompt: request.consentGranted ? "" : "consent",
+      prompt,
       ...(request.hint ? { login_hint: request.hint } : {})
     });
   });
+};
+
+/**
+ * Returns a usable access token for one feature.
+ *
+ * `silent` never opens Google UI. When consent was already granted it asks
+ * Google for a fresh token without a popup. `interactive` reuses a cached
+ * token unless `ignoreCache` is set, and otherwise opens Google's popup,
+ * which must run inside a user gesture; only the very first connection shows
+ * the consent screen.
+ */
+export const requestGoogleToken = async (request: GoogleTokenRequest): Promise<GoogleStoredToken> => {
+  if (!request.ignoreCache) {
+    const cached = readGoogleToken(request.storageKey);
+    if (cached) {
+      return cached;
+    }
+  }
+  if (!request.clientId.trim()) {
+    throw new GoogleAuthError("Missing Google OAuth client id", true, false);
+  }
+
+  if (request.mode === "silent") {
+    const stillValid = () =>
+      request.allowStaleOnFailure === false
+        ? null
+        : readGoogleTokenAllowingNearExpiry(request.storageKey);
+    if (!request.consentGranted) {
+      const near = stillValid();
+      if (near) {
+        return near;
+      }
+      throw new GoogleAuthError("Google sign-in required", true, false);
+    }
+    try {
+      return await requestTokenFromGis(request, "", SILENT_REFRESH_TIMEOUT_MS);
+    } catch (error) {
+      const near = stillValid();
+      if (near) {
+        return near;
+      }
+      if (error instanceof GoogleAuthError) {
+        throw error;
+      }
+      throw new GoogleAuthError(
+        error instanceof Error ? error.message : "Google sign-in required",
+        true,
+        true
+      );
+    }
+  }
+
+  return requestTokenFromGis(
+    request,
+    request.consentGranted ? "" : "consent",
+    GOOGLE_SIGN_IN_TIMEOUT_MS
+  );
 };
 
 /**
