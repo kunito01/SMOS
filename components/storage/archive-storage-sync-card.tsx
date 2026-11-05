@@ -7,6 +7,7 @@ import {
   Cloud,
   CloudOff,
   Database,
+  CalendarDays,
   FolderSync,
   HardDrive,
   Link2,
@@ -27,7 +28,23 @@ import { isAppleSignInEnabled } from "@/lib/auth/sign-in-options";
 import { bindGoogleServicesFromSignIn, reconnectGoogleServices } from "@/lib/integrations/google-services";
 import { readGoogleSignInToken } from "@/lib/integrations/google-signin";
 import { formatLocalizedDate } from "@/lib/i18n/formatters";
-import { googleTokenOmitsScope, preloadGoogleIdentity } from "@/lib/integrations/google-auth";
+import {
+  GOOGLE_CALENDAR_SCOPE,
+  googleTokenOmitsScope,
+  preloadGoogleIdentity
+} from "@/lib/integrations/google-auth";
+import {
+  disableGoogleCalendarPush,
+  enableGoogleCalendarPush,
+  getGoogleCalendarStatus,
+  hasGoogleAccessToken,
+  isGoogleCalendarConnected,
+  readGoogleCalendarSettings,
+  subscribeGoogleCalendarStatus,
+  syncGoogleCalendar,
+  writeGoogleCalendarSettings,
+  type GoogleCalendarStatus
+} from "@/lib/integrations/google-calendar";
 import {
   CLOUDKIT_SIGN_IN_BUTTON_ID,
   CLOUDKIT_SIGN_OUT_BUTTON_ID
@@ -108,6 +125,9 @@ export function ArchiveStorageSyncCard({ workspaceId }: ArchiveStorageSyncCardPr
     () => readGoogleDriveSettings(workspaceId).clientId
   );
   const [driveBindPending, setDriveBindPending] = useState(false);
+  const [calendarSettings, setCalendarSettings] = useState(() => readGoogleCalendarSettings(workspaceId));
+  const [calendarStatus, setCalendarStatus] = useState<GoogleCalendarStatus>(() => getGoogleCalendarStatus());
+  const [calendarHasToken, setCalendarHasToken] = useState(() => hasGoogleAccessToken(workspaceId));
   const refreshDrive = useCallback(() => {
     const next = readGoogleDriveSettings(workspaceId);
     setDrive(next);
@@ -121,6 +141,16 @@ export function ArchiveStorageSyncCard({ workspaceId }: ArchiveStorageSyncCardPr
     void preloadGoogleIdentity().catch(() => undefined);
     return subscribeGoogleDriveStatus(refreshDrive);
   }, [refreshDrive]);
+
+  useEffect(
+    () =>
+      subscribeGoogleCalendarStatus((nextStatus) => {
+        setCalendarStatus(nextStatus);
+        setCalendarSettings(readGoogleCalendarSettings(workspaceId));
+        setCalendarHasToken(hasGoogleAccessToken(workspaceId));
+      }),
+    [workspaceId]
+  );
 
   // Google tokens live about an hour. Try a silent refresh before showing
   // "reconnect", and flip the card once the cached one actually lapses.
@@ -153,6 +183,13 @@ export function ArchiveStorageSyncCard({ workspaceId }: ArchiveStorageSyncCardPr
   const driveConfigured = Boolean(drive.clientId.trim());
   const driveConnected = isGoogleDriveConnected(drive);
   const driveNeedsReconnect = driveConnected && !driveHasToken;
+  const calendarConnected = isGoogleCalendarConnected(calendarSettings);
+  const calendarPushDisabled = calendarSettings.pushDisabled;
+  const calendarActive = calendarConnected && !calendarPushDisabled;
+  const calendarNeedsReconnect =
+    calendarActive && (calendarStatus.state === "reconnect" || !calendarHasToken);
+  const calendarEventCount =
+    calendarStatus.eventCount ?? Object.keys(calendarSettings.syncedEvents).length;
   const isDriveProvider = preference.provider === "gdrive";
   const isCloudKitProvider = preference.provider === "cloudkit";
   // Apple ID is retired: the iCloud option only stays visible on a device that
@@ -388,6 +425,38 @@ export function ArchiveStorageSyncCard({ workspaceId }: ArchiveStorageSyncCardPr
     ]
   );
 
+  const ensureCalendarTokenForSync = useCallback(async () => {
+    if (!calendarActive) {
+      return;
+    }
+    if (hasGoogleAccessToken(workspaceId)) {
+      return;
+    }
+    if (!signsInWithGoogle) {
+      return;
+    }
+    const token = readGoogleSignInToken();
+    if (
+      !token ||
+      googleTokenOmitsScope(token, GOOGLE_CALENDAR_SCOPE) ||
+      googleTokenOmitsScope(token, GOOGLE_DRIVE_SCOPE)
+    ) {
+      await reconnectGoogleServices(workspaceId);
+      return;
+    }
+    await bindGoogleServicesFromSignIn(workspaceId, token);
+  }, [calendarActive, signsInWithGoogle, workspaceId]);
+
+  const syncGoogleCalendarIfActive = useCallback(async () => {
+    if (!calendarActive) {
+      return null;
+    }
+    await ensureCalendarTokenForSync();
+    return syncGoogleCalendar(workspaceId, {
+      mode: signsInWithGoogle ? "silent" : "interactive"
+    });
+  }, [calendarActive, ensureCalendarTokenForSync, signsInWithGoogle, workspaceId]);
+
   const syncNow = async () => {
     setBusy("sync");
     setNotice(null);
@@ -402,11 +471,76 @@ export function ArchiveStorageSyncCard({ workspaceId }: ArchiveStorageSyncCardPr
         ),
         t("storageSyncSuccess")
       );
+      const calendarResult = await syncGoogleCalendarIfActive();
+      if (
+        calendarResult &&
+        (calendarResult.state === "error" || calendarResult.state === "reconnect") &&
+        calendarResult.message
+      ) {
+        setNotice({ message: calendarResult.message, tone: "error" });
+      }
     } catch (error) {
       refreshPreference();
       refreshDrive();
       setNotice({ message: describeFailure(error), tone: "error" });
     } finally {
+      setCalendarSettings(readGoogleCalendarSettings(workspaceId));
+      setCalendarHasToken(hasGoogleAccessToken(workspaceId));
+      setBusy(null);
+    }
+  };
+
+  const turnOffCalendarPush = async () => {
+    setBusy("auth");
+    setNotice(null);
+    try {
+      disableGoogleCalendarPush(workspaceId);
+      setCalendarSettings(readGoogleCalendarSettings(workspaceId));
+    } catch (error) {
+      setNotice({
+        message: error instanceof Error ? error.message : String(error),
+        tone: "error"
+      });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const turnOnCalendarPush = async () => {
+    setBusy("auth");
+    setNotice(null);
+    try {
+      if (getWorkspaceStoragePreference(workspaceId).status === "conflict") {
+        setNotice({ message: t("storageConflictBlockedBody"), tone: "error" });
+        return;
+      }
+      enableGoogleCalendarPush(workspaceId);
+      const token = readGoogleSignInToken();
+      if (
+        !token ||
+        googleTokenOmitsScope(token, GOOGLE_CALENDAR_SCOPE) ||
+        googleTokenOmitsScope(token, GOOGLE_DRIVE_SCOPE)
+      ) {
+        await reconnectGoogleServices(workspaceId);
+      } else {
+        await bindGoogleServicesFromSignIn(workspaceId, token);
+      }
+      if (!hasGoogleAccessToken(workspaceId)) {
+        setNotice({ message: t("googleCalendarScopeMissing"), tone: "error" });
+        return;
+      }
+      const result = await syncGoogleCalendar(workspaceId, { mode: "silent" });
+      if (
+        (result.state === "error" || result.state === "reconnect") &&
+        result.message
+      ) {
+        setNotice({ message: result.message, tone: "error" });
+      }
+    } catch (error) {
+      setNotice({ message: describeFailure(error, "google-account"), tone: "error" });
+    } finally {
+      setCalendarSettings(readGoogleCalendarSettings(workspaceId));
+      setCalendarHasToken(hasGoogleAccessToken(workspaceId));
       setBusy(null);
     }
   };
@@ -504,6 +638,25 @@ export function ArchiveStorageSyncCard({ workspaceId }: ArchiveStorageSyncCardPr
     }
   };
 
+  const calendarStatusLabel = (() => {
+    if (calendarPushDisabled) {
+      return null;
+    }
+    if (!calendarConnected) {
+      return signsInWithGoogle ? null : t("googleCalendarStatusIdle");
+    }
+    switch (calendarStatus.state) {
+      case "syncing":
+        return t("googleCalendarStatusSyncing");
+      case "error":
+        return t("googleCalendarStatusError").replace("{message}", calendarStatus.message ?? "");
+      default:
+        return calendarNeedsReconnect
+          ? t("googleCalendarStatusReconnect")
+          : t("googleCalendarStatusSynced").replace("{count}", String(calendarEventCount));
+    }
+  })();
+  const googleSyncBusy = busy === "sync" || calendarStatus.state === "syncing";
   const providerTitle =
     preference.provider === "cloudkit"
       ? t("storageCloudKitTitle")
@@ -836,12 +989,45 @@ export function ArchiveStorageSyncCard({ workspaceId }: ArchiveStorageSyncCardPr
                 <p className="mt-1 text-xs font-bold leading-5 text-muted">
                   {t("storageGoogleDriveBody")}
                 </p>
-                <p className="mt-1 text-xs font-bold leading-5 text-muted">
-                  {t("storageGoogleDriveSameAccountOnly")}
-                </p>
+                {signsInWithGoogle && driveConnected ? (
+                  <p className="mt-1 text-xs font-bold leading-5 text-muted">{t("googleCalendarViaSignIn")}</p>
+                ) : (
+                  <p className="mt-1 text-xs font-bold leading-5 text-muted">
+                    {t("storageGoogleDriveSameAccountOnly")}
+                  </p>
+                )}
                 <p className="mt-1 text-xs font-bold leading-5 text-coral">
                   {t("storageGoogleDriveWarning")}
                 </p>
+                {driveConnected && signsInWithGoogle ? (
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    {calendarPushDisabled ? null : calendarActive ? (
+                      <>
+                        <span className="inline-flex min-h-8 items-center gap-2 rounded-full bg-ink/[0.06] px-3 text-xs font-black text-muted">
+                          <CalendarDays size={14} />
+                          {t("googleCalendarTarget").replace("{name}", "Studio Map OS")}
+                        </span>
+                        {calendarStatusLabel ? (
+                          <span
+                            className={cn(
+                              "inline-flex min-h-8 items-center rounded-full px-3 text-xs font-black",
+                              calendarStatus.state === "error"
+                                ? "bg-coral/15 text-coral"
+                                : calendarStatus.state === "syncing"
+                                  ? "bg-aqua/60 text-ink"
+                                  : calendarNeedsReconnect
+                                    ? "bg-[#ffc700]/40 text-ink"
+                                    : "bg-[#97EECE] text-[#12263A]"
+                            )}
+                          >
+                            {calendarStatusLabel}
+                          </span>
+                        ) : null}
+                      </>
+                    ) : null}
+                  </div>
+                ) : null}
+                <p className="mt-2 text-xs font-bold leading-5 text-muted">{t("googleCalendarScopeNote")}</p>
               </div>
             </div>
           </div>
@@ -938,8 +1124,8 @@ export function ArchiveStorageSyncCard({ workspaceId }: ArchiveStorageSyncCardPr
                       onClick={() => void syncNow()}
                       className="w-full"
                     >
-                      <RefreshCw className={cn(busy === "sync" && "animate-spin")} size={17} />
-                      {busy === "sync" ? t("storageSyncing") : t("storageSyncNow")}
+                      <RefreshCw className={cn(googleSyncBusy && "animate-spin")} size={17} />
+                      {googleSyncBusy ? t("storageSyncing") : t("storageSyncNow")}
                     </Button>
                   </>
                 ) : preference.status === "conflict" ? (
@@ -977,16 +1163,58 @@ export function ArchiveStorageSyncCard({ workspaceId }: ArchiveStorageSyncCardPr
                     {t("storageGoogleDriveReconnect")}
                   </Button>
                 ) : (
-                  <Button
-                    variant="secondary"
-                    size="md"
-                    disabled={Boolean(busy)}
-                    onClick={() => void syncNow()}
-                    className="w-full"
-                  >
-                    <RefreshCw className={cn(busy === "sync" && "animate-spin")} size={17} />
-                    {busy === "sync" ? t("storageSyncing") : t("storageSyncNow")}
-                  </Button>
+                  <>
+                    <Button
+                      variant="secondary"
+                      size="md"
+                      disabled={Boolean(busy)}
+                      onClick={() => void syncNow()}
+                      className="w-full"
+                    >
+                      <RefreshCw className={cn(googleSyncBusy && "animate-spin")} size={17} />
+                      {googleSyncBusy ? t("storageSyncing") : t("storageSyncNow")}
+                    </Button>
+                    {isDriveProvider && calendarActive ? (
+                      <label className="flex cursor-pointer items-center gap-2 rounded-studio bg-ink/[0.04] p-3 text-xs font-black text-ink/70">
+                        <input
+                          type="checkbox"
+                          checked={calendarSettings.autoSync}
+                          disabled={Boolean(busy)}
+                          onChange={(event) =>
+                            setCalendarSettings(
+                              writeGoogleCalendarSettings(workspaceId, { autoSync: event.target.checked })
+                            )
+                          }
+                          className="size-4 accent-coral"
+                        />
+                        {t("googleCalendarAutoSync")}
+                      </label>
+                    ) : null}
+                    {signsInWithGoogle && calendarActive ? (
+                      <Button
+                        variant="ghost"
+                        size="md"
+                        disabled={Boolean(busy)}
+                        onClick={() => void turnOffCalendarPush()}
+                        className="w-full"
+                      >
+                        <Unplug size={17} />
+                        {t("googleCalendarTurnOff")}
+                      </Button>
+                    ) : null}
+                    {signsInWithGoogle && calendarPushDisabled ? (
+                      <Button
+                        variant="ghost"
+                        size="md"
+                        disabled={Boolean(busy)}
+                        onClick={() => void turnOnCalendarPush()}
+                        className="w-full"
+                      >
+                        <Link2 size={17} />
+                        {t("googleCalendarTurnOn")}
+                      </Button>
+                    ) : null}
+                  </>
                 )}
                 {googleOwned ? (
                   <p className="rounded-studio bg-ink/[0.06] p-3 text-xs font-bold leading-5 text-muted">
@@ -1011,9 +1239,11 @@ export function ArchiveStorageSyncCard({ workspaceId }: ArchiveStorageSyncCardPr
             ) : null}
           </div>
 
-          <div className="border-t border-black/10 pt-4 lg:col-span-2">
-            <GoogleCalendarSyncCard workspaceId={workspaceId} embedded />
-          </div>
+          {!signsInWithGoogle && driveConnected && !calendarConnected ? (
+            <div className="border-t border-black/10 pt-4 lg:col-span-2">
+              <GoogleCalendarSyncCard workspaceId={workspaceId} embedded hideSyncControls />
+            </div>
+          ) : null}
         </div>
 
         {notice ? (
