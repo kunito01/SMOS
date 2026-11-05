@@ -32,9 +32,15 @@ const USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo";
 const FINGERPRINT_DOMAIN = "studio-map-os.google-account.v1";
 // A token must outlive the sign-in's own Drive pull to count as usable.
 const MIN_USABLE_TOKEN_MS = 5 * 60_000;
-/** Refresh silently this long before the token would fail `hasUsableGoogleSignInToken`. */
-const SIGN_IN_TOKEN_REFRESH_LEAD_MS = 8 * 60_000;
+/**
+ * Start silent GIS refresh once this much lifetime remains on the access token
+ * (~18 minutes into a typical one-hour implicit grant, then again after each
+ * successful refresh).
+ */
+const SIGN_IN_TOKEN_REFRESH_WHEN_REMAINING_MS = 42 * 60_000;
 const SIGN_IN_TOKEN_REFRESH_RETRY_MS = 90_000;
+const SIGN_IN_TOKEN_MAINTENANCE_RETRY_DELAYS_MS = [4_000, 15_000, 45_000, 90_000] as const;
+const SIGN_IN_TOKEN_WATCHDOG_INTERVAL_MS = 6 * 60_000;
 const WORKSPACE_SETTINGS_PREFIXES = ["studio-map-os.google-drive:", "studio-map-os.google-calendar:"];
 
 export type GoogleSignInSettings = {
@@ -169,9 +175,32 @@ export const rememberGoogleClientId = (clientId: string) => {
 
 export const readGoogleSignInToken = () => readGoogleToken(GOOGLE_SIGN_IN_TOKEN_KEY);
 
+/** Cached grant that API calls may still use inside Google's one-minute skew margin. */
+export const readGoogleSignInTokenRelaxed = () =>
+  readGoogleSignInToken() ?? readGoogleTokenAllowingNearExpiry(GOOGLE_SIGN_IN_TOKEN_KEY);
+
 export const hasUsableGoogleSignInToken = () => {
   const token = readGoogleSignInToken();
   return Boolean(token) && token !== null && googleTokenUsableUntil(token) - Date.now() >= MIN_USABLE_TOKEN_MS;
+};
+
+export const shouldProactivelyRefreshGoogleSignInToken = (): boolean => {
+  const settings = readGoogleSignInSettings();
+  if (settings.signedOut || !settings.email) {
+    return false;
+  }
+  if (!resolveGoogleClientId()) {
+    return false;
+  }
+  const token = readGoogleTokenAllowingNearExpiry(GOOGLE_SIGN_IN_TOKEN_KEY);
+  if (!token) {
+    return true;
+  }
+  const remainingMs = token.expiresAt - Date.now();
+  if (remainingMs <= 0) {
+    return true;
+  }
+  return remainingMs <= SIGN_IN_TOKEN_REFRESH_WHEN_REMAINING_MS;
 };
 
 /** Milliseconds until a background silent refresh should run; `null` when not applicable. */
@@ -183,24 +212,27 @@ export const msUntilGoogleSignInTokenRefresh = (): number | null => {
   if (!resolveGoogleClientId()) {
     return null;
   }
-  const token = readGoogleSignInToken();
+  const token = readGoogleTokenAllowingNearExpiry(GOOGLE_SIGN_IN_TOKEN_KEY);
   if (!token) {
     return 0;
   }
-  const refreshAt =
-    googleTokenUsableUntil(token) - MIN_USABLE_TOKEN_MS - SIGN_IN_TOKEN_REFRESH_LEAD_MS;
-  const delay = refreshAt - Date.now();
+  const delay = token.expiresAt - Date.now() - SIGN_IN_TOKEN_REFRESH_WHEN_REMAINING_MS;
   if (delay <= 0) {
     return 0;
   }
-  return Math.min(delay, 45 * 60_000);
+  return Math.min(delay, 30 * 60_000);
 };
+
+const sleep = (ms: number) => new Promise<void>((resolve) => window.setTimeout(resolve, ms));
 
 /**
  * Keeps the cached sign-in grant fresh with `prompt: ""`. Never signs the
  * user out; failures leave the prior token and local workspace untouched.
  */
-export const refreshGoogleSignInTokenSilently = async (): Promise<boolean> => {
+export const refreshGoogleSignInTokenSilently = async (options?: {
+  /** When true, call GIS even if the strict cache reader still accepts the token. */
+  proactive?: boolean;
+}): Promise<boolean> => {
   const settings = readGoogleSignInSettings();
   if (settings.signedOut) {
     return false;
@@ -209,23 +241,56 @@ export const refreshGoogleSignInTokenSilently = async (): Promise<boolean> => {
   if (!clientId) {
     return false;
   }
-  if (hasUsableGoogleSignInToken()) {
+  const proactive = options?.proactive ?? shouldProactivelyRefreshGoogleSignInToken();
+  if (!proactive && hasUsableGoogleSignInToken()) {
     return true;
   }
   try {
-    await requestGoogleSignIn({ clientId, mode: "silent" });
-    return hasUsableGoogleSignInToken();
-  } catch (error) {
-    if (error instanceof GoogleAuthError && error.transient) {
-      return Boolean(readGoogleTokenAllowingNearExpiry(GOOGLE_SIGN_IN_TOKEN_KEY));
-    }
+    await requestGoogleSignIn({
+      clientId,
+      mode: "silent",
+      ignoreCache: proactive || !hasUsableGoogleSignInToken()
+    });
+    return (
+      hasUsableGoogleSignInToken() ||
+      Boolean(readGoogleTokenAllowingNearExpiry(GOOGLE_SIGN_IN_TOKEN_KEY))
+    );
+  } catch {
     return Boolean(readGoogleTokenAllowingNearExpiry(GOOGLE_SIGN_IN_TOKEN_KEY));
   }
+};
+
+/**
+ * Retries silent refresh on transient GIS/network failures without clearing
+ * the signed-in workspace or cached grant.
+ */
+export const maintainGoogleSignInSession = async (): Promise<void> => {
+  if (readGoogleSignInSettings().signedOut || !resolveGoogleClientId()) {
+    return;
+  }
+  if (!shouldProactivelyRefreshGoogleSignInToken() && hasUsableGoogleSignInToken()) {
+    return;
+  }
+
+  for (const retryDelayMs of SIGN_IN_TOKEN_MAINTENANCE_RETRY_DELAYS_MS) {
+    const refreshed = await refreshGoogleSignInTokenSilently({ proactive: true });
+    if (refreshed || hasUsableGoogleSignInToken()) {
+      return;
+    }
+    if (!shouldProactivelyRefreshGoogleSignInToken()) {
+      return;
+    }
+    await sleep(retryDelayMs);
+  }
+
+  await refreshGoogleSignInTokenSilently({ proactive: true });
 };
 
 export const forgetGoogleSignInToken = () => writeGoogleToken(GOOGLE_SIGN_IN_TOKEN_KEY, null);
 
 export const googleSignInTokenRefreshRetryMs = () => SIGN_IN_TOKEN_REFRESH_RETRY_MS;
+
+export const googleSignInTokenWatchdogIntervalMs = () => SIGN_IN_TOKEN_WATCHDOG_INTERVAL_MS;
 
 /**
  * Opens Google's popup (interactive mode must run inside a user gesture) or

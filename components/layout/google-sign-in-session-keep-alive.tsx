@@ -5,10 +5,12 @@ import { useAuth } from "@/components/providers/app-providers";
 import { preloadGoogleIdentity } from "@/lib/integrations/google-auth";
 import {
   googleSignInTokenRefreshRetryMs,
+  googleSignInTokenWatchdogIntervalMs,
   hasUsableGoogleSignInToken,
+  maintainGoogleSignInSession,
   msUntilGoogleSignInTokenRefresh,
   readGoogleSignInSettings,
-  refreshGoogleSignInTokenSilently
+  shouldProactivelyRefreshGoogleSignInToken
 } from "@/lib/integrations/google-signin";
 
 /**
@@ -30,6 +32,7 @@ export function GoogleSignInSessionKeepAlive() {
 
     let cancelled = false;
     let timer = 0;
+    let watchdog = 0;
 
     const schedule = (delayMs: number) => {
       if (cancelled) {
@@ -46,10 +49,10 @@ export function GoogleSignInSessionKeepAlive() {
         return;
       }
       if (document.visibilityState !== "visible") {
-        schedule(msUntilGoogleSignInTokenRefresh() ?? googleSignInTokenRefreshRetryMs());
+        schedule(Math.min(msUntilGoogleSignInTokenRefresh() ?? 60_000, 60_000));
         return;
       }
-      await refreshGoogleSignInTokenSilently();
+      await maintainGoogleSignInSession();
       if (cancelled) {
         return;
       }
@@ -57,20 +60,33 @@ export function GoogleSignInSessionKeepAlive() {
       schedule(next ?? googleSignInTokenRefreshRetryMs());
     };
 
+    const runWatchdog = () => {
+      if (
+        cancelled ||
+        document.visibilityState !== "visible" ||
+        (!shouldProactivelyRefreshGoogleSignInToken() && hasUsableGoogleSignInToken())
+      ) {
+        return;
+      }
+      void maintainGoogleSignInSession();
+    };
+
     void preloadGoogleIdentity().catch(() => undefined);
 
     const initialDelay = msUntilGoogleSignInTokenRefresh();
-    if (initialDelay === 0 || !hasUsableGoogleSignInToken()) {
+    if (initialDelay === 0 || shouldProactivelyRefreshGoogleSignInToken() || !hasUsableGoogleSignInToken()) {
       void tick();
     } else if (initialDelay !== null) {
       schedule(initialDelay);
     }
 
+    watchdog = window.setInterval(runWatchdog, googleSignInTokenWatchdogIntervalMs());
+
     const onVisibility = () => {
       if (document.visibilityState !== "visible" || cancelled) {
         return;
       }
-      if (!hasUsableGoogleSignInToken()) {
+      if (shouldProactivelyRefreshGoogleSignInToken() || !hasUsableGoogleSignInToken()) {
         void tick();
       }
     };
@@ -80,6 +96,7 @@ export function GoogleSignInSessionKeepAlive() {
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
+      window.clearInterval(watchdog);
       document.removeEventListener("visibilitychange", onVisibility);
     };
   }, [signsInWithGoogle, user?.id]);

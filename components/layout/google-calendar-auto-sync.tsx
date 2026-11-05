@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import { useAuth } from "@/components/providers/app-providers";
 import { bindGoogleServicesFromSignIn } from "@/lib/integrations/google-services";
-import { readGoogleSignInToken } from "@/lib/integrations/google-signin";
+import { readGoogleSignInTokenRelaxed } from "@/lib/integrations/google-signin";
 import {
   DATABASE_PERSISTED_EVENT,
   hasGoogleAccessToken,
@@ -55,7 +55,7 @@ export function GoogleCalendarAutoSync() {
     // a binding that was already stored and retries on the next launch.
     const initiallyConnected = isGoogleCalendarConnected(settings);
     if (signsInWithGoogle) {
-      const token = readGoogleSignInToken();
+      const token = readGoogleSignInTokenRelaxed();
       if (token) {
         void bindGoogleServicesFromSignIn(workspaceId, token).finally(() => {
           if (!cancelled && !initiallyConnected) {

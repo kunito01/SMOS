@@ -12,7 +12,7 @@ import {
 export { bindGoogleCalendarFromSignIn } from "@/lib/integrations/google-calendar";
 import {
   readGoogleSignInSettings,
-  readGoogleSignInToken,
+  readGoogleSignInTokenRelaxed,
   requestGoogleSignIn,
   resolveGoogleClientId
 } from "@/lib/integrations/google-signin";
@@ -126,7 +126,7 @@ export const adoptGoogleSignInTokenForWorkspace = (workspaceId: string, token: G
  * whether Calendar has a usable token afterwards.
  */
 export const adoptVerifiedSignInTokenForCalendar = (workspaceId: string) => {
-  const token = readGoogleSignInToken();
+  const token = readGoogleSignInTokenRelaxed();
   if (!token) {
     return hasGoogleAccessToken(workspaceId);
   }

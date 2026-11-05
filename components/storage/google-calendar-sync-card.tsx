@@ -25,7 +25,7 @@ import {
 } from "@/lib/integrations/google-calendar";
 import { GOOGLE_CALENDAR_SCOPE, googleTokenOmitsScope } from "@/lib/integrations/google-auth";
 import { GOOGLE_DRIVE_SCOPE } from "@/lib/storage/google-drive/google-drive-client";
-import { readGoogleSignInToken } from "@/lib/integrations/google-signin";
+import { readGoogleSignInTokenRelaxed } from "@/lib/integrations/google-signin";
 import { bindGoogleServicesFromSignIn, reconnectGoogleServices } from "@/lib/integrations/google-services";
 import { getWorkspaceStoragePreference } from "@/lib/storage/storage-preferences";
 import { cn } from "@/lib/utils/cn";
@@ -124,7 +124,7 @@ export function GoogleCalendarSyncCard({
   // click. The follow-up sync runs on the cached token, never asking Google
   // again outside the click.
   const refreshViaSignIn = async (): Promise<GoogleCalendarStatus> => {
-    const token = readGoogleSignInToken();
+    const token = readGoogleSignInTokenRelaxed();
     if (
       !token ||
       googleTokenOmitsScope(token, GOOGLE_CALENDAR_SCOPE) ||

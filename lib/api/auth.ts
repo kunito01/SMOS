@@ -99,6 +99,7 @@ import {
   markGoogleSignedOut,
   readGoogleSignInSettings,
   readGoogleSignInToken,
+  readGoogleSignInTokenRelaxed,
   requestGoogleSignIn,
   resolveGoogleClientId,
   type GoogleUserInfo
@@ -2179,9 +2180,9 @@ const refreshGoogleSignInTokenForLocalEntry = async (options: {
   allowWithoutToken?: boolean;
   clientId: string;
 }) => {
-  let token = readGoogleSignInToken();
+  let token = readGoogleSignInTokenRelaxed();
   if (token !== null && hasUsableGoogleSignInToken()) {
-    return token;
+    return readGoogleSignInToken() ?? token;
   }
   if (!options.clientId) {
     return options.allowWithoutToken ? token : null;
@@ -2194,7 +2195,7 @@ const refreshGoogleSignInTokenForLocalEntry = async (options: {
     if (!options.allowWithoutToken && !transient) {
       return null;
     }
-    return readGoogleSignInToken();
+    return readGoogleSignInTokenRelaxed();
   }
 };
 
@@ -2315,7 +2316,7 @@ async function unlockGoogleAccountLocallyUnlocked(
       account,
       workspaceId: workspace.workspaceId,
       clientId,
-      token: readGoogleSignInToken(),
+      token: readGoogleSignInTokenRelaxed(),
       allowWithoutToken: options.allowWithoutToken
     });
     return mockApi({ user }, 0);
