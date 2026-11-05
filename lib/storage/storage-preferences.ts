@@ -1,22 +1,32 @@
 import { validateWorkspaceId } from "@/lib/security/workspace-crypto";
 import { cloudProviderOfIdentity } from "@/lib/storage/cloud-provider-error";
 
-export type WorkspaceStorageProvider = "indexeddb" | "cloudkit" | "gdrive";
+export type WorkspaceStorageProvider = "indexeddb" | "gdrive";
 
 /** Every provider other than the device's own IndexedDB keeps an encrypted cloud copy. */
 export type WorkspaceCloudStorageProvider = Exclude<WorkspaceStorageProvider, "indexeddb">;
 
-const storageProviders = new Set<WorkspaceStorageProvider>(["indexeddb", "cloudkit", "gdrive"]);
+const storageProviders = new Set<WorkspaceStorageProvider>(["indexeddb", "gdrive"]);
+
+/** Legacy iCloud records are read as Google Drive with a fresh auth/sync cycle. */
+export const normalizeStorageProvider = (value: unknown): WorkspaceStorageProvider | null => {
+  if (value === "cloudkit") {
+    return "gdrive";
+  }
+  return typeof value === "string" && storageProviders.has(value as WorkspaceStorageProvider)
+    ? (value as WorkspaceStorageProvider)
+    : null;
+};
 
 export const isStorageProvider = (value: unknown): value is WorkspaceStorageProvider =>
-  typeof value === "string" && storageProviders.has(value as WorkspaceStorageProvider);
+  normalizeStorageProvider(value) !== null;
 
 export const isCloudStorageProvider = (
   provider: WorkspaceStorageProvider
 ): provider is WorkspaceCloudStorageProvider => provider !== "indexeddb";
 
 export const cloudStorageProviderLabel = (provider: WorkspaceStorageProvider) =>
-  provider === "gdrive" ? "Google Drive" : provider === "cloudkit" ? "iCloud" : "this device";
+  provider === "gdrive" ? "Google Drive" : "this device";
 
 export type WorkspaceSyncStatus =
   | "idle"
@@ -121,29 +131,42 @@ const parsePreference = (
   value: unknown,
   expectedWorkspaceId: string
 ): WorkspaceStoragePreference | null => {
-  if (
-    !isRecord(value) ||
-    value.workspaceId !== expectedWorkspaceId ||
-    !isStorageProvider(value.provider)
-  ) {
+  if (!isRecord(value) || value.workspaceId !== expectedWorkspaceId) {
+    return null;
+  }
+  const provider = normalizeStorageProvider(value.provider);
+  if (!provider) {
     return null;
   }
 
   const status = syncStatuses.has(value.status as WorkspaceSyncStatus)
     ? (value.status as WorkspaceSyncStatus)
     : "pending";
+  const migratedFromICloud = value.provider === "cloudkit";
+  const cloudKitUserRecordName = optionalText(value.cloudKitUserRecordName);
+  const cloudManifestChangeTag = optionalText(value.cloudManifestChangeTag);
 
   return {
     workspaceId: expectedWorkspaceId,
-    provider: value.provider,
+    provider,
     // A browser may close while a sync is in flight. Resume it as pending on
     // the next launch instead of presenting a permanently stuck state.
-    status: status === "syncing" ? "pending" : status,
+    status: migratedFromICloud
+      ? "auth-required"
+      : status === "syncing"
+        ? "pending"
+        : status,
     lastSyncAt: isCanonicalIsoDate(value.lastSyncAt) ? value.lastSyncAt : null,
-    pendingUpload: value.pendingUpload === true,
-    lastError: typeof value.lastError === "string" ? value.lastError : null,
-    cloudKitUserRecordName: optionalText(value.cloudKitUserRecordName),
-    cloudManifestChangeTag: optionalText(value.cloudManifestChangeTag),
+    pendingUpload: migratedFromICloud ? true : value.pendingUpload === true,
+    lastError: migratedFromICloud
+      ? null
+      : typeof value.lastError === "string"
+        ? value.lastError
+        : null,
+    cloudKitUserRecordName: migratedFromICloud
+      ? null
+      : cloudKitUserRecordName,
+    cloudManifestChangeTag: migratedFromICloud ? null : cloudManifestChangeTag,
     updatedAt: isCanonicalIsoDate(value.updatedAt) ? value.updatedAt : new Date(0).toISOString()
   };
 };

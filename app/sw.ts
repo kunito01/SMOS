@@ -36,7 +36,7 @@ const serwist = new Serwist({
     // a stale Drive download or identity reply would mask the real state.
     {
       matcher: ({ url }) =>
-        /^(www\.googleapis\.com|oauth2\.googleapis\.com|api\.apple-cloudkit\.com)$/.test(url.hostname),
+        /^(www\.googleapis\.com|oauth2\.googleapis\.com)$/.test(url.hostname),
       handler: new NetworkOnly()
     },
     ...defaultCache

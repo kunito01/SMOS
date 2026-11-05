@@ -2,22 +2,17 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { CostDisplayCurrencyProvider } from "@/components/costs/use-cost-display-currency";
-import { CloudKitAuthProvider } from "@/components/providers/cloudkit-auth-provider";
 import { BackgroundMotionController } from "@/components/providers/background-motion-controller";
 import { JellyInteractions } from "@/components/providers/jelly-interactions";
 import { WorkspaceConflictGuardDialog } from "@/components/storage/workspace-conflict-guard-dialog";
 import { authApi } from "@/lib/api";
 import type {
-  AppleAccountLoginResolution,
-  AppleAccountRecoveryPayload,
-  AppleAccountSetupPayload,
   GoogleAccountLoginResolution,
   GoogleSignInPayload,
   LocalAuthUser,
   RegisterPayload,
   RegisterResult
 } from "@/lib/api/auth";
-import type { CloudKitUserIdentity } from "@/lib/storage/cloudkit/cloudkit-client";
 import { keepNumericWordPairsTogether } from "@/lib/i18n/non-breaking";
 import {
   Language,
@@ -31,13 +26,9 @@ type AuthContextValue = {
   user: LocalAuthUser | null;
   isReady: boolean;
   signIn: (email: string, password: string) => Promise<void>;
-  inspectAppleAccount: (identity: CloudKitUserIdentity) => Promise<AppleAccountLoginResolution>;
-  provisionAppleAccount: (payload: AppleAccountSetupPayload) => Promise<RegisterResult>;
-  recoverAppleAccount: (payload: AppleAccountRecoveryPayload) => Promise<{ token: string; user: LocalAuthUser }>;
-  unlockAppleAccountOffline: () => Promise<{ user: LocalAuthUser } | null>;
   signInWithGoogle: (payload: GoogleSignInPayload) => Promise<GoogleAccountLoginResolution>;
   unlockGoogleAccountLocally: (options?: { allowWithoutToken?: boolean }) => Promise<{ user: LocalAuthUser } | null>;
-  commitAppleAccountUser: (user: LocalAuthUser) => void;
+  commitSessionUser: (nextUser: LocalAuthUser) => void;
   signInDevelopmentTestAccount: () => Promise<void>;
   signUp: (payload: RegisterPayload) => Promise<RegisterResult>;
   signOut: () => Promise<void>;
@@ -100,12 +91,6 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
     window.localStorage.setItem(languageStorageKey, nextLanguage);
   }, []);
 
-  const handleCloudKitSignedOut = useCallback(async () => {
-    if (await authApi.logoutAppleSession()) {
-      setUser(null);
-    }
-  }, []);
-
   const authValue = useMemo<AuthContextValue>(
     () => ({
       user,
@@ -115,25 +100,15 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
 
         setUser(nextUser);
       },
-      inspectAppleAccount: async (identity: CloudKitUserIdentity) => {
-        return authApi.inspectAppleAccount(identity);
-      },
-      provisionAppleAccount: async (payload: AppleAccountSetupPayload) => {
-        return authApi.provisionAppleAccount(payload);
-      },
-      recoverAppleAccount: async (payload: AppleAccountRecoveryPayload) => {
-        return authApi.recoverAppleAccount(payload);
-      },
-      unlockAppleAccountOffline: async () => {
-        return authApi.unlockAppleAccountOffline();
-      },
       signInWithGoogle: async (payload: GoogleSignInPayload) => {
         return authApi.signInWithGoogle(payload);
       },
       unlockGoogleAccountLocally: async (options?: { allowWithoutToken?: boolean }) => {
         return authApi.unlockGoogleAccountLocally(options);
       },
-      commitAppleAccountUser: (nextUser: LocalAuthUser) => setUser(nextUser),
+      commitSessionUser: (nextUser: LocalAuthUser) => {
+        setUser(nextUser);
+      },
       signInDevelopmentTestAccount: async () => {
         const { user: nextUser } = await authApi.loginDevelopmentTestAccount();
 
@@ -174,16 +149,14 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
 
   return (
     <LanguageContext.Provider value={languageValue}>
-      <CloudKitAuthProvider onSignedOut={handleCloudKitSignedOut}>
-        <AuthContext.Provider value={authValue}>
-          <CostDisplayCurrencyProvider>
-            <JellyInteractions />
-            <BackgroundMotionController />
-            <WorkspaceConflictGuardDialog />
-            {children}
-          </CostDisplayCurrencyProvider>
-        </AuthContext.Provider>
-      </CloudKitAuthProvider>
+      <AuthContext.Provider value={authValue}>
+        <CostDisplayCurrencyProvider>
+          <JellyInteractions />
+          <BackgroundMotionController />
+          <WorkspaceConflictGuardDialog />
+          {children}
+        </CostDisplayCurrencyProvider>
+      </AuthContext.Provider>
     </LanguageContext.Provider>
   );
 }

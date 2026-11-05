@@ -14,21 +14,18 @@ export type CloudProviderErrorCode =
   | "THROTTLED"
   | "REQUEST_FAILED";
 
-export type CloudProviderKind = "cloudkit" | "gdrive";
+export type CloudProviderKind = "gdrive";
 
-export const cloudProviderLabel = (provider: CloudProviderKind) =>
-  provider === "gdrive" ? "Google Drive" : "iCloud";
+export const cloudProviderLabel = (_provider: CloudProviderKind) => "Google Drive";
 
-/** Google identities carry this prefix so they can never collide with a CloudKit record name. */
+/** Google identities carry this prefix in stored sync bindings. */
 export const GOOGLE_DRIVE_IDENTITY_PREFIX = "gdrive:";
 
-/** Which cloud produced a stored account binding. */
+/** Which cloud produced a stored account binding (legacy non-prefixed ids are ignored). */
 export const cloudProviderOfIdentity = (userRecordName: string | null): CloudProviderKind | null =>
-  userRecordName === null
-    ? null
-    : userRecordName.startsWith(GOOGLE_DRIVE_IDENTITY_PREFIX)
-      ? "gdrive"
-      : "cloudkit";
+  userRecordName !== null && userRecordName.startsWith(GOOGLE_DRIVE_IDENTITY_PREFIX)
+    ? "gdrive"
+    : null;
 
 export class CloudProviderError extends Error {
   constructor(
