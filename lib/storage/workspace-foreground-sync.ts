@@ -8,10 +8,11 @@ import {
 import { getWorkspaceStoragePreference, isCloudStorageProvider } from "@/lib/storage/storage-preferences";
 
 /**
- * Pulls the CloudKit copy when it is newer than the local one. Used when a
+ * Pulls the Google Drive copy when it is newer than the local one. Used when a
  * device comes back to the foreground and before every agent tool call, so
  * edits made elsewhere (by the user on another device, or by an agent) show
- * up without signing in again.
+ * up without signing in again. Reloads the in-memory database in place instead
+ * of refreshing the page so the unlocked session stays active.
  */
 
 export const WORKSPACE_REPLACED_EVENT = "smos:workspace-replaced";
