@@ -64,6 +64,7 @@ import type {
   WishlistItem
 } from "@/lib/types";
 import { projectPath } from "@/lib/utils/app-routes";
+import { calculateProjectProgress } from "@/lib/utils/project-progress";
 import { cn } from "@/lib/utils/cn";
 import { TESTFLIGHT_WARNING_DAYS, getTestflightDaysLeft, todayDateKey } from "@/lib/utils/testflight";
 import { USAGE_WARNING_DAYS, getUsageDaysLeft, usageCycles } from "@/lib/utils/usage-reminders";
@@ -1463,7 +1464,11 @@ export function VisualDashboardShell() {
                 action={<ProjectReleaseBadges project={project} t={t} className="max-w-48" />}
               >
                 <div className="rounded-full bg-white/[0.88] p-1">
-                  <ProgressBar value={project.progress} barClassName={index === 1 ? "bg-limepop" : "bg-coral"} />
+                  <ProgressBar
+                    value={calculateProjectProgress(project)}
+                    className="bg-ink/20"
+                    barClassName={index === 1 ? "bg-limepop" : "bg-coral"}
+                  />
                 </div>
                 <span className="mt-3 flex min-w-0 flex-wrap items-center gap-2">
                   <Pill

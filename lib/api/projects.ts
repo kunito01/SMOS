@@ -25,6 +25,10 @@ import { assertUploadedImageWithinLimit } from "@/lib/utils/image-upload";
 import { normalizeProjectBudgetForPhases } from "@/lib/utils/project-budget-normalize";
 import { buildProjectPhaseDateRanges } from "@/lib/utils/project-phases";
 import {
+  calculateProjectProgress,
+  calculateTaskCompletionProgress
+} from "@/lib/utils/project-progress";
+import {
   normalizeProjectWorkflowIds,
   normalizeProjectWorkflows,
   normalizeWorkflowLibrary
@@ -154,17 +158,17 @@ const filterProjectsByScope = (scope: DashboardScope = { type: "all" }): Project
 
 export async function listProjects(scope: DashboardScope = { type: "all" }) {
   await hydrateMockDatabase();
-  return mockApi(filterProjectsByScope(scope).filter(isActiveProject));
+  return mockApi(filterProjectsByScope(scope).filter(isActiveProject).map(rememberProjectProgress));
 }
 
 export async function listActiveProjects(scope: DashboardScope = { type: "all" }) {
   await hydrateMockDatabase();
-  return mockApi(filterProjectsByScope(scope).filter(isActiveProject));
+  return mockApi(filterProjectsByScope(scope).filter(isActiveProject).map(rememberProjectProgress));
 }
 
 export async function listArchivedProjects(scope: DashboardScope = { type: "all" }) {
   await hydrateMockDatabase();
-  return mockApi(filterProjectsByScope(scope).filter(isArchivedProject));
+  return mockApi(filterProjectsByScope(scope).filter(isArchivedProject).map(rememberProjectProgress));
 }
 
 export async function getProject(projectId: string) {
@@ -174,7 +178,7 @@ export async function getProject(projectId: string) {
     `Project not found: ${projectId}`
   );
 
-  return mockApi(project);
+  return mockApi(rememberProjectProgress(project));
 }
 
 export async function getDashboardOverview(
@@ -182,7 +186,9 @@ export async function getDashboardOverview(
   options: DashboardOverviewOptions = { includeArchivedTotal: true }
 ) {
   await hydrateMockDatabase();
-  return mockApi(createDashboardOverview(filterProjectsByScope(scope), options));
+  const projects = filterProjectsByScope(scope);
+  projects.forEach(rememberProjectProgress);
+  return mockApi(createDashboardOverview(projects, options));
 }
 
 const alignProjectPhasesToDates = (project: Project, startDate: string, endDate: string) => {
@@ -300,7 +306,7 @@ export async function createProject(input: CreateProjectInput) {
     deliverables: []
   }));
   project.currentPhaseId = project.phases[0]?.id ?? "";
-  project.progress = 0;
+  rememberProjectProgress(project);
   project.payments = [];
   project.materials = [];
   project.versions = [];
@@ -339,13 +345,19 @@ export async function createProject(input: CreateProjectInput) {
   return mockApi(project);
 }
 
-const calculateProjectProgress = (project: Project) => {
-  const tasks = project.phases.flatMap((phase) =>
-    phase.deliverables.flatMap((deliverable) => deliverable.tasks)
-  );
-  const completedTasks = tasks.filter((task) => task.completed).length;
+const rememberProjectProgress = (project: Project) => {
+  project.progress = calculateProjectProgress(project);
+  return project;
+};
 
-  return tasks.length ? Math.round((completedTasks / tasks.length) * 100) : 0;
+const applyTaskStatusFromProgress = (project: Project) => {
+  const taskProgress = calculateTaskCompletionProgress(project);
+
+  if (taskProgress !== null) {
+    project.status = getProjectStatusFromProgress(project, taskProgress);
+  }
+
+  return project;
 };
 
 const getProjectStatusFromProgress = (project: Project, progress: number): ProjectStatus => {
@@ -376,7 +388,11 @@ export async function updateTaskCompletion(taskId: string, completed: boolean) {
 
         if (task) {
           task.completed = completed;
-          deliverable.completed = deliverable.tasks.every((item) => item.completed);
+          const titledTasks = deliverable.tasks.filter(
+            (item) => typeof item.title === "string" && item.title.trim()
+          );
+          deliverable.completed =
+            titledTasks.length > 0 && titledTasks.every((item) => item.completed);
           updatedTask = task;
           updatedProject = project;
         }
@@ -386,11 +402,16 @@ export async function updateTaskCompletion(taskId: string, completed: boolean) {
 
   if (updatedProject) {
     markProjectAsPopulated(updatedProject);
-    updatedProject.progress = calculateProjectProgress(updatedProject);
-    updatedProject.status = getProjectStatusFromProgress(updatedProject, updatedProject.progress);
 
     updatedProject.phases.forEach((phase) => {
-      const phaseTasks = phase.deliverables.flatMap((deliverable) => deliverable.tasks);
+      const phaseTasks = phase.deliverables
+        .flatMap((deliverable) => deliverable.tasks)
+        .filter((task) => typeof task.title === "string" && task.title.trim());
+
+      if (phaseTasks.length === 0) {
+        return;
+      }
+
       const completedTasks = phaseTasks.filter((task) => task.completed).length;
 
       if (completedTasks === phaseTasks.length) {
@@ -401,6 +422,8 @@ export async function updateTaskCompletion(taskId: string, completed: boolean) {
         phase.status = "not-started";
       }
     });
+    rememberProjectProgress(updatedProject);
+    applyTaskStatusFromProgress(updatedProject);
     updatedProject.currentPhaseId =
       updatedProject.phases.find((phase) => phase.status === "active")?.id ??
       updatedProject.phases.at(-1)?.id ??
@@ -436,18 +459,9 @@ const createPhaseFromTimelineInput = (
   index: number
 ): Phase => {
   const phaseId = phaseInput.id || `${project.id}-phase-custom-${Date.now()}-${index + 1}`;
+  const existingPhase = project.phases.find((phase) => phase.id === phaseId);
   const deliverableId = `${phaseId}-deliverable-1`;
-  const normalizedTasks = phaseInput.tasks.length
-    ? phaseInput.tasks
-    : [
-        {
-          assigneeId: phaseInput.personIds[0] ?? project.people[0]?.id ?? "",
-          completed: false,
-          dueDate: phaseInput.endDate,
-          title: ""
-        }
-      ];
-  const tasks: Task[] = normalizedTasks.map((task, taskIndex) => ({
+  const tasks: Task[] = phaseInput.tasks.map((task, taskIndex) => ({
     id: task.id || `${phaseId}-task-${Date.now()}-${taskIndex + 1}`,
     deliverableId,
     title: task.title.trim(),
@@ -456,9 +470,17 @@ const createPhaseFromTimelineInput = (
     dueDate: task.dueDate || phaseInput.endDate,
     priority: task.priority ?? "medium"
   }));
-  const completedTasks = tasks.filter((task) => task.completed).length;
-  const status: Phase["status"] =
-    completedTasks === tasks.length ? "completed" : completedTasks > 0 ? "active" : "not-started";
+  const titledTasks = tasks.filter((task) => task.title.trim());
+  const completedTitledTasks = titledTasks.filter((task) => task.completed).length;
+  // A phase with no named tasks keeps the status it already had. Inventing a
+  // blank incomplete task here used to zero the card and mark the phase not-started.
+  const status: Phase["status"] = titledTasks.length === 0
+    ? existingPhase?.status ?? "not-started"
+    : completedTitledTasks === titledTasks.length
+      ? "completed"
+      : completedTitledTasks > 0
+        ? "active"
+        : "not-started";
 
   return {
     id: phaseId,
@@ -473,18 +495,20 @@ const createPhaseFromTimelineInput = (
     personIds: phaseInput.personIds,
     toolIds: phaseInput.toolIds,
     notes: phaseInput.notes.trim(),
-    deliverables: [
-      {
-        id: deliverableId,
-        phaseId,
-        title: "",
-        description: "",
-        assigneeId: phaseInput.personIds[0] || project.people[0]?.id || "",
-        dueDate: phaseInput.endDate,
-        tasks,
-        completed: tasks.every((task) => task.completed)
-      }
-    ]
+    deliverables: tasks.length === 0
+      ? []
+      : [
+          {
+            id: deliverableId,
+            phaseId,
+            title: "",
+            description: "",
+            assigneeId: phaseInput.personIds[0] || project.people[0]?.id || "",
+            dueDate: phaseInput.endDate,
+            tasks,
+            completed: titledTasks.length > 0 && completedTitledTasks === titledTasks.length
+          }
+        ]
   };
 };
 
@@ -547,8 +571,8 @@ export async function updateProjectTimeline(projectId: string, input: UpdateProj
     (latest, phase) => (phase.endDate > latest ? phase.endDate : latest),
     nextPhases[0]?.endDate ?? project.endDate
   );
-  project.progress = calculateProjectProgress(project);
-  project.status = getProjectStatusFromProgress(project, project.progress);
+  rememberProjectProgress(project);
+  applyTaskStatusFromProgress(project);
   project.currentPhaseId =
     project.phases.find((phase) => phase.status === "active")?.id ??
     project.phases.find((phase) => phase.status === "not-started")?.id ??
@@ -1244,13 +1268,13 @@ export async function replaceProjectFromArchive(
 
   const archiveIdentity = archive.projectIdentity ?? createProjectArchiveIdentity();
   const importedWorkflows = mergeImportedWorkflows(projectId, archiveIdentity, archive);
-  const nextProject = normalizeImportedProject(
+  const nextProject = rememberProjectProgress(normalizeImportedProject(
     projectId,
     archive,
     currentProject,
     archiveIdentity,
     importedWorkflows.workflowIds
-  );
+  ));
   const previousProject = currentProject;
   const previousWorkflows = mockDatabase.workflows;
   mockDatabase.projects[projectIndex] = nextProject;

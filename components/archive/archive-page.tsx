@@ -56,6 +56,7 @@ import {
 import type { Company, Project, ProjectGroup } from "@/lib/types";
 import type { ImportedSiteBackup } from "@/lib/api/auth";
 import { projectPath, withBasePath } from "@/lib/utils/app-routes";
+import { calculateProjectProgress } from "@/lib/utils/project-progress";
 
 type ArchiveData = {
   companies: Company[];
@@ -679,7 +680,7 @@ export function ArchivePage() {
                                     className="min-h-72 transition duration-200 hover:-translate-y-1"
                                   >
                                     <div className="rounded-full bg-white/[0.88] p-1">
-                                      <ProgressBar value={project.progress} />
+                                      <ProgressBar value={calculateProjectProgress(project)} className="bg-ink/20" />
                                     </div>
                                     <div className="mt-3 flex items-center justify-between gap-3">
                                       <Pill tone="dark" className="min-h-8 px-3 text-xs">

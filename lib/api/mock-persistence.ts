@@ -6,6 +6,7 @@ import {
   mockDatabase
 } from "@/lib/mock";
 import { languages, type Language } from "@/lib/i18n/translations";
+import { calculateProjectProgress } from "@/lib/utils/project-progress";
 import {
   buildEncryptedPublicShareRecords,
   type EncryptedPublicSharePayload
@@ -608,7 +609,7 @@ const normalizePersistedProject = (
   projectTools.forEach((tool) => toolsById.set(tool.id, tool));
   tools.forEach((tool) => toolsById.set(tool.id, tool));
 
-  return {
+  const normalizedProject: Project = {
     ...project,
     isExample: project.isExample ?? Boolean(seedProject && seedProject.name === project.name),
     archivedAt: project.archivedAt ?? null,
@@ -621,6 +622,11 @@ const normalizePersistedProject = (
       ? project.payments
       : createProjectPayments(project.id, projectIndex),
     versions: normalizePersistedVersions(project, projectIndex)
+  };
+
+  return {
+    ...normalizedProject,
+    progress: calculateProjectProgress(normalizedProject)
   };
 };
 
