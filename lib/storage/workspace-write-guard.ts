@@ -1,3 +1,4 @@
+import { googleDrivePolicyApplies } from "@/lib/storage/google-workspace-sync-policy";
 import { getWorkspaceStoragePreference, isCloudStorageProvider } from "@/lib/storage/storage-preferences";
 
 export const WORKSPACE_CONFLICT_BLOCKED_EVENT = "smos:workspace-conflict-blocked";
@@ -41,6 +42,9 @@ export function assertWorkspaceWritable(
   const preference = getWorkspaceStoragePreference(workspaceId);
 
   if (isCloudStorageProvider(preference.provider) && preference.status === "conflict") {
+    if (googleDrivePolicyApplies(workspaceId, preference)) {
+      return;
+    }
     if (notify) {
       notifyWorkspaceConflictBlocked();
     }

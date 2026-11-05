@@ -2776,20 +2776,31 @@ const upsertStoredGoogleAccount = (account: StoredGoogleAccount) => {
 const pinGoogleWorkspaceToDrive = (workspaceId: string, lastError?: string | null) => {
   const preference = getWorkspaceStoragePreference(workspaceId);
   if (preference.provider === "gdrive" && preference.status !== "idle") {
+    if (preference.status === "conflict") {
+      return updateWorkspaceStoragePreference(workspaceId, {
+        status: "pending",
+        pendingUpload: true,
+        lastError: lastError === undefined ? null : lastError
+      });
+    }
     if (lastError === undefined) {
       return preference;
     }
     return updateWorkspaceStoragePreference(workspaceId, { lastError });
   }
+  const wasConflict = preference.status === "conflict";
   return updateWorkspaceStoragePreference(workspaceId, {
     provider: "gdrive",
     status:
-      preference.status === "conflict"
-        ? "conflict"
-        : preference.status === "account-mismatch"
-          ? "account-mismatch"
-          : "pending",
-    ...(lastError !== undefined ? { lastError } : {})
+      preference.status === "account-mismatch"
+        ? "account-mismatch"
+        : "pending",
+    ...(wasConflict || preference.pendingUpload ? { pendingUpload: true } : {}),
+    ...(wasConflict
+      ? { lastError: null }
+      : lastError !== undefined
+        ? { lastError }
+        : {})
   });
 };
 
