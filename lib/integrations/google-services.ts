@@ -1,17 +1,26 @@
 "use client";
 
-import type { GoogleStoredToken } from "@/lib/integrations/google-auth";
+import { googleTokenOmitsScope, type GoogleStoredToken } from "@/lib/integrations/google-auth";
 import {
   adoptGoogleSignInTokenForCalendar,
-  hasGoogleAccessToken
+  bindGoogleCalendarFromSignIn,
+  hasGoogleAccessToken,
+  isGoogleCalendarConnected,
+  readGoogleCalendarSettings
 } from "@/lib/integrations/google-calendar";
+
+export { bindGoogleCalendarFromSignIn } from "@/lib/integrations/google-calendar";
 import {
   readGoogleSignInSettings,
   readGoogleSignInToken,
   requestGoogleSignIn,
   resolveGoogleClientId
 } from "@/lib/integrations/google-signin";
+import { CloudProviderError } from "@/lib/storage/cloud-provider-error";
 import {
+  GOOGLE_DRIVE_SCOPE,
+  isGoogleDriveConnected,
+  readGoogleDriveSettings,
   requireGoogleDriveAccessToken,
   seedGoogleDriveConnection
 } from "@/lib/storage/google-drive/google-drive-client";
@@ -29,15 +38,87 @@ import {
 
 export const googleSignInClientId = () => readGoogleSignInSettings().clientId || resolveGoogleClientId();
 
-/**
- * Hands a fresh sign-in token to Drive (account-checked) and then Calendar.
- * Throws when Drive refuses the token, so callers stop instead of retrying.
- */
-export const adoptGoogleSignInTokenForWorkspace = async (workspaceId: string, token: GoogleStoredToken) => {
-  await seedGoogleDriveConnection(workspaceId, token, googleSignInClientId());
-  const calendar = adoptGoogleSignInTokenForCalendar(workspaceId, token);
-  return { drive: true, calendar };
+export type GoogleServiceBinding = {
+  drive: boolean;
+  calendar: boolean;
+  /** This attempt verified the Drive account and stored its token. */
+  seeded: boolean;
 };
+
+const bindingInFlight = new Map<string, Promise<GoogleServiceBinding>>();
+
+const bindGoogleServicesBody = async (
+  workspaceId: string,
+  token: GoogleStoredToken,
+  clientId: string
+): Promise<GoogleServiceBinding> => {
+  let seeded = false;
+  // A grant that explicitly left Drive unticked cannot seed it. An unknown
+  // scope string is tried against the Drive API instead.
+  if (!googleTokenOmitsScope(token, GOOGLE_DRIVE_SCOPE)) {
+    try {
+      await seedGoogleDriveConnection(workspaceId, token, clientId);
+      seeded = true;
+    } catch (error) {
+      if (error instanceof CloudProviderError && error.code === "ACCOUNT_MISMATCH") {
+        throw error;
+      }
+      // A timeout or a refused Drive call leaves the previous connection in
+      // place. Sign-in still succeeds; a later launch tries again.
+    }
+  }
+  const drive = isGoogleDriveConnected(readGoogleDriveSettings(workspaceId));
+  // Calendar is created only after Drive has accepted this token, so a popup
+  // that picked another Google account cannot open a calendar for it.
+  let calendar = isGoogleCalendarConnected(readGoogleCalendarSettings(workspaceId));
+  if (drive && !readGoogleCalendarSettings(workspaceId).pushDisabled) {
+    try {
+      calendar = await bindGoogleCalendarFromSignIn(workspaceId, token);
+    } catch (error) {
+      if (error instanceof CloudProviderError && error.code === "ACCOUNT_MISMATCH") {
+        throw error;
+      }
+      calendar = isGoogleCalendarConnected(readGoogleCalendarSettings(workspaceId));
+    }
+  }
+  return {
+    drive,
+    calendar,
+    seeded
+  };
+};
+
+/**
+ * Persists Drive and Calendar as connected from a Google sign-in token.
+ * One in-flight bind per workspace is shared, so sign-in and the next launch
+ * do not create two calendars. A transient failure does not clear a binding
+ * that was already stored.
+ */
+export const bindGoogleServicesFromSignIn = (
+  workspaceId: string,
+  token: GoogleStoredToken,
+  clientId = googleSignInClientId()
+) => {
+  const current = bindingInFlight.get(workspaceId);
+  if (current) {
+    return current;
+  }
+  const run = bindGoogleServicesBody(workspaceId, token, clientId).finally(() => {
+    if (bindingInFlight.get(workspaceId) === run) {
+      bindingInFlight.delete(workspaceId);
+    }
+  });
+  bindingInFlight.set(workspaceId, run);
+  return run;
+};
+
+/**
+ * Hands a fresh sign-in token to Drive (account-checked) and Calendar, and
+ * creates or reuses the Studio Map OS calendar. Throws when Drive refuses
+ * the token as a different account, so callers stop instead of retrying.
+ */
+export const adoptGoogleSignInTokenForWorkspace = (workspaceId: string, token: GoogleStoredToken) =>
+  bindGoogleServicesFromSignIn(workspaceId, token);
 
 /**
  * Calendar adopts the cached sign-in token only when Drive already holds that
@@ -64,8 +145,8 @@ export const adoptVerifiedSignInTokenForCalendar = (workspaceId: string) => {
 /**
  * Reconnects Drive and Calendar with one Google popup. Must be called from a
  * click handler before any other await, or the popup is blocked. Throws when
- * Drive does not accept the new token (wrong account, Drive unticked, network),
- * so no caller goes on to request another token outside the click.
+ * the token belongs to a different Google account. A timeout keeps the
+ * previous binding instead of asking for another sign-in.
  */
 export const reconnectGoogleServices = async (workspaceId: string) => {
   // Ask for a fresh token, but keep the previous one until Google actually
@@ -75,5 +156,5 @@ export const reconnectGoogleServices = async (workspaceId: string) => {
     mode: "interactive",
     ignoreCache: true
   });
-  return adoptGoogleSignInTokenForWorkspace(workspaceId, token);
+  return bindGoogleServicesFromSignIn(workspaceId, token);
 };
