@@ -6,10 +6,7 @@ import {
   Archive,
   ArrowRight,
   Building2,
-  Check,
-  Copy,
   Download,
-  KeyRound,
   Layers3,
   Sparkles,
   Upload
@@ -21,7 +18,6 @@ import { AppShell } from "@/components/layout/app-shell";
 import { useAuth, useI18n } from "@/components/providers/app-providers";
 import { ArchiveStorageSyncCard } from "@/components/storage/archive-storage-sync-card";
 import { AgentBridgeCard } from "@/components/storage/agent-bridge-card";
-import { MigrateAppleToGoogleCard } from "@/components/storage/migrate-apple-to-google-card";
 import { isWorkspaceSyncConflictError } from "@/lib/storage/workspace-write-guard";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -32,7 +28,6 @@ import { ProgressBar } from "@/components/ui/progress-bar";
 import { SectionHeader } from "@/components/ui/section-header";
 import { authApi, companiesApi, groupsApi, projectsApi } from "@/lib/api";
 import { LocalAuthError } from "@/lib/api/auth";
-import { formatWorkspaceCode } from "@/lib/security/workspace-crypto";
 import {
   captureMockDatabaseWorkspaceStorage,
   createMockDatabaseBackup,
@@ -81,19 +76,6 @@ const createWorkspaceBackupFileName = (exportedAt: string) =>
 
 export function ArchivePage() {
   const { user } = useAuth();
-  // The Apple → Google card is for Apple ID accounts, but it must survive its
-  // own success: committing the Google user flips accountKind, and the card
-  // still has to show its done state on this visit. It goes away once the
-  // account is anything else (sign-out, password account) or on the next visit.
-  const accountKind = user?.accountKind;
-  const [showMigrateCard, setShowMigrateCard] = useState(false);
-  useEffect(() => {
-    if (accountKind === "apple") {
-      setShowMigrateCard(true);
-    } else if (accountKind !== "google") {
-      setShowMigrateCard(false);
-    }
-  }, [accountKind]);
   const { language, t } = useI18n();
   const [data, setData] = useState<ArchiveData | null>(null);
   const backupInputRef = useRef<HTMLInputElement | null>(null);
@@ -107,186 +89,7 @@ export function ArchivePage() {
   const [pendingBackupExport, setPendingBackupExport] = useState<"device" | "workspace" | null>(null);
   const [exportUnlockError, setExportUnlockError] = useState("");
   const [unlockError, setUnlockError] = useState("");
-  // Apple ID workspaces start without a recovery key; until one exists no
-  // backup can be exported, so the export buttons stay locked and the card
-  // offers to create the key.
-  // "checking" → "missing" (create offered, exports locked) → "creating" →
-  // "created" (key shown once; exports stay locked until the user confirms it
-  // is saved) → "ready". The registry is the source of truth, so the check
-  // re-runs whenever the tab regains focus (another tab may have created a key).
-  const [recoveryKeyState, setRecoveryKeyState] = useState<
-    "checking" | "missing" | "creating" | "created" | "ready"
-  >("checking");
-  const [createdRecoveryKey, setCreatedRecoveryKey] = useState<string | null>(null);
-  const [recoveryKeyHandled, setRecoveryKeyHandled] = useState(false);
-  const [recoveryKeyCopied, setRecoveryKeyCopied] = useState(false);
-  const [recoveryKeyCopyFailed, setRecoveryKeyCopyFailed] = useState(false);
-  const [recoveryKeyError, setRecoveryKeyError] = useState("");
-  const [recoveryKeyConfirming, setRecoveryKeyConfirming] = useState(false);
-  const [recoveryKeyReplacing, setRecoveryKeyReplacing] = useState(false);
-  const [replaceRecoveryKeyOpen, setReplaceRecoveryKeyOpen] = useState(false);
-  const recoveryKeyInputRef = useRef<HTMLInputElement | null>(null);
-
-  useEffect(() => {
-    if (!user?.cloudRequired) {
-      setRecoveryKeyState("ready");
-      return;
-    }
-    let cancelled = false;
-    const check = () => {
-      void authApi
-        .getActiveAppleWorkspaceRecoveryState()
-        .then((state) => {
-          if (cancelled) {
-            return;
-          }
-          setRecoveryKeyState((current) => {
-            // Never hide a key that is still on screen.
-            if (current === "created" || current === "creating") {
-              return current;
-            }
-            return state === "has-key" ? "ready" : "missing";
-          });
-        })
-        .catch(() => {
-          if (!cancelled) {
-            setRecoveryKeyState((current) => (current === "created" || current === "creating" ? current : "missing"));
-          }
-        });
-    };
-    check();
-    const onVisible = () => {
-      if (document.visibilityState === "visible") {
-        check();
-      }
-    };
-    document.addEventListener("visibilitychange", onVisible);
-    window.addEventListener("focus", check);
-    return () => {
-      cancelled = true;
-      document.removeEventListener("visibilitychange", onVisible);
-      window.removeEventListener("focus", check);
-    };
-  }, [user?.cloudRequired]);
-
-  const createRecoveryKey = async (replace = false) => {
-    setRecoveryKeyState("creating");
-    setRecoveryKeyError("");
-    setRecoveryKeyReplacing(replace);
-    try {
-      const { workspaceCode } = await authApi.createRecoveryKeyForActiveAppleWorkspace({ replace });
-      setCreatedRecoveryKey(workspaceCode);
-      setRecoveryKeyHandled(false);
-      setRecoveryKeyCopied(false);
-      setRecoveryKeyCopyFailed(false);
-      setRecoveryKeyState("created");
-    } catch (error) {
-      const code = error instanceof LocalAuthError ? error.code : null;
-      const exists = code === "RECOVERY_KEY_EXISTS";
-      setRecoveryKeyError(
-        exists
-          ? t("appleRecoveryKeyExists")
-          : code === "CLOUD_AUTH_REQUIRED"
-            ? t("storageGoogleDriveTokenExpired")
-            : `${t("appleRecoveryKeyFailed")}${error instanceof Error ? ` (${error.message})` : ""}`
-      );
-      // A failed replacement keeps the existing key valid.
-      setRecoveryKeyState(exists || replace ? "ready" : "missing");
-    }
-  };
-
-  const copyRecoveryKey = async () => {
-    if (!createdRecoveryKey) {
-      return;
-    }
-    const text = formatWorkspaceCode(createdRecoveryKey);
-    let copied = false;
-    try {
-      await navigator.clipboard.writeText(text);
-      copied = true;
-    } catch {
-      // Fall back to the legacy command; some embedded browsers lack the API.
-      const input = recoveryKeyInputRef.current;
-      try {
-        input?.focus();
-        input?.select();
-        copied = document.execCommand("copy");
-      } catch {
-        copied = false;
-      }
-    }
-    setRecoveryKeyCopied(copied);
-    setRecoveryKeyCopyFailed(!copied);
-    if (copied) {
-      setRecoveryKeyHandled(true);
-    }
-  };
-
-  const downloadRecoveryCard = () => {
-    if (!createdRecoveryKey) {
-      return;
-    }
-    const content = [
-      t("workspaceRecoveryCardTitle"),
-      "Studio Map OS",
-      "",
-      t("appleRecoveryKeyTitle"),
-      `${t("registerName")}: ${user?.name ?? ""}`,
-      `${formatLocalizedDate(new Date().toISOString(), language)}`,
-      "",
-      `${t("workspaceKeyLabel")}: ${formatWorkspaceCode(createdRecoveryKey)}`,
-      "",
-      t("workspaceKeyOnlyOnce"),
-      "",
-      t("workspaceRecoveryCardDataNotice")
-    ].join("\n");
-    const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = "studio-map-os-recovery-card.txt";
-    link.click();
-    // Safari starts the download asynchronously; revoking at once can cancel it.
-    window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
-    setRecoveryKeyHandled(true);
-  };
-
-  // "I have saved it" is what makes the key valid; until then nothing changed.
-  const dismissCreatedRecoveryKey = async () => {
-    setRecoveryKeyConfirming(true);
-    setRecoveryKeyError("");
-    try {
-      await authApi.confirmRecoveryKeyForActiveAppleWorkspace();
-      setCreatedRecoveryKey(null);
-      setRecoveryKeyCopied(false);
-      setRecoveryKeyCopyFailed(false);
-      setRecoveryKeyState("ready");
-    } catch (error) {
-      const code = error instanceof LocalAuthError ? error.code : null;
-      setRecoveryKeyError(
-        code === "CLOUD_AUTH_REQUIRED"
-          ? t("storageGoogleDriveTokenExpired")
-          : `${t("appleRecoveryKeyFailed")}${error instanceof Error ? ` (${error.message})` : ""}`
-      );
-      if (code === "RECOVERY_KEY_EXISTS" || code === "NO_ACTIVE_SESSION") {
-        setCreatedRecoveryKey(null);
-        setRecoveryKeyState(recoveryKeyReplacing ? "ready" : "missing");
-      }
-    } finally {
-      setRecoveryKeyConfirming(false);
-    }
-  };
-
-  const cancelCreatedRecoveryKey = () => {
-    authApi.discardPendingRecoveryKey();
-    setCreatedRecoveryKey(null);
-    setRecoveryKeyCopied(false);
-    setRecoveryKeyCopyFailed(false);
-    setRecoveryKeyError("");
-    setRecoveryKeyState(recoveryKeyReplacing ? "ready" : "missing");
-  };
-
-  const exportLocked = Boolean(user?.cloudRequired) && recoveryKeyState !== "ready";
+  const exportLocked = false;
 
   useEffect(() => {
     const restoredNotice = window.sessionStorage.getItem(restoredNoticeStorageKey);
@@ -729,14 +532,6 @@ export function ArchivePage() {
           </section>
         ) : null}
 
-        {data && user && showMigrateCard ? (
-          <section className="mt-6">
-            <MigrateAppleToGoogleCard
-              workspaceId={user.workspaceId}
-              recoveryKeyReady={recoveryKeyState === "ready"}
-            />
-          </section>
-        ) : null}
 
         {data && user ? (
           <section className="mt-6">
@@ -759,104 +554,6 @@ export function ArchivePage() {
               <p className="mt-4 max-w-3xl rounded-studio bg-white/[0.07] p-4 text-xs font-bold leading-5 text-white/72 ring-1 ring-white/10">
                 {t("siteBackupCredentialsHint")}
               </p>
-              {user?.cloudRequired && recoveryKeyState !== "ready" && recoveryKeyState !== "checking" ? (
-                <div className="mt-4 max-w-3xl rounded-studio bg-[#ffc700]/14 p-4 ring-1 ring-[#ffc700]/40">
-                  <div className="flex items-start gap-3">
-                    <KeyRound className="mt-0.5 shrink-0 text-[#ffc700]" size={20} />
-                    <div className="min-w-0 flex-1">
-                      {recoveryKeyState === "created" && createdRecoveryKey ? (
-                        <>
-                          <p className="text-sm font-black text-white">{t("appleRecoveryKeyCreatedTitle")}</p>
-                          <input
-                            ref={recoveryKeyInputRef}
-                            readOnly
-                            value={formatWorkspaceCode(createdRecoveryKey)}
-                            aria-label={t("workspaceKeyLabel")}
-                            onFocus={(event) => event.currentTarget.select()}
-                            onClick={(event) => event.currentTarget.select()}
-                            className="mt-3 h-14 w-full rounded-studio bg-white/[0.08] px-3 text-center font-mono text-[clamp(1rem,4vw,1.45rem)] font-black tracking-[0.08em] text-limepop outline-none ring-1 ring-white/10"
-                          />
-                          <p className="mt-3 text-xs font-bold leading-5 text-white/62">{t("workspaceKeyOnlyOnce")}</p>
-                          {recoveryKeyCopyFailed ? (
-                            <p role="alert" className="mt-2 text-xs font-black text-[#ffb7a8]">
-                              {t("workspaceKeyCopyFailed")}
-                            </p>
-                          ) : null}
-                          <div className="mt-3 grid gap-2 sm:grid-cols-3">
-                            <Button type="button" variant="secondary" size="md" onClick={() => void copyRecoveryKey()} className="w-full">
-                              <Copy size={17} />
-                              {recoveryKeyCopied ? t("workspaceKeyCopied") : t("workspaceKeyCopy")}
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="md"
-                              onClick={downloadRecoveryCard}
-                              className="w-full bg-white/10 text-white hover:bg-white/18"
-                            >
-                              <Download size={17} />
-                              {t("workspaceKeyDownload")}
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="md"
-                              disabled={!recoveryKeyHandled || recoveryKeyConfirming}
-                              onClick={() => void dismissCreatedRecoveryKey()}
-                              className="w-full bg-white/10 text-white hover:bg-white/18"
-                            >
-                              <Check size={17} />
-                              {recoveryKeyConfirming ? t("saving") : t("appleRecoveryKeySaved")}
-                            </Button>
-                          </div>
-                          {recoveryKeyError ? (
-                            <p role="alert" className="mt-2 text-xs font-black text-[#ffb7a8]">
-                              {recoveryKeyError}
-                            </p>
-                          ) : null}
-                          <button
-                            type="button"
-                            disabled={recoveryKeyConfirming}
-                            onClick={cancelCreatedRecoveryKey}
-                            className="mt-2 inline-flex min-h-9 items-center rounded-full px-3 text-xs font-black text-white/55 transition hover:bg-white/[0.06] hover:text-white disabled:opacity-50"
-                          >
-                            {t("cancel")}
-                          </button>
-                        </>
-                      ) : (
-                        <>
-                          <p className="text-sm font-black text-white">{t("appleRecoveryKeyTitle")}</p>
-                          <p className="mt-1 text-xs font-bold leading-5 text-white/62">{t("appleRecoveryKeyBody")}</p>
-                          <Button
-                            type="button"
-                            variant="secondary"
-                            size="md"
-                            disabled={recoveryKeyState !== "missing" || Boolean(backupBusy)}
-                            onClick={() => void createRecoveryKey()}
-                            className="mt-3 w-full bg-[#ffc700] hover:bg-[#ffc700] sm:w-auto"
-                          >
-                            <KeyRound size={17} />
-                            {recoveryKeyState === "creating" ? t("saving") : t("appleRecoveryKeyCreate")}
-                          </Button>
-                          {recoveryKeyError ? (
-                            <p role="alert" className="mt-2 text-xs font-black text-[#ffb7a8]">
-                              {recoveryKeyError}
-                            </p>
-                          ) : null}
-                          {recoveryKeyState === "missing" ? (
-                            <p className="mt-2 text-xs font-bold text-white/55">{t("appleRecoveryKeyRequiredForExport")}</p>
-                          ) : null}
-                        </>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              ) : null}
-              {user?.cloudRequired && recoveryKeyState === "ready" && recoveryKeyError ? (
-                <p role="alert" className="mt-3 text-xs font-black text-[#ffb7a8]">
-                  {recoveryKeyError}
-                </p>
-              ) : null}
               <div className="mt-5 grid gap-3 sm:grid-cols-2">
                 <Button
                   type="button"
@@ -890,17 +587,6 @@ export function ArchivePage() {
               <p className="mt-1 text-xs font-bold leading-5 text-white/48">
                 {t("siteBackupFileHint")}
               </p>
-              {user?.cloudRequired && recoveryKeyState === "ready" ? (
-                <button
-                  type="button"
-                  disabled={Boolean(backupBusy)}
-                  onClick={() => setReplaceRecoveryKeyOpen(true)}
-                  className="mt-3 inline-flex min-h-10 items-center gap-2 rounded-full px-3 text-xs font-black text-white/62 transition hover:bg-white/[0.06] hover:text-white disabled:opacity-50"
-                >
-                  <KeyRound size={15} />
-                  {t("appleRecoveryKeyReplace")}
-                </button>
-              ) : null}
               <div className="mt-5 border-t border-white/10 pt-5">
                 <p className="max-w-3xl text-xs font-bold leading-5 text-white/62">
                   {t("workspaceBackupShareHint")}
@@ -951,21 +637,6 @@ export function ArchivePage() {
           </section>
         ) : null}
       </div>
-      <DeleteConfirmDialog
-        open={replaceRecoveryKeyOpen}
-        busy={recoveryKeyState === "creating"}
-        acknowledgementLabel={t("dangerousActionAcknowledgement")}
-        title={t("appleRecoveryKeyReplace")}
-        description={t("appleRecoveryKeyReplaceBody")}
-        warning={t("workspaceKeyOnlyOnce")}
-        cancelLabel={t("cancel")}
-        confirmLabel={t("appleRecoveryKeyReplace")}
-        onCancel={() => setReplaceRecoveryKeyOpen(false)}
-        onConfirm={() => {
-          setReplaceRecoveryKeyOpen(false);
-          void createRecoveryKey(true);
-        }}
-      />
       <DeleteConfirmDialog
         open={Boolean(pendingBackup)}
         busy={backupBusy === "restore"}

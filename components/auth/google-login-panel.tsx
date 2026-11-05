@@ -26,7 +26,7 @@ const GOOGLE_CLIENT_ID_PLACEHOLDER = "xxxxxxxx.apps.googleusercontent.com";
 export function GoogleLoginPanel() {
   const router = useRouter();
   const { t } = useI18n();
-  const { commitAppleAccountUser, signInWithGoogle, unlockGoogleAccountLocally, user } = useAuth();
+  const { commitSessionUser, signInWithGoogle, unlockGoogleAccountLocally, user } = useAuth();
   const [flow, setFlow] = useState<GoogleLoginFlow>({ phase: "idle" });
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -99,7 +99,7 @@ export function GoogleLoginPanel() {
           return;
         }
         if (result) {
-          commitAppleAccountUser(result.user);
+          commitSessionUser(result.user);
           router.replace("/dashboard");
         }
       })
@@ -112,7 +112,7 @@ export function GoogleLoginPanel() {
           setBusy(false);
         }
       });
-  }, [commitAppleAccountUser, router, unlockGoogleAccountLocally, user]);
+  }, [commitSessionUser, router, unlockGoogleAccountLocally, user]);
 
   const effectiveClientId = (storedClientId || clientIdInput).trim();
 
@@ -138,7 +138,7 @@ export function GoogleLoginPanel() {
         return;
       }
       if (resolution.kind === "ready") {
-        commitAppleAccountUser(resolution.user);
+        commitSessionUser(resolution.user);
         router.replace("/dashboard");
         return;
       }
@@ -179,7 +179,7 @@ export function GoogleLoginPanel() {
         setActionError(t("loginGoogleContinueUnavailable"));
         return;
       }
-      commitAppleAccountUser(result.user);
+      commitSessionUser(result.user);
       router.replace("/dashboard");
     } catch (error) {
       logFailure("continue on device", error);

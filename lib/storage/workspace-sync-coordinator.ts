@@ -1,9 +1,6 @@
-import {
-  downloadEncryptedWorkspaceBundleFromCloudKit,
-  uploadEncryptedWorkspaceBundleToCloudKit
-} from "@/lib/storage/cloudkit-provider";
 import { GoogleApiError } from "@/lib/integrations/google-auth";
 import { CloudProviderError } from "@/lib/storage/cloud-provider-error";
+import type { CloudUserIdentity } from "@/lib/storage/cloud-user-identity";
 import {
   downloadEncryptedWorkspaceBundleFromGoogleDrive,
   uploadEncryptedWorkspaceBundleToGoogleDrive
@@ -13,16 +10,6 @@ import {
   getGoogleDriveConfigurationStatus,
   getGoogleDriveIdentity
 } from "@/lib/storage/google-drive/google-drive-client";
-import {
-  assertCloudKitAuthenticatedUser,
-  CloudKitClientError,
-  describeLastFailedCloudKitResponse,
-  getCloudKitConfigurationStatus,
-  probeCloudKitReachability,
-  getCloudKitUserRecordName,
-  setUpCloudKitAuth,
-  type CloudKitUserIdentity
-} from "@/lib/storage/cloudkit/cloudkit-client";
 import {
   captureEncryptedWorkspaceBundle,
   restoreEncryptedWorkspaceBundle,
@@ -70,7 +57,7 @@ export type WorkspaceCloudSyncAvailability =
 export type WorkspaceCloudAuthState = {
   configured: boolean;
   signedIn: boolean;
-  user: CloudKitUserIdentity | null;
+  user: CloudUserIdentity | null;
   error: string | null;
 };
 
@@ -92,7 +79,7 @@ export type WorkspaceSyncResult = {
   direction: WorkspaceSyncDirection;
   didReplaceLocalBundle: boolean;
   preference: WorkspaceStoragePreference;
-  user: CloudKitUserIdentity | null;
+  user: CloudUserIdentity | null;
 };
 
 export type WorkspaceConflictResolution = "keep-local" | "use-cloud";
@@ -102,7 +89,7 @@ export type WorkspaceCloudSyncOptions = {
    * A CloudKit identity delivered by Apple's sign-in event. Supplying it avoids
    * asking setUpAuth() to rediscover the same just-completed popup session.
    */
-  authenticatedUser?: CloudKitUserIdentity;
+  authenticatedUser?: CloudUserIdentity;
   /**
    * Verifies that a downloaded encrypted bundle can be unlocked by the active
    * workspace before the IndexedDB copy is replaced. Auth owns the in-memory
@@ -153,7 +140,7 @@ const noteLocalSaveRevision = (workspaceId: string) => {
   return next;
 };
 
-const GENERIC_REQUEST_FAILURE = "The CloudKit request failed.";
+const GENERIC_REQUEST_FAILURE = "The cloud sync request failed.";
 const MAX_FAILURE_DETAIL_LENGTH = 320;
 
 /** Loose comparison so "CODE: text" and "CODE · text" count as the same detail. */
@@ -227,12 +214,7 @@ export const describeWorkspaceSyncFailure = (error: unknown): string => {
       : causeDetail
     : [ownMessage, causeDetail].filter(Boolean).join(" — ");
   // CloudKit JS hides the HTTP status; quote the last failed response instead.
-  const lastResponse =
-    (error instanceof CloudProviderError && error.provider === "gdrive") ||
-    error instanceof GoogleApiError
-      ? ""
-      : describeLastFailedCloudKitResponse();
-  const detail = lastResponse ? `${combined}; last response: ${lastResponse}` : combined;
+  const detail = combined;
   const scrubbed = scrubSecrets(detail).replace(/\s+/g, " ").trim();
   return scrubbed.length > MAX_FAILURE_DETAIL_LENGTH
     ? `${scrubbed.slice(0, MAX_FAILURE_DETAIL_LENGTH - 1)}…`
@@ -241,13 +223,10 @@ export const describeWorkspaceSyncFailure = (error: unknown): string => {
 
 const genericErrorMessage = (error: unknown) => {
   if (error instanceof CloudProviderError) {
-    const drive = error.provider === "gdrive";
-    const service = drive ? "Google Drive" : "CloudKit";
+    const service = "Google Drive";
     switch (error.code) {
       case "AUTH_REQUIRED":
-        return drive
-          ? "Reconnect Google Drive to continue syncing this workspace."
-          : "Sign in to iCloud to continue syncing this workspace.";
+        return "Reconnect Google Drive to continue syncing this workspace.";
       case "CONFLICT":
         return `${service} contains a different version of this workspace.`;
       case "PAYLOAD_TOO_LARGE":
@@ -257,15 +236,10 @@ const genericErrorMessage = (error: unknown) => {
       case "CRYPTO_UNAVAILABLE":
         return "Secure browser cryptography is unavailable.";
       case "QUOTA_EXCEEDED":
-        return drive
-          ? "Google Drive storage is full, so the upload was rejected. Free up Drive space and sync again."
-          : "iCloud storage is full, so CloudKit rejected the upload. Free up iCloud space (or delete leftover SMOSWorkspaceChunk records) and sync again.";
+        return "Google Drive storage is full, so the upload was rejected. Free up Drive space and sync again.";
       case "THROTTLED":
         return `${service} is rate-limiting this device (${describeWorkspaceSyncFailure(error) || "try again later"}).`;
       default: {
-        // REQUEST_FAILED covers every server/transport failure (QUOTA_EXCEEDED,
-        // BAD_REQUEST, THROTTLED, CORS, 421, 5xx…). Show the actual reason so
-        // the storage card is diagnosable instead of a blanket "unreachable".
         const detail = describeWorkspaceSyncFailure(error);
         return detail
           ? `${service} request failed: ${detail}. The local encrypted copy is unchanged.`
@@ -327,7 +301,7 @@ const result = (
   outcome: WorkspaceSyncOutcome,
   direction: WorkspaceSyncDirection,
   didReplaceLocalBundle: boolean,
-  user: CloudKitUserIdentity | null
+  user: CloudUserIdentity | null
 ): WorkspaceSyncResult => ({
   workspaceId,
   outcome,
@@ -337,15 +311,12 @@ const result = (
   user
 });
 
-const assertCloudKitUserMatches = (workspaceId: string, user: CloudKitUserIdentity) => {
-  // Resolve like every other identity comparison (trimmed, lookupInfo
-  // fallback); a raw empty userRecordName must not turn this check into a
-  // no-op or bind an empty value.
-  const userRecordName = getCloudKitUserRecordName(user);
+const assertCloudKitUserMatches = (workspaceId: string, user: CloudUserIdentity) => {
+  const userRecordName = user.userRecordName?.trim() || user.lookupInfo?.userRecordName?.trim() || "";
   if (!userRecordName) {
     throw new WorkspaceSyncError(
       "AUTH_REQUIRED",
-      "Apple ID did not provide a usable account identity."
+      "Google Drive did not provide a usable account identity."
     );
   }
 
@@ -363,7 +334,7 @@ const assertCloudKitUserMatches = (workspaceId: string, user: CloudKitUserIdenti
   return userRecordName;
 };
 
-const bindCloudKitUser = (workspaceId: string, user: CloudKitUserIdentity) => {
+const bindCloudKitUser = (workspaceId: string, user: CloudUserIdentity) => {
   const userRecordName = assertCloudKitUserMatches(workspaceId, user);
   const preference = getWorkspaceStoragePreference(workspaceId);
 
@@ -379,17 +350,6 @@ const markAuthRequired = (workspaceId: string, adapter: CloudAdapter) =>
     status: "auth-required",
     lastError: adapter.authRequiredMessage
   });
-
-/**
- * The auth re-check inside a sync throws CloudKitClientError, not the
- * provider's error class. Without this it was recorded as a generic failure
- * and the card never asked the user to sign in again.
- */
-const isClientAuthRequired = (error: unknown) =>
-  error instanceof CloudKitClientError && error.code === "AUTH_REQUIRED";
-
-const isClientAccountMismatch = (error: unknown) =>
-  error instanceof CloudKitClientError && error.code === "ACCOUNT_MISMATCH";
 
 const markAccountMismatch = (workspaceId: string, error: unknown) =>
   updateWorkspaceStoragePreference(workspaceId, {
@@ -415,8 +375,8 @@ const markConflict = (workspaceId: string, message: string) => {
 const markConflictOrUpload = async (
   workspaceId: string,
   message: string,
-  user: CloudKitUserIdentity,
-  upload: (boundUser: CloudKitUserIdentity) => Promise<WorkspaceSyncResult>
+  user: CloudUserIdentity,
+  upload: (boundUser: CloudUserIdentity) => Promise<WorkspaceSyncResult>
 ): Promise<WorkspaceSyncResult> => {
   if (googleDrivePolicyApplies(workspaceId)) {
     updateWorkspaceStoragePreference(workspaceId, {
@@ -430,15 +390,6 @@ const markConflictOrUpload = async (
   return result(workspaceId, "conflict", "none", false, user);
 };
 
-const TRANSPORT_FAILURE_PATTERN =
-  /NETWORK_ERROR|UNEXPECTED_SERVER_RESPONSE|SERVICE_UNAVAILABLE|TRY_AGAIN_LATER|timed out|Failed to fetch|no response/i;
-
-const isTransportFailure = (error: unknown) =>
-  error instanceof CloudProviderError &&
-  error.provider === "cloudkit" &&
-  (error.code === "REQUEST_FAILED" || error.code === "THROTTLED") &&
-  TRANSPORT_FAILURE_PATTERN.test(describeWorkspaceSyncFailure(error));
-
 const markError = (workspaceId: string, error: unknown) => {
   logSyncFailure(workspaceId, error);
   const message = genericErrorMessage(error);
@@ -446,26 +397,11 @@ const markError = (workspaceId: string, error: unknown) => {
     status: "error",
     lastError: message
   });
-  if (!isTransportFailure(error)) {
-    return;
-  }
-  // Append a reachability verdict once it is known, unless a newer attempt
-  // has replaced the status in the meantime.
-  void probeCloudKitReachability().then((summary) => {
-    if (!summary) {
-      return;
-    }
-    console.warn(`[smos-sync] ${summary}`);
-    const current = getWorkspaceStoragePreference(workspaceId);
-    if (current.status === "error" && current.lastError === message) {
-      updateWorkspaceStoragePreference(workspaceId, { lastError: `${message} ${summary}` });
-    }
-  });
 };
 
 const markSynced = (
   workspaceId: string,
-  user: CloudKitUserIdentity,
+  user: CloudUserIdentity,
   manifestChangeTag: string
 ) =>
   updateWorkspaceStoragePreference(workspaceId, {
@@ -575,7 +511,7 @@ const cloudSyncStartGuardStillMatches = (
 
 const cloudBindingStillMatches = (
   workspaceId: string,
-  user: CloudKitUserIdentity,
+  user: CloudUserIdentity,
   preference = getWorkspaceStoragePreference(workspaceId)
 ) =>
   isCloudStorageProvider(preference.provider) &&
@@ -635,8 +571,8 @@ type CloudAdapter = {
     workspaceId: string,
     options: WorkspaceCloudSyncOptions,
     mode: IdentityLookupMode
-  ) => Promise<CloudKitUserIdentity | null>;
-  assertIdentity: (workspaceId: string, user: CloudKitUserIdentity) => Promise<CloudKitUserIdentity>;
+  ) => Promise<CloudUserIdentity | null>;
+  assertIdentity: (workspaceId: string, user: CloudUserIdentity) => Promise<CloudUserIdentity>;
   download: (workspaceId: string) => Promise<CloudDownload | null>;
   upload: (
     snapshot: EncryptedWorkspaceBundleSnapshot,
@@ -645,35 +581,6 @@ type CloudAdapter = {
   isAuthRequiredError: (error: unknown) => boolean;
   isAccountMismatchError: (error: unknown) => boolean;
   isConflictError: (error: unknown) => boolean;
-};
-
-const cloudKitAdapter: CloudAdapter = {
-  provider: "cloudkit",
-  label: "iCloud",
-  authRequiredMessage: "Sign in to iCloud to sync this workspace.",
-  availability: () => getWorkspaceCloudSyncAvailability(),
-  getIdentity: async (_workspaceId, options, mode) => {
-    if (options.authenticatedUser && mode.useProvided !== "ignore") {
-      return mode.useProvided === "trust"
-        ? options.authenticatedUser
-        : assertCloudKitAuthenticatedUser(options.authenticatedUser);
-    }
-    const authentication = setUpCloudKitAuth();
-    return mode.timeoutMs ? withTimeout(authentication, mode.timeoutMs) : authentication;
-  },
-  assertIdentity: (_workspaceId, user) => assertCloudKitAuthenticatedUser(user),
-  download: (workspaceId) => downloadEncryptedWorkspaceBundleFromCloudKit(workspaceId),
-  upload: async (snapshot, expectedManifestChangeTag) => {
-    const uploaded = await uploadEncryptedWorkspaceBundleToCloudKit(snapshot, {
-      expectedManifestChangeTag
-    });
-    return { recordChangeTag: uploaded.manifest.recordChangeTag };
-  },
-  isAuthRequiredError: (error) =>
-    (error instanceof CloudProviderError && error.code === "AUTH_REQUIRED") ||
-    isClientAuthRequired(error),
-  isAccountMismatchError: (error) => isClientAccountMismatch(error),
-  isConflictError: (error) => error instanceof CloudProviderError && error.code === "CONFLICT"
 };
 
 const googleDriveAdapter: CloudAdapter = {
@@ -711,7 +618,7 @@ const googleDriveAdapter: CloudAdapter = {
 };
 
 const adapterFor = (provider: WorkspaceStorageProvider): CloudAdapter | null =>
-  provider === "cloudkit" ? cloudKitAdapter : provider === "gdrive" ? googleDriveAdapter : null;
+  provider === "gdrive" ? googleDriveAdapter : null;
 
 /**
  * Applies a verified cloud snapshot while holding the same lock as local
@@ -720,7 +627,7 @@ const adapterFor = (provider: WorkspaceStorageProvider): CloudAdapter | null =>
  */
 const restoreRemoteBundleUnderMutationLock = async (
   workspaceId: string,
-  user: CloudKitUserIdentity,
+  user: CloudUserIdentity,
   remote: CloudDownload,
   guard: RemoteRestoreGuard
 ): Promise<RemoteRestoreOutcome> =>
@@ -771,7 +678,7 @@ const restoreRemoteBundleUnderMutationLock = async (
 
 const markSyncedIfLocalUnchangedUnderMutationLock = async (
   workspaceId: string,
-  user: CloudKitUserIdentity,
+  user: CloudUserIdentity,
   expectedLocal: EncryptedWorkspaceBundleSnapshot,
   expectedLocalSaveRevision: number,
   expectedMutationEpoch: number,
@@ -821,7 +728,7 @@ const markSyncedIfLocalUnchangedUnderMutationLock = async (
 const uploadLocalBundle = async (
   adapter: CloudAdapter,
   workspaceId: string,
-  user: CloudKitUserIdentity,
+  user: CloudUserIdentity,
   local: EncryptedWorkspaceBundleSnapshot,
   expectedManifestChangeTag: string | null,
   localSaveRevision: number,
@@ -891,7 +798,7 @@ const manualSyncInternal = async (
     return result(workspaceId, "offline", "none", false, null);
   }
 
-  let user: CloudKitUserIdentity | null = null;
+  let user: CloudUserIdentity | null = null;
   let bindingEstablished = false;
   try {
     user = await adapter.getIdentity(workspaceId, options, { useProvided: "verify" });
@@ -1184,45 +1091,10 @@ const runExclusive = (workspaceId: string, operation: () => Promise<WorkspaceSyn
   return current;
 };
 
-export function getWorkspaceCloudSyncAvailability(): WorkspaceCloudSyncAvailability {
-  if (typeof window === "undefined") {
-    return { available: false, reason: "browser-unavailable", missing: [] };
-  }
-
-  const status = getCloudKitConfigurationStatus();
-  if (!status.configured) {
-    return {
-      available: false,
-      reason: status.invalidEnvironment ? "configuration-invalid" : "configuration-missing",
-      missing: status.missing
-    };
-  }
-
-  return { available: true };
-}
-
-export async function getWorkspaceCloudAuthState(): Promise<WorkspaceCloudAuthState> {
-  const availability = getWorkspaceCloudSyncAvailability();
-  if (!availability.available) {
-    return {
-      configured: false,
-      signedIn: false,
-      user: null,
-      error: availability.reason
-    };
-  }
-
-  try {
-    const user = await setUpCloudKitAuth();
-    return { configured: true, signedIn: Boolean(user), user, error: null };
-  } catch (error) {
-    return {
-      configured: true,
-      signedIn: false,
-      user: null,
-      error: genericErrorMessage(error)
-    };
-  }
+export function getWorkspaceCloudSyncAvailability(
+  workspaceId: string
+): WorkspaceCloudSyncAvailability {
+  return googleDriveAdapter.availability(workspaceId);
 }
 
 export function noteWorkspaceLocalSave(workspaceIdInput: string) {
@@ -1340,7 +1212,7 @@ export async function resolveWorkspaceCloudConflict(
       return result(workspaceId, "offline", "none", false, null);
     }
 
-    let user: CloudKitUserIdentity | null = null;
+    let user: CloudUserIdentity | null = null;
     let bindingEstablished = false;
     try {
       user = await adapter.getIdentity(workspaceId, options, { useProvided: "ignore" });
@@ -1517,7 +1389,7 @@ export async function pullWorkspaceFromCloudOnLogin(
       return staleSyncResult(workspaceId);
     }
 
-    let user: CloudKitUserIdentity | null = null;
+    let user: CloudUserIdentity | null = null;
     let bindingEstablished = false;
     try {
       user = await adapter.getIdentity(workspaceId, options, {
@@ -1845,31 +1717,9 @@ export async function connectWorkspaceCloud(
   return manualSyncWorkspace(workspaceId, options);
 }
 
-export async function connectWorkspaceCloudKit(
-  workspaceIdInput: string,
-  options: WorkspaceCloudSyncOptions = {}
-) {
-  return connectWorkspaceCloud(workspaceIdInput, "cloudkit", options);
-}
-
 /** Stops cloud sync for the workspace; both encrypted copies are kept. */
 export function disconnectWorkspaceCloud(workspaceIdInput: string) {
   const workspaceId = validateWorkspaceId(workspaceIdInput);
   cancelWorkspaceCloudUpload(workspaceId);
   return setWorkspaceStorageProvider(workspaceId, "indexeddb");
-}
-
-export function disconnectWorkspaceCloudKit(workspaceIdInput: string) {
-  return disconnectWorkspaceCloud(workspaceIdInput);
-}
-
-/**
- * Pauses cloud sync after the CloudKit session is signed out without erasing
- * the workspace-to-account binding or either encrypted copy.
- */
-export function noteWorkspaceCloudKitSignedOut(workspaceIdInput: string) {
-  const workspaceId = validateWorkspaceId(workspaceIdInput);
-  cancelWorkspaceCloudUpload(workspaceId);
-  const preference = getWorkspaceStoragePreference(workspaceId);
-  return preference.provider === "cloudkit" ? markAuthRequired(workspaceId, cloudKitAdapter) : preference;
 }
