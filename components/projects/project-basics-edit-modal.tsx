@@ -17,6 +17,7 @@ import {
 import type { TranslationKey } from "@/lib/i18n/translations";
 import type { Project, ProjectGroup } from "@/lib/types";
 import { cn } from "@/lib/utils/cn";
+import { canonicalDeviceLabel } from "@/lib/utils/device-label";
 import { MAX_UPLOAD_IMAGE_BYTES } from "@/lib/utils/image-upload";
 
 type ProjectBasicsEditModalProps = {
@@ -47,7 +48,7 @@ export function ProjectBasicsEditModal({
   const [description, setDescription] = useState(project.description);
   const [coverImage, setCoverImage] = useState(project.coverImage);
   const [groupId, setGroupId] = useState(project.groupId);
-  const [codingDevice, setCodingDevice] = useState(project.codingDevice ?? "");
+  const [codingDevice, setCodingDevice] = useState(canonicalDeviceLabel(project.codingDevice ?? ""));
   const [deviceOptions, setDeviceOptions] = useState<string[]>([]);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -61,7 +62,7 @@ export function ProjectBasicsEditModal({
     setDescription(project.description);
     setCoverImage(project.coverImage);
     setGroupId(groups.some((group) => group.id === project.groupId) ? project.groupId : "");
-    setCodingDevice(project.codingDevice ?? "");
+    setCodingDevice(canonicalDeviceLabel(project.codingDevice ?? ""));
     setError("");
     setSaving(false);
 
@@ -126,7 +127,7 @@ export function ProjectBasicsEditModal({
       description,
       coverImage,
       groupId,
-      codingDevice: codingDevice.trim()
+      codingDevice: canonicalDeviceLabel(codingDevice.trim())
     };
     try {
       const nextProject = await projectsApi.updateProjectBasics(project.id, payload);
@@ -201,7 +202,7 @@ export function ProjectBasicsEditModal({
                         onClick={() => setCodingDevice(device)}
                         className={cn(
                           "min-h-7 rounded-full px-3 text-xs font-black transition",
-                          codingDevice.trim() === device
+                          canonicalDeviceLabel(codingDevice.trim()) === device
                             ? "bg-[#112f45] text-white"
                             : "bg-white text-ink ring-1 ring-black/[0.08] hover:bg-[#112f45] hover:text-white"
                         )}

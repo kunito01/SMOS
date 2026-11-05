@@ -2,6 +2,7 @@ import { mockApi, requireEntity } from "@/lib/api/mock-client";
 import { hydrateMockDatabase, persistMockDatabase } from "@/lib/api/mock-persistence";
 import { mockDatabase } from "@/lib/mock";
 import type { ComfyUiWorkflow, ProjectWorkflow } from "@/lib/types";
+import { canonicalDeviceLabel } from "@/lib/utils/device-label";
 import {
   createEmptyProjectWorkflow,
   normalizeProjectWorkflow,
@@ -144,7 +145,7 @@ export async function createComfyWorkflow(input: ComfyWorkflowInput) {
   const workflow: ComfyUiWorkflow = {
     id: createComfyWorkflowId(),
     name: input.name.trim(),
-    host: input.host.trim(),
+    host: canonicalDeviceLabel(input.host.trim()),
     content: input.content,
     ...(input.strengths?.trim() ? { strengths: input.strengths.trim() } : {}),
     ...(input.weaknesses?.trim() ? { weaknesses: input.weaknesses.trim() } : {}),
@@ -176,7 +177,7 @@ export async function updateComfyWorkflow(comfyWorkflowId: string, input: ComfyW
     id: currentWorkflow.id,
     createdAt: currentWorkflow.createdAt,
     name: input.name.trim(),
-    host: input.host.trim(),
+    host: canonicalDeviceLabel(input.host.trim()),
     content: input.content,
     ...(input.strengths?.trim() ? { strengths: input.strengths.trim() } : {}),
     ...(input.weaknesses?.trim() ? { weaknesses: input.weaknesses.trim() } : {}),

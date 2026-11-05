@@ -11,6 +11,7 @@ import {
 } from "@/lib/api";
 import type { ProjectPaymentInput, TimelinePhaseInput } from "@/lib/api/projects";
 import type { Project, ProjectStatus } from "@/lib/types";
+import { canonicalDeviceLabel } from "@/lib/utils/device-label";
 import { supportedCurrencies, type MoneyCurrency } from "@/lib/utils/money";
 import { isDateKey, todayDateKey } from "@/lib/utils/testflight";
 
@@ -122,7 +123,8 @@ const summarizeProject = (project: Project) => ({
   startDate: project.startDate,
   endDate: project.endDate,
   currentPhase: project.phases.find((phase) => phase.id === project.currentPhaseId)?.name ?? null,
-  codingDevice: project.codingDevice ?? null,
+  codingDevice:
+    typeof project.codingDevice === "string" ? canonicalDeviceLabel(project.codingDevice) : null,
   archivedAt: project.archivedAt ?? null,
   isExample: project.isExample === true
 });

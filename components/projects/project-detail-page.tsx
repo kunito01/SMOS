@@ -60,6 +60,7 @@ import {
 import { formatLocalizedDate } from "@/lib/i18n/formatters";
 import type { Project, ProjectGroup, ProjectStatus, ProjectVersion, ReleasePlatform } from "@/lib/types";
 import { projectCostsPath } from "@/lib/utils/app-routes";
+import { canonicalDeviceLabel } from "@/lib/utils/device-label";
 import { cn } from "@/lib/utils/cn";
 import { releasePlatformLabels, releasePlatforms } from "@/lib/utils/testflight";
 import { findProjectReleaseVersion } from "@/lib/utils/project-release";
@@ -675,7 +676,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
                       {data.project.codingDevice ? (
                         <span className="mt-3 inline-flex min-h-7 max-w-full items-center gap-1.5 rounded-full bg-limepop px-3 text-xs font-black text-ink">
                           <MonitorSmartphone size={13} className="shrink-0" />
-                          <span className="truncate">{data.project.codingDevice}</span>
+                          <span className="truncate">{canonicalDeviceLabel(data.project.codingDevice)}</span>
                         </span>
                       ) : null}
                     </div>

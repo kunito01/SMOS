@@ -8,6 +8,7 @@ import { Select } from "@/components/ui/select";
 import { projectsApi, workflowsApi } from "@/lib/api";
 import type { TranslationKey } from "@/lib/i18n/translations";
 import type { ComfyUiWorkflow, Project } from "@/lib/types";
+import { canonicalDeviceLabel } from "@/lib/utils/device-label";
 
 type ProjectComfySectionProps = {
   project: Project;
@@ -96,7 +97,7 @@ export function ProjectComfySection({ project, t }: ProjectComfySectionProps) {
                 {available.map((workflow) => (
                   <option key={workflow.id} value={workflow.id}>
                     {workflow.name}
-                    {workflow.host ? ` · ${workflow.host}` : ""}
+                    {workflow.host ? ` · ${canonicalDeviceLabel(workflow.host)}` : ""}
                   </option>
                 ))}
               </Select>
@@ -124,7 +125,7 @@ export function ProjectComfySection({ project, t }: ProjectComfySectionProps) {
                 <p className="flex min-w-0 items-baseline gap-1.5">
                   <span className="min-w-0 truncate font-black">{workflow.name}</span>
                   {workflow.host ? (
-                    <span className="shrink-0 text-[10px] font-normal text-ink/40">{workflow.host}</span>
+                    <span className="shrink-0 text-[10px] font-normal text-ink/40">{canonicalDeviceLabel(workflow.host)}</span>
                   ) : null}
                   {workflow.rating ? (
                     <span
