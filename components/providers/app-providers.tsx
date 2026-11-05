@@ -11,7 +11,8 @@ import type {
   GoogleSignInPayload,
   LocalAuthUser,
   RegisterPayload,
-  RegisterResult
+  RegisterResult,
+  UnlockGoogleAccountLocallyOptions
 } from "@/lib/api/auth";
 import { keepNumericWordPairsTogether } from "@/lib/i18n/non-breaking";
 import {
@@ -27,7 +28,9 @@ type AuthContextValue = {
   isReady: boolean;
   signIn: (email: string, password: string) => Promise<void>;
   signInWithGoogle: (payload: GoogleSignInPayload) => Promise<GoogleAccountLoginResolution>;
-  unlockGoogleAccountLocally: (options?: { allowWithoutToken?: boolean }) => Promise<{ user: LocalAuthUser } | null>;
+  unlockGoogleAccountLocally: (
+    options?: UnlockGoogleAccountLocallyOptions
+  ) => Promise<{ user: LocalAuthUser } | null>;
   commitSessionUser: (nextUser: LocalAuthUser) => void;
   /** @deprecated Renamed to `commitSessionUser`; kept for cached PWA bundles after iCloud removal. */
   commitAppleAccountUser: (nextUser: LocalAuthUser) => void;
@@ -64,7 +67,10 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
           setLanguageState(storedLanguage as Language);
         }
 
-        const currentUser = await authApi.getCurrentUser();
+        let currentUser = await authApi.getCurrentUser();
+        if (!currentUser) {
+          currentUser = await authApi.restorePersistedLocalSession();
+        }
         if (!isCancelled) {
           setUser(currentUser);
         }
@@ -105,7 +111,7 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
       signInWithGoogle: async (payload: GoogleSignInPayload) => {
         return authApi.signInWithGoogle(payload);
       },
-      unlockGoogleAccountLocally: async (options?: { allowWithoutToken?: boolean }) => {
+      unlockGoogleAccountLocally: async (options?: UnlockGoogleAccountLocallyOptions) => {
         return authApi.unlockGoogleAccountLocally(options);
       },
       commitSessionUser: (nextUser: LocalAuthUser) => {

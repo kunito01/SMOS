@@ -97,8 +97,7 @@ export function GoogleLoginPanel() {
     }
 
     const requestSequence = ++requestSequenceRef.current;
-    setBusy(true);
-    void unlockGoogleAccountLocally({ allowWithoutToken: true })
+    void unlockGoogleAccountLocally({ allowWithoutToken: true, deferCloudSync: true })
       .then((result: { user: LocalAuthUser } | null) => {
         if (requestSequence !== requestSequenceRef.current || userRef.current) {
           return;
@@ -111,11 +110,6 @@ export function GoogleLoginPanel() {
       .catch((error: unknown) => {
         // The interactive button stays available; a silent entry is best effort.
         logFailure("local unlock", error);
-      })
-      .finally(() => {
-        if (requestSequence === requestSequenceRef.current) {
-          setBusy(false);
-        }
       });
   }, [commitSessionUser, router, unlockGoogleAccountLocally, user]);
 
@@ -176,7 +170,10 @@ export function GoogleLoginPanel() {
     setActionError(null);
     setFlow({ phase: "idle" });
     try {
-      const result = await unlockGoogleAccountLocally({ allowWithoutToken: true });
+      const result = await unlockGoogleAccountLocally({
+        allowWithoutToken: true,
+        deferCloudSync: true
+      });
       if (requestSequence !== requestSequenceRef.current || userRef.current) {
         return;
       }
