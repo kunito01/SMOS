@@ -34,9 +34,15 @@ type GoogleCalendarSyncCardProps = {
   workspaceId: string;
   /** Sit inside the Google Drive panel instead of rendering a second card. */
   embedded?: boolean;
+  /** Parent runs Drive and Calendar sync together; hide duplicate sync controls. */
+  hideSyncControls?: boolean;
 };
 
-export function GoogleCalendarSyncCard({ workspaceId, embedded = false }: GoogleCalendarSyncCardProps) {
+export function GoogleCalendarSyncCard({
+  workspaceId,
+  embedded = false,
+  hideSyncControls = false
+}: GoogleCalendarSyncCardProps) {
   const { language, t } = useI18n();
   const { user } = useAuth();
   // Google accounts: Calendar rides on the Google sign-in (same token, same
@@ -238,47 +244,49 @@ export function GoogleCalendarSyncCard({ workspaceId, embedded = false }: Google
         </div>
       ) : null}
 
-      <div className="mt-4 flex flex-wrap items-center gap-2">
-        {connected ? (
-          <>
-            <Button type="button" size="sm" disabled={busy} onClick={() => void syncNow()}>
-              <RefreshCw size={16} className={status.state === "syncing" ? "animate-spin" : undefined} />
-              {needsReconnect ? t("googleCalendarReconnect") : t("googleCalendarSyncNow")}
+      {hideSyncControls ? null : (
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          {connected ? (
+            <>
+              <Button type="button" size="sm" disabled={busy} onClick={() => void syncNow()}>
+                <RefreshCw size={16} className={status.state === "syncing" ? "animate-spin" : undefined} />
+                {needsReconnect ? t("googleCalendarReconnect") : t("googleCalendarSyncNow")}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                disabled={busy}
+                onClick={() => void (viaSignIn ? turnOff() : disconnect())}
+              >
+                <Unplug size={16} />
+                {viaSignIn ? t("googleCalendarTurnOff") : t("googleCalendarDisconnect")}
+              </Button>
+              <label className="ml-auto flex cursor-pointer items-center gap-2 text-xs font-black text-ink/70">
+                <input
+                  type="checkbox"
+                  checked={settings.autoSync}
+                  onChange={(event) =>
+                    setSettings(writeGoogleCalendarSettings(workspaceId, { autoSync: event.target.checked }))
+                  }
+                  className="size-4 accent-coral"
+                />
+                {t("googleCalendarAutoSync")}
+              </label>
+            </>
+          ) : viaSignIn ? (
+            <Button type="button" size="sm" disabled={busy} onClick={() => void turnOn()}>
+              <Link2 size={16} />
+              {t("googleCalendarTurnOn")}
             </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              disabled={busy}
-              onClick={() => void (viaSignIn ? turnOff() : disconnect())}
-            >
-              <Unplug size={16} />
-              {viaSignIn ? t("googleCalendarTurnOff") : t("googleCalendarDisconnect")}
+          ) : (
+            <Button type="button" size="sm" disabled={busy || !clientIdDraft.trim()} onClick={() => void connect()}>
+              <Link2 size={16} />
+              {t("googleCalendarConnect")}
             </Button>
-            <label className="ml-auto flex cursor-pointer items-center gap-2 text-xs font-black text-ink/70">
-              <input
-                type="checkbox"
-                checked={settings.autoSync}
-                onChange={(event) =>
-                  setSettings(writeGoogleCalendarSettings(workspaceId, { autoSync: event.target.checked }))
-                }
-                className="size-4 accent-coral"
-              />
-              {t("googleCalendarAutoSync")}
-            </label>
-          </>
-        ) : viaSignIn ? (
-          <Button type="button" size="sm" disabled={busy} onClick={() => void turnOn()}>
-            <Link2 size={16} />
-            {t("googleCalendarTurnOn")}
-          </Button>
-        ) : (
-          <Button type="button" size="sm" disabled={busy || !clientIdDraft.trim()} onClick={() => void connect()}>
-            <Link2 size={16} />
-            {t("googleCalendarConnect")}
-          </Button>
-        )}
-      </div>
+          )}
+        </div>
+      )}
 
       <p className="mt-3 text-xs font-bold leading-5 text-muted">{t("googleCalendarScopeNote")}</p>
       {error ? <p className="mt-2 text-sm font-black text-coral">{error}</p> : null}
