@@ -32,9 +32,11 @@ import { cn } from "@/lib/utils/cn";
 
 type GoogleCalendarSyncCardProps = {
   workspaceId: string;
+  /** Sit inside the Google Drive panel instead of rendering a second card. */
+  embedded?: boolean;
 };
 
-export function GoogleCalendarSyncCard({ workspaceId }: GoogleCalendarSyncCardProps) {
+export function GoogleCalendarSyncCard({ workspaceId, embedded = false }: GoogleCalendarSyncCardProps) {
   const { language, t } = useI18n();
   const { user } = useAuth();
   // Google accounts: Calendar rides on the Google sign-in (same token, same
@@ -177,22 +179,36 @@ export function GoogleCalendarSyncCard({ workspaceId }: GoogleCalendarSyncCardPr
           ? "bg-[#ffc700]/40 text-ink"
           : "bg-[#97EECE] text-[#12263A]";
 
-  return (
-    <Card tone="glass" className="overflow-hidden bg-white/[0.76] p-5 sm:p-6">
-      <SectionHeader eyebrow={t("googleCalendarEyebrow")} title={t("googleCalendarTitle")} />
-      <p className="mt-3 max-w-2xl text-sm font-semibold leading-6 text-muted">{t("googleCalendarBody")}</p>
-      {viaSignIn ? (
-        <p className="mt-2 max-w-2xl text-xs font-bold leading-5 text-muted">{t("googleCalendarViaSignIn")}</p>
-      ) : null}
+  const body = (
+    <>
+      {embedded ? (
+        <div className="flex items-start gap-3">
+          <span className="grid size-10 shrink-0 place-items-center rounded-full bg-limepop text-ink">
+            <CalendarDays size={19} />
+          </span>
+          <div className="min-w-0">
+            <p className="text-sm font-black">{t("googleCalendarTitle")}</p>
+            <p className="mt-1 text-xs font-bold leading-5 text-muted">
+              {viaSignIn ? t("googleCalendarViaSignIn") : t("googleCalendarBody")}
+            </p>
+          </div>
+        </div>
+      ) : (
+        <>
+          <SectionHeader eyebrow={t("googleCalendarEyebrow")} title={t("googleCalendarTitle")} />
+          <p className="mt-3 max-w-2xl text-sm font-semibold leading-6 text-muted">{t("googleCalendarBody")}</p>
+          {viaSignIn ? (
+            <p className="mt-2 max-w-2xl text-xs font-bold leading-5 text-muted">{t("googleCalendarViaSignIn")}</p>
+          ) : null}
+        </>
+      )}
 
       <div className="mt-4 flex flex-wrap items-center gap-2">
         <span className={cn("inline-flex min-h-8 items-center gap-2 rounded-full px-3 text-xs font-black", statusTone)}>
           <CalendarDays size={14} />
           {statusLabel}
         </span>
-        {connected ? (
-          <span className="text-xs font-bold text-muted">{t("googleCalendarTarget").replace("{name}", "Studio Map OS")}</span>
-        ) : null}
+        <span className="text-xs font-bold text-muted">{t("googleCalendarTarget").replace("{name}", "Studio Map OS")}</span>
         {connected && settings.lastSyncAt ? (
           <span className="text-xs font-bold text-muted">
             {t("googleCalendarLastSync").replace(
@@ -266,6 +282,16 @@ export function GoogleCalendarSyncCard({ workspaceId }: GoogleCalendarSyncCardPr
 
       <p className="mt-3 text-xs font-bold leading-5 text-muted">{t("googleCalendarScopeNote")}</p>
       {error ? <p className="mt-2 text-sm font-black text-coral">{error}</p> : null}
+    </>
+  );
+
+  if (embedded) {
+    return body;
+  }
+
+  return (
+    <Card tone="glass" className="overflow-hidden bg-white/[0.76] p-5 sm:p-6">
+      {body}
     </Card>
   );
 }
