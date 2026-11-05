@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { useCloudKitAuth } from "@/components/providers/cloudkit-auth-provider";
 import { useAuth, useI18n } from "@/components/providers/app-providers";
+import { GoogleCalendarSyncCard } from "@/components/storage/google-calendar-sync-card";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { DeleteConfirmDialog } from "@/components/ui/delete-confirm-dialog";
@@ -1008,6 +1009,10 @@ export function ArchiveStorageSyncCard({ workspaceId }: ArchiveStorageSyncCardPr
                 </p>
               </div>
             ) : null}
+          </div>
+
+          <div className="border-t border-black/10 pt-4 lg:col-span-2">
+            <GoogleCalendarSyncCard workspaceId={workspaceId} embedded />
           </div>
         </div>
 
