@@ -26,6 +26,7 @@ import type {
   Tool
 } from "@/lib/types";
 import { cn } from "@/lib/utils/cn";
+import { canonicalDeviceLabel } from "@/lib/utils/device-label";
 
 type ProjectCreateModalProps = {
   companies: Company[];
@@ -80,7 +81,14 @@ export function ProjectCreateModal({ companies, groups, open, onClose, onCreated
         setPeople(nextPeople);
         setTools(nextTools);
         setDeviceOptions(
-          [...new Set(projects.map((item) => item.codingDevice?.trim()).filter((device): device is string => Boolean(device)))].sort()
+          [
+            ...new Set(
+              projects.flatMap((item) => {
+                const device = item.codingDevice?.trim();
+                return device ? [canonicalDeviceLabel(device)] : [];
+              })
+            )
+          ].sort()
         );
       }
     }
@@ -128,7 +136,7 @@ export function ProjectCreateModal({ companies, groups, open, onClose, onCreated
     const project = await projectsApi.createProject({
       ...form,
       name,
-      codingDevice: form.codingDevice?.trim() ?? "",
+      codingDevice: canonicalDeviceLabel(form.codingDevice?.trim() ?? ""),
       endDate: form.endDate >= form.startDate ? form.endDate : form.startDate,
       costTemplateIds: []
     });
@@ -236,7 +244,7 @@ export function ProjectCreateModal({ companies, groups, open, onClose, onCreated
                               onClick={() => setForm((current) => ({ ...current, codingDevice: device }))}
                               className={cn(
                                 "min-h-7 rounded-full px-3 text-xs font-black transition",
-                                (form.codingDevice ?? "").trim() === device
+                                canonicalDeviceLabel((form.codingDevice ?? "").trim()) === device
                                   ? "bg-[#112f45] text-white"
                                   : "bg-white text-ink ring-1 ring-black/[0.08] hover:bg-[#112f45] hover:text-white"
                               )}

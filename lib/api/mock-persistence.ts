@@ -55,6 +55,7 @@ import type {
   WorkspaceIntegrations
 } from "@/lib/types";
 import { synchronizeCostTemplateLinks } from "@/lib/utils/cost-template-links";
+import { canonicalDeviceLabel } from "@/lib/utils/device-label";
 import {
   isPricingTemplateLibrary,
   isQuoteLibrary,
@@ -272,7 +273,7 @@ const normalizeComfyWorkflows = (value: unknown): ComfyUiWorkflow[] =>
     ? value.filter(isComfyWorkflow).map((item) => ({
         id: item.id,
         name: item.name,
-        host: item.host,
+        host: canonicalDeviceLabel(item.host),
         content: item.content,
         ...(item.strengths ? { strengths: item.strengths } : {}),
         ...(item.weaknesses ? { weaknesses: item.weaknesses } : {}),
@@ -614,6 +615,9 @@ const normalizePersistedProject = (
 
   const normalizedProject: Project = {
     ...project,
+    ...(typeof project.codingDevice === "string"
+      ? { codingDevice: canonicalDeviceLabel(project.codingDevice) }
+      : {}),
     isExample: project.isExample ?? Boolean(seedProject && seedProject.name === project.name),
     archivedAt: project.archivedAt ?? null,
     budget: normalizeProjectBudgetForPhases(project.budget, phases, [...toolsById.values()]),

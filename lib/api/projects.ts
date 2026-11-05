@@ -17,6 +17,7 @@ import type {
   Task,
   TimelineCustomRow
 } from "@/lib/types";
+import { canonicalDeviceLabel } from "@/lib/utils/device-label";
 import {
   type ExchangeRateSnapshot,
   type MoneyCurrency
@@ -282,7 +283,7 @@ export async function createProject(input: CreateProjectInput) {
   project.startDate = input.startDate;
   project.endDate = input.endDate;
   project.description = "";
-  const codingDevice = input.codingDevice?.trim() ?? "";
+  const codingDevice = canonicalDeviceLabel((input.codingDevice ?? "").trim());
   if (codingDevice) {
     project.codingDevice = codingDevice;
   }
@@ -629,7 +630,7 @@ export async function updateProjectBasics(projectId: string, input: ProjectBasic
   project.groupId = groupId;
 
   if (input.codingDevice !== undefined) {
-    const codingDevice = input.codingDevice.trim();
+    const codingDevice = canonicalDeviceLabel(input.codingDevice.trim());
 
     if (codingDevice) {
       project.codingDevice = codingDevice;
@@ -747,13 +748,13 @@ export async function listKnownCodingDevices() {
   mockDatabase.projects.forEach((project) => {
     const device = project.codingDevice?.trim();
     if (device) {
-      devices.add(device);
+      devices.add(canonicalDeviceLabel(device));
     }
   });
   mockDatabase.comfyWorkflows.forEach((workflow) => {
     const host = workflow.host.trim();
     if (host) {
-      devices.add(host);
+      devices.add(canonicalDeviceLabel(host));
     }
   });
 
@@ -1123,6 +1124,9 @@ const normalizeImportedProject = (
       id: createImportedEntityId(projectId, archiveIdentity, "activity", event.id),
       projectId
     })),
+    ...(typeof importedProject.codingDevice === "string"
+      ? { codingDevice: canonicalDeviceLabel(importedProject.codingDevice) }
+      : {}),
     // Company placement, archive state, and public sharing remain local to the
     // receiving device. A standalone project file cannot silently move or
     // publish the target project.

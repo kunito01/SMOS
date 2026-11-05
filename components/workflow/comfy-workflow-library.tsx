@@ -10,6 +10,7 @@ import { useI18n } from "@/components/providers/app-providers";
 import { projectsApi, workflowsApi } from "@/lib/api";
 import type { ComfyUiWorkflow } from "@/lib/types";
 import { cn } from "@/lib/utils/cn";
+import { canonicalDeviceLabel } from "@/lib/utils/device-label";
 
 export function ComfyWorkflowLibrary() {
   const { t } = useI18n();
@@ -74,7 +75,7 @@ export function ComfyWorkflowLibrary() {
     try {
       const input = {
         content: contentDraft,
-        host: hostDraft,
+        host: canonicalDeviceLabel(hostDraft),
         name: nameDraft,
         strengths: strengthsDraft,
         weaknesses: weaknessesDraft,
@@ -94,7 +95,7 @@ export function ComfyWorkflowLibrary() {
 
   const startEditing = (workflow: ComfyUiWorkflow) => {
     setEditingId(workflow.id);
-    setHostDraft(workflow.host);
+    setHostDraft(canonicalDeviceLabel(workflow.host));
     setNameDraft(workflow.name);
     setContentDraft(workflow.content);
     setStrengthsDraft(workflow.strengths ?? "");
@@ -186,7 +187,7 @@ export function ComfyWorkflowLibrary() {
                       onClick={() => setHostDraft(device)}
                       className={cn(
                         "min-h-7 rounded-full px-3 text-xs font-black transition",
-                        hostDraft.trim() === device
+                        canonicalDeviceLabel(hostDraft.trim()) === device
                           ? "bg-[#112f45] text-white"
                           : "bg-white text-ink ring-1 ring-black/[0.08] hover:bg-[#112f45] hover:text-white"
                       )}
@@ -269,7 +270,7 @@ export function ComfyWorkflowLibrary() {
                   <p className="flex min-w-0 items-baseline gap-1.5">
                     <span className="min-w-0 truncate font-black">{workflow.name}</span>
                     {workflow.host ? (
-                      <span className="shrink-0 text-[10px] font-normal text-ink/40">{workflow.host}</span>
+                      <span className="shrink-0 text-[10px] font-normal text-ink/40">{canonicalDeviceLabel(workflow.host)}</span>
                     ) : null}
                     {workflow.rating ? (
                       <span

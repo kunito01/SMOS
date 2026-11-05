@@ -17,6 +17,7 @@ import {
 import type { TranslationKey } from "@/lib/i18n/translations";
 import type { Project, ProjectGroup } from "@/lib/types";
 import { projectPath } from "@/lib/utils/app-routes";
+import { canonicalDeviceLabel } from "@/lib/utils/device-label";
 import { calculateProjectProgress } from "@/lib/utils/project-progress";
 
 type ProjectCardProps = {
@@ -64,7 +65,7 @@ export function ProjectCard({ project, groups, t, href = projectPath(project.id)
             </Pill>
             {project.codingDevice ? (
               <span className="inline-flex min-h-7 max-w-36 items-center rounded-full bg-[#112f45] px-3 text-xs font-black text-white">
-                <span className="truncate">{project.codingDevice}</span>
+                <span className="truncate">{canonicalDeviceLabel(project.codingDevice)}</span>
               </span>
             ) : null}
           </span>
