@@ -90,20 +90,7 @@ export const calculateTaskCompletionProgress = (project: ProgressProject) => {
   return clampPercent((tasks.filter((task) => task.completed).length / tasks.length) * 100);
 };
 
-/**
- * Percent of the project that should fill the card bar.
- * Named tasks keep the existing checklist ratio, so a phase that is almost
- * done on its tasks still fills that share. With no named tasks, each phase
- * is weighted by its length: a completed phase counts in full, and a phase
- * that is simply nearing its end date counts for how far that window has run.
- */
-export const calculateProjectProgress = (project: ProgressProject, now = Date.now()) => {
-  const taskProgress = calculateTaskCompletionProgress(project);
-
-  if (taskProgress !== null) {
-    return taskProgress;
-  }
-
+const calculateScheduleProgress = (project: ProgressProject, now: number) => {
   const phases = project.phases ?? [];
 
   if (phases.length === 0) {
@@ -124,4 +111,21 @@ export const calculateProjectProgress = (project: ProgressProject, now = Date.no
   }
 
   return clampPercent((weighted / weightSum) * 100);
+};
+
+/**
+ * Percent of the project that should fill the card bar.
+ * When at least one named task is checked, the bar follows the checklist.
+ * Otherwise it follows the phase schedule (completed phase = full, active
+ * window = date fraction). A project that has not started stays at 0%.
+ */
+export const calculateProjectProgress = (project: ProgressProject, now = Date.now()) => {
+  const tasks = (project.phases ?? []).flatMap((phase) => titledTasks(phase));
+  const completedCount = tasks.filter((task) => task.completed).length;
+
+  if (tasks.length > 0 && completedCount > 0) {
+    return clampPercent((completedCount / tasks.length) * 100);
+  }
+
+  return calculateScheduleProgress(project, now);
 };
