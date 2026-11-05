@@ -6,7 +6,6 @@ import {
   hasGoogleAccessToken
 } from "@/lib/integrations/google-calendar";
 import {
-  forgetGoogleSignInToken,
   readGoogleSignInSettings,
   readGoogleSignInToken,
   requestGoogleSignIn,
@@ -19,8 +18,9 @@ import {
 
 /**
  * One Google session for every Google feature of a workspace that signs in
- * with Google: the sign-in token is handed to Drive storage and Calendar push,
- * so a single popup (and, after the hourly expiry, a single click) covers all.
+ * with Google: the sign-in token is handed to Drive storage and Calendar push.
+ * After the hourly expiry a silent refresh covers all of them; a popup is
+ * only needed when Google itself rejects the grant.
  *
  * Drive verifies which Google account a token belongs to; Calendar only ever
  * takes a token that Drive accepted for this workspace, so a popup that picked
@@ -68,9 +68,12 @@ export const adoptVerifiedSignInTokenForCalendar = (workspaceId: string) => {
  * so no caller goes on to request another token outside the click.
  */
 export const reconnectGoogleServices = async (workspaceId: string) => {
-  // A fresh token every time: the cached one may be the very token Google
-  // just rejected.
-  forgetGoogleSignInToken();
-  const token = await requestGoogleSignIn({ clientId: googleSignInClientId(), mode: "interactive" });
+  // Ask for a fresh token, but keep the previous one until Google actually
+  // grants a replacement. A timed-out popup must not wipe a still-valid session.
+  const token = await requestGoogleSignIn({
+    clientId: googleSignInClientId(),
+    mode: "interactive",
+    ignoreCache: true
+  });
   return adoptGoogleSignInTokenForWorkspace(workspaceId, token);
 };

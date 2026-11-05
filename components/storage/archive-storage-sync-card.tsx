@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -118,13 +118,25 @@ export function ArchiveStorageSyncCard({ workspaceId }: ArchiveStorageSyncCardPr
     return subscribeGoogleDriveStatus(refreshDrive);
   }, [refreshDrive]);
 
-  // Google tokens live about an hour and cannot be refreshed silently. Flip
-  // the card to "reconnect" the moment the cached one lapses, so the Sync
-  // button never surprises the user with a popup it did not announce.
+  // Google tokens live about an hour. Try a silent refresh before showing
+  // "reconnect", and flip the card once the cached one actually lapses.
+  const silentDriveRefreshAttempted = useRef(false);
   useEffect(() => {
     if (!driveHasToken) {
+      if (silentDriveRefreshAttempted.current) {
+        return;
+      }
+      silentDriveRefreshAttempted.current = true;
+      const settings = readGoogleDriveSettings(workspaceId);
+      if (!settings.clientId || (!settings.consentGranted && !settings.connectedAt)) {
+        return;
+      }
+      void requestGoogleDriveAccessToken(workspaceId, "silent")
+        .then(() => refreshDrive())
+        .catch(() => refreshDrive());
       return;
     }
+    silentDriveRefreshAttempted.current = false;
     const usableUntil = getGoogleDriveTokenUsableUntil(workspaceId);
     if (usableUntil === null) {
       refreshDrive();

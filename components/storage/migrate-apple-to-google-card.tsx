@@ -146,7 +146,7 @@ export function MigrateAppleToGoogleCard({ workspaceId, recoveryKeyReady }: Migr
     rememberGoogleClientId(clientId);
 
     // The popup needs the click's user gesture: request the token before any await.
-    const tokenRequest = requestGoogleSignIn({ clientId, mode: "interactive" });
+    const tokenRequest = requestGoogleSignIn({ clientId, mode: "interactive", ignoreCache: true });
 
     void (async () => {
       try {
@@ -160,11 +160,15 @@ export function MigrateAppleToGoogleCard({ workspaceId, recoveryKeyReady }: Migr
           window.location.reload();
         }
       } catch (caught) {
-        // A failed switch must not leave a Drive-capable token behind; the
-        // next attempt opens Google's chooser again.
-        forgetGoogleSignInToken();
+        // The next click asks Google again (`ignoreCache`). A timeout must
+        // not also delete the token the user already had.
+        if (caught instanceof GoogleAuthError && !caught.transient) {
+          forgetGoogleSignInToken();
+        }
         if (caught instanceof GoogleAuthError) {
-          setError(t("loginGoogleCancelled"));
+          setError(
+            caught.transient ? `${t("migrateGoogleFailed")} (${caught.message})` : t("loginGoogleCancelled")
+          );
         } else if (caught instanceof LocalAuthError) {
           setError(`${t("migrateGoogleFailed")} (${caught.message})`);
         } else {

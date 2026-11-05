@@ -6,6 +6,7 @@ import {
   googleFetch,
   googleTokenUsableUntil,
   readGoogleToken,
+  readGoogleTokenAllowingNearExpiry,
   requestGoogleToken,
   revokeGoogleToken,
   writeGoogleToken,
@@ -207,7 +208,8 @@ const verifiedTokens = new Map<string, string>();
 
 export const requestGoogleDriveAccessToken = async (
   workspaceId: string,
-  mode: "interactive" | "silent"
+  mode: "interactive" | "silent",
+  options: { ignoreCache?: boolean; allowStaleOnFailure?: boolean } = {}
 ): Promise<GoogleStoredToken> => {
   const settings = readGoogleDriveSettings(workspaceId);
   let token: GoogleStoredToken;
@@ -217,20 +219,61 @@ export const requestGoogleDriveAccessToken = async (
       clientId: settings.clientId,
       scope: GOOGLE_DRIVE_SCOPE,
       mode,
-      consentGranted: settings.consentGranted,
+      consentGranted: settings.consentGranted || Boolean(settings.connectedAt),
       hint: settings.accountEmail || undefined,
+      ignoreCache: options.ignoreCache,
+      allowStaleOnFailure: options.allowStaleOnFailure,
       onGranted: () => {
         writeGoogleDriveSettings(workspaceId, { consentGranted: true });
       }
     });
   } catch (error) {
     if (error instanceof GoogleAuthError) {
-      throw authRequired(error.message, error);
+      // A timeout or a script failure is not a sign-out. The cached token,
+      // when one still exists, stays where it is.
+      throw new CloudProviderError(
+        "gdrive",
+        error.transient ? "REQUEST_FAILED" : "AUTH_REQUIRED",
+        error.message,
+        { cause: error }
+      );
     }
     throw error;
   }
   await verifyTokenAccount(workspaceId, token);
   return token;
+};
+
+/**
+ * Token for an upload or download. Refreshes silently when the cached token
+ * is missing or inside `minLifetimeMs` of expiry. A still-valid token is
+ * reused when the refresh itself times out, so a network blip does not look
+ * like a signed-out session.
+ */
+export const ensureGoogleDriveAccessToken = async (
+  workspaceId: string,
+  options: { minLifetimeMs?: number } = {}
+): Promise<GoogleStoredToken> => {
+  const minLifetimeMs = options.minLifetimeMs ?? 0;
+  const current = readGoogleTokenAllowingNearExpiry(tokenKey(workspaceId));
+  const fresh = readGoogleToken(tokenKey(workspaceId));
+  const lifetime = current ? current.expiresAt - Date.now() : 0;
+  if (fresh && lifetime >= minLifetimeMs) {
+    return fresh;
+  }
+  try {
+    return await requestGoogleDriveAccessToken(workspaceId, "silent", {
+      ignoreCache: true,
+      allowStaleOnFailure: false
+    });
+  } catch (error) {
+    // Google asked for a click, or the refresh timed out, but the current
+    // token has not actually expired. Keep using it instead of signing out.
+    if (current && lifetime > 30_000 && !(error instanceof GoogleApiError && error.status === 401)) {
+      return current;
+    }
+    throw error;
+  }
 };
 
 /**
@@ -333,21 +376,58 @@ const fetchGoogleDriveAccount = async (token: GoogleStoredToken) => {
  * Silent identity lookup for the coordinator: null when this device has no
  * usable token; otherwise the connected account (fetched once, then cached).
  */
+const rejectedDriveToken = (error: unknown) =>
+  error instanceof GoogleApiError && error.status === 401;
+
+/**
+ * Silent identity lookup for the coordinator. A missing or rejected token is
+ * refreshed without a popup first. Null means Google actually needs a click.
+ * A timeout throws REQUEST_FAILED and leaves the cached token in place.
+ */
 export const getGoogleDriveIdentity = async (
   workspaceId: string
 ): Promise<GoogleDriveIdentity | null> => {
-  const token = readGoogleToken(tokenKey(workspaceId));
+  const token = readGoogleToken(tokenKey(workspaceId)) ?? readGoogleTokenAllowingNearExpiry(tokenKey(workspaceId));
   if (!token) {
-    return null;
+    try {
+      await requestGoogleDriveAccessToken(workspaceId, "silent", { allowStaleOnFailure: false });
+    } catch (error) {
+      if (error instanceof CloudProviderError && error.code !== "AUTH_REQUIRED") {
+        throw error;
+      }
+      if (rejectedDriveToken(error)) {
+        forgetGoogleDriveAccessToken(workspaceId);
+        return null;
+      }
+      if (error instanceof GoogleApiError) {
+        throw error;
+      }
+      return null;
+    }
+    return toIdentity(readGoogleDriveSettings(workspaceId));
   }
   try {
     await verifyTokenAccount(workspaceId, token);
   } catch (error) {
-    if (error instanceof GoogleApiError && error.status === 401) {
+    if (!rejectedDriveToken(error)) {
+      throw error;
+    }
+    try {
+      await requestGoogleDriveAccessToken(workspaceId, "silent", {
+        ignoreCache: true,
+        allowStaleOnFailure: false
+      });
+    } catch (refreshError) {
+      if (refreshError instanceof CloudProviderError && refreshError.code !== "AUTH_REQUIRED") {
+        throw refreshError;
+      }
+      if (refreshError instanceof GoogleApiError && !rejectedDriveToken(refreshError)) {
+        throw refreshError;
+      }
       forgetGoogleDriveAccessToken(workspaceId);
       return null;
     }
-    throw error;
+    return toIdentity(readGoogleDriveSettings(workspaceId));
   }
   return toIdentity(readGoogleDriveSettings(workspaceId));
 };

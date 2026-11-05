@@ -3,8 +3,9 @@
 import { GoogleApiError, describeGoogleErrorResponse, googleFetch } from "@/lib/integrations/google-auth";
 import { CloudProviderError } from "@/lib/storage/cloud-provider-error";
 import {
+  ensureGoogleDriveAccessToken,
   forgetGoogleDriveAccessToken,
-  requireGoogleDriveAccessToken
+  requestGoogleDriveAccessToken
 } from "@/lib/storage/google-drive/google-drive-client";
 import {
   parseEncryptedWorkspaceBundleSnapshot,
@@ -114,13 +115,14 @@ const workspaceFileName = async (workspaceId: string) =>
 const revisionTag = (file: DriveFile) => `${file.id}:${file.version ?? ""}`;
 
 /** Maps Google's HTTP answers onto the shared provider error codes. */
-const translateApiError = (error: unknown, workspaceId: string): never => {
+const translateApiError = (error: unknown): never => {
   if (error instanceof CloudProviderError) {
     throw error;
   }
   if (error instanceof GoogleApiError) {
     if (error.status === 401) {
-      forgetGoogleDriveAccessToken(workspaceId);
+      // Leave the cached token for a silent refresh. Forgetting it here made a
+      // single 401 — including a gateway timeout — look like a signed-out session.
       throw providerError("AUTH_REQUIRED", `Google sign-in expired (${error.message})`, error);
     }
     if (error.status === 403 && /storageQuotaExceeded|quotaExceeded/i.test(error.reason)) {
@@ -204,11 +206,40 @@ const assertFileMetadata = async (file: DriveFile, workspaceId: string) => {
   return props.smosSha256 as string;
 };
 
+/** One silent refresh after Google rejected the token. A timeout keeps the cache. */
+const refreshDriveTokenAfterRejection = async (workspaceId: string) => {
+  try {
+    await requestGoogleDriveAccessToken(workspaceId, "silent", {
+      ignoreCache: true,
+      allowStaleOnFailure: false
+    });
+  } catch (error) {
+    if (
+      error instanceof CloudProviderError &&
+      (error.code === "REQUEST_FAILED" || error.code === "ACCOUNT_MISMATCH" || error.code === "AUTH_REQUIRED")
+    ) {
+      if (error.code === "AUTH_REQUIRED") {
+        forgetGoogleDriveAccessToken(workspaceId);
+      }
+      throw error;
+    }
+    forgetGoogleDriveAccessToken(workspaceId);
+    throw providerError(
+      "AUTH_REQUIRED",
+      error instanceof Error ? `Google sign-in expired (${error.message})` : "Google sign-in expired",
+      error
+    );
+  }
+};
+
 export async function downloadEncryptedWorkspaceBundleFromGoogleDrive(
   workspaceIdInput: string
 ): Promise<GoogleDriveWorkspaceDownload | null> {
   const workspaceId = validateWorkspaceId(workspaceIdInput);
-  const token = requireGoogleDriveAccessToken(workspaceId).accessToken;
+  let refreshed = false;
+
+  while (true) {
+  const token = (await ensureGoogleDriveAccessToken(workspaceId)).accessToken;
 
   try {
     const file = await findWorkspaceFile(token, workspaceId);
@@ -284,7 +315,13 @@ export async function downloadEncryptedWorkspaceBundleFromGoogleDrive(
       })
     };
   } catch (error) {
-    return translateApiError(error, workspaceId);
+    if (!refreshed && error instanceof GoogleApiError && error.status === 401) {
+      refreshed = true;
+      await refreshDriveTokenAfterRejection(workspaceId);
+      continue;
+    }
+    return translateApiError(error);
+  }
   }
 }
 
@@ -458,13 +495,17 @@ export async function uploadEncryptedWorkspaceBundleToGoogleDrive(
     throw providerError("INVALID_REMOTE_DATA", "An empty workspace bundle cannot be uploaded to Google Drive.");
   }
   const workspaceId = snapshot.workspaceId;
-  const tokenRecord = requireGoogleDriveAccessToken(workspaceId);
-  if (tokenRecord.expiresAt - Date.now() < MIN_TOKEN_LIFETIME_FOR_UPLOAD_MS) {
-    // Ask for a fresh token before streaming megabytes that would be cut off
-    // by expiry halfway through.
-    throw providerError("AUTH_REQUIRED", "Google sign-in is about to expire; reconnect before uploading.");
-  }
-  const token = tokenRecord.accessToken;
+  let refreshed = false;
+
+  while (true) {
+  // A token inside the last few minutes is refreshed silently. The upload
+  // still runs on the current token when that refresh times out, instead of
+  // telling the user they have to sign in again.
+  const token = (
+    await ensureGoogleDriveAccessToken(workspaceId, {
+      minLifetimeMs: MIN_TOKEN_LIFETIME_FOR_UPLOAD_MS
+    })
+  ).accessToken;
 
   try {
     const existing = await findWorkspaceFile(token, workspaceId);
@@ -564,6 +605,12 @@ export async function uploadEncryptedWorkspaceBundleToGoogleDrive(
       })
     };
   } catch (error) {
-    return translateApiError(error, workspaceId);
+    if (!refreshed && error instanceof GoogleApiError && error.status === 401) {
+      refreshed = true;
+      await refreshDriveTokenAfterRejection(workspaceId);
+      continue;
+    }
+    return translateApiError(error);
+  }
   }
 }

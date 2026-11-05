@@ -241,7 +241,30 @@ export function CloudKitAuthProvider({
 
     const listenForSignOut = () => {
       void whenCloudKitUserSignsOut()
-        .then(() => {
+        .then(async () => {
+          if (!active) {
+            return;
+          }
+          // CloudKit JS treats a legacy 421 and a dropped request as sign-out.
+          // Confirm against the REST session before clearing the app session,
+          // and keep it when Apple cannot be reached: a timeout must not drop
+          // a Google login or the edits still in memory.
+          try {
+            const identity = await setUpCloudKitAuth({ force: true });
+            if (!active) {
+              return;
+            }
+            if (identity) {
+              acceptSignedIn(identity);
+              scheduleListener(listenForSignOut, 0);
+              return;
+            }
+          } catch {
+            if (active) {
+              scheduleListener(listenForSignOut, 1000);
+            }
+            return;
+          }
           if (active) {
             acceptSignedOut();
             scheduleListener(listenForSignOut, 0);

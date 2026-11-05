@@ -110,6 +110,13 @@ const createDefaultPreference = (workspaceIdInput: string): WorkspaceStoragePref
   };
 };
 
+const optionalText = (value: unknown) => (typeof value === "string" ? value : null);
+
+/**
+ * A record that names a provider is kept even when a field is missing or
+ * stale. Dropping it used to make the next status write persist the IndexedDB
+ * default, so a Google Drive workspace flipped to local storage on its own.
+ */
 const parsePreference = (
   value: unknown,
   expectedWorkspaceId: string
@@ -117,22 +124,14 @@ const parsePreference = (
   if (
     !isRecord(value) ||
     value.workspaceId !== expectedWorkspaceId ||
-    !isStorageProvider(value.provider) ||
-    typeof value.status !== "string" ||
-    !syncStatuses.has(value.status as WorkspaceSyncStatus) ||
-    typeof value.pendingUpload !== "boolean" ||
-    (value.lastSyncAt !== null && !isCanonicalIsoDate(value.lastSyncAt)) ||
-    (value.lastError !== null && typeof value.lastError !== "string") ||
-    (value.cloudKitUserRecordName !== null &&
-      typeof value.cloudKitUserRecordName !== "string") ||
-    (value.cloudManifestChangeTag !== null &&
-      typeof value.cloudManifestChangeTag !== "string") ||
-    !isCanonicalIsoDate(value.updatedAt)
+    !isStorageProvider(value.provider)
   ) {
     return null;
   }
 
-  const status = value.status as WorkspaceSyncStatus;
+  const status = syncStatuses.has(value.status as WorkspaceSyncStatus)
+    ? (value.status as WorkspaceSyncStatus)
+    : "pending";
 
   return {
     workspaceId: expectedWorkspaceId,
@@ -140,12 +139,12 @@ const parsePreference = (
     // A browser may close while a sync is in flight. Resume it as pending on
     // the next launch instead of presenting a permanently stuck state.
     status: status === "syncing" ? "pending" : status,
-    lastSyncAt: value.lastSyncAt as string | null,
-    pendingUpload: value.pendingUpload,
-    lastError: value.lastError as string | null,
-    cloudKitUserRecordName: value.cloudKitUserRecordName as string | null,
-    cloudManifestChangeTag: value.cloudManifestChangeTag as string | null,
-    updatedAt: value.updatedAt
+    lastSyncAt: isCanonicalIsoDate(value.lastSyncAt) ? value.lastSyncAt : null,
+    pendingUpload: value.pendingUpload === true,
+    lastError: typeof value.lastError === "string" ? value.lastError : null,
+    cloudKitUserRecordName: optionalText(value.cloudKitUserRecordName),
+    cloudManifestChangeTag: optionalText(value.cloudManifestChangeTag),
+    updatedAt: isCanonicalIsoDate(value.updatedAt) ? value.updatedAt : new Date(0).toISOString()
   };
 };
 
