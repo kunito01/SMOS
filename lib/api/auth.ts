@@ -94,6 +94,8 @@ import { isWorkspaceSyncConflictError } from "@/lib/storage/workspace-write-guar
 import {
   disconnectGoogleDriveAccount,
   forgetGoogleDriveAccessToken,
+  isGoogleDriveConnected,
+  readGoogleDriveSettings,
   requireGoogleDriveAccessToken,
   seedGoogleDriveConnection
 } from "@/lib/storage/google-drive/google-drive-client";
@@ -117,6 +119,7 @@ import {
   resolveGoogleClientId,
   type GoogleUserInfo
 } from "@/lib/integrations/google-signin";
+import { bindGoogleCalendarFromSignIn, bindGoogleServicesFromSignIn } from "@/lib/integrations/google-services";
 import {
   GOOGLE_ACCOUNT_PROFILE_SCHEMA,
   googleAccountOwnerDigest,
@@ -2858,6 +2861,9 @@ const activateGoogleAccountSession = async (input: {
     // reports the sync state). Only a token for a different account than the
     // one this workspace is bound to is a hard stop.
     try {
+      // Drive is verified before the workspace opens. Calendar is bound after
+      // the encrypted database is active, further down, so a timeout here
+      // still lets the workspace open and does not drop an existing binding.
       await seedGoogleDriveConnection(workspace.workspaceId, token, clientId);
       seeded = true;
     } catch (error) {
@@ -2937,6 +2943,13 @@ const activateGoogleAccountSession = async (input: {
     markGoogleSignedIn({ email: account.email, displayName: account.name });
     rememberLastEmail(account.email);
     void requestPersistentBrowserStorage();
+    if (seeded || isGoogleDriveConnected(readGoogleDriveSettings(workspace.workspaceId))) {
+      try {
+        await bindGoogleCalendarFromSignIn(workspace.workspaceId, token);
+      } catch {
+        // Calendar retries on the next launch. A timeout must not sign the user out.
+      }
+    }
     return user;
   } catch (error) {
     const openSession = activeSession;
@@ -3210,7 +3223,7 @@ async function unlockGoogleAccountLocallyUnlocked(options: {
     const session = activeSession;
     let replaced = false;
     try {
-      await seedGoogleDriveConnection(
+      await bindGoogleServicesFromSignIn(
         workspace.workspaceId,
         token,
         settings.clientId || resolveGoogleClientId()
@@ -3305,6 +3318,13 @@ async function migrateAppleAccountToGoogleUnlocked(
   // The popup may have picked a different Google account than the one this
   // workspace's Drive copy belongs to; that is refused before any write.
   await seedGoogleDriveConnection(workspaceId, payload.token, payload.clientId);
+  try {
+    // Calendar uses the same sign-in. A timeout here must not undo the Drive
+    // connection this migration already verified.
+    await bindGoogleCalendarFromSignIn(workspaceId, payload.token);
+  } catch {
+    // The Drive copy is what migration requires; Calendar retries on the next launch.
+  }
   // One Google identity owns one workspace, in Drive as on the device. A
   // profile that never became ready elsewhere is an abandoned attempt.
   const ownedProfiles = (await listGoogleAccountProfiles(payload.token.accessToken)).filter(

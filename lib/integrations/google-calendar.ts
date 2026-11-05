@@ -5,7 +5,7 @@ import { getActiveMockDatabaseWorkspaceId } from "@/lib/api/mock-persistence";
 import {
   GOOGLE_CALENDAR_SCOPE,
   GoogleAuthError,
-  googleTokenHasScope,
+  googleTokenOmitsScope,
   preloadGoogleIdentity,
   readGoogleToken,
   requestGoogleToken,
@@ -30,6 +30,7 @@ import {
 export { preloadGoogleIdentity, GoogleAuthError as GoogleCalendarAuthError };
 import type { Project } from "@/lib/types";
 import { projectPath, withBasePath } from "@/lib/utils/app-routes";
+import { isWorkspaceSyncConflictError } from "@/lib/storage/workspace-write-guard";
 
 /**
  * Google Calendar direct push.
@@ -276,6 +277,22 @@ const ensureGoogleCalendar = async (token: string, existingCalendarId: string) =
   return created.id;
 };
 
+const isTransientCalendarFailure = (error: unknown) => {
+  if (error instanceof GoogleAuthError) {
+    return error.transient;
+  }
+  if (error instanceof TypeError) {
+    return true;
+  }
+  if (error && typeof error === "object" && "status" in error) {
+    const status = (error as { status?: unknown }).status;
+    if (typeof status === "number" && (status === 0 || status === 429 || status >= 500)) {
+      return true;
+    }
+  }
+  return error instanceof Error && /timed out|timeout|network|failed to fetch|offline/i.test(error.message);
+};
+
 /**
  * Resolves the calendar for this workspace + client: the synced workspace
  * binding wins, a pre-binding device-local id is migrated into it, and only
@@ -283,26 +300,37 @@ const ensureGoogleCalendar = async (token: string, existingCalendarId: string) =
  */
 const resolveCalendarBinding = async (workspaceId: string, clientId: string, token: string) => {
   const settings = readGoogleCalendarSettings(workspaceId);
+  if (settings.pushDisabled) {
+    return { calendarId: settings.calendarId, calendarChanged: false };
+  }
   const link = await integrationsApi.getGoogleCalendarLink(clientId);
   const candidate = link?.calendarId || settings.calendarId;
   const calendarId = await ensureGoogleCalendar(token, candidate);
-  if (calendarId !== settings.calendarId) {
-    // Remember the calendar before the workspace binding is saved: if saving
-    // is refused (a storage conflict blocks writes), the next attempt reuses
-    // this calendar instead of creating yet another one.
-    writeGoogleCalendarSettings(workspaceId, { calendarId });
+  // The user may have turned push off while the calendar request was in flight.
+  if (readGoogleCalendarSettings(workspaceId).pushDisabled) {
+    return { calendarId: settings.calendarId, calendarChanged: false };
   }
   const connectedAt = link?.connectedAt || settings.connectedAt || new Date().toISOString();
-
-  if (!link || link.calendarId !== calendarId) {
-    await integrationsApi.setGoogleCalendarLink(clientId, { calendarId, connectedAt });
-  }
   const calendarChanged = settings.calendarId !== calendarId;
+  // The device binding is written before the workspace link. A timeout or a
+  // storage conflict must not leave Calendar looking disconnected after the
+  // calendar itself exists, and the saved id is reused instead of creating
+  // another one.
   writeGoogleCalendarSettings(workspaceId, {
     calendarId,
     connectedAt,
     ...(calendarChanged ? { syncedEvents: {} } : {})
   });
+
+  if (!link || link.calendarId !== calendarId) {
+    try {
+      await integrationsApi.setGoogleCalendarLink(clientId, { calendarId, connectedAt });
+    } catch (error) {
+      if (!isWorkspaceSyncConflictError(error) && !isTransientCalendarFailure(error)) {
+        throw error;
+      }
+    }
+  }
   return { calendarId, calendarChanged };
 };
 
@@ -684,7 +712,9 @@ export const adoptGoogleSignInTokenForCalendar = (
   workspaceId: string,
   token: GoogleStoredToken | null = readGoogleSignInToken()
 ) => {
-  if (!token || !googleTokenHasScope(token, GOOGLE_CALENDAR_SCOPE)) {
+  // A scope string that leaves Calendar out is a refusal. A token with no
+  // scope field is an older grant: try it, and let the API answer.
+  if (!token || googleTokenOmitsScope(token, GOOGLE_CALENDAR_SCOPE)) {
     return hasGoogleAccessToken(workspaceId);
   }
   const current = readToken(workspaceId);
@@ -703,6 +733,41 @@ export const adoptGoogleSignInTokenForCalendar = (
 /** Turns Calendar push back on after the user switched it off. */
 export const enableGoogleCalendarPush = (workspaceId: string) =>
   writeGoogleCalendarSettings(workspaceId, { pushDisabled: false });
+
+/**
+ * Connects Calendar from the Google sign-in token and remembers that binding
+ * on this device. A timeout keeps whatever was already stored. When the user
+ * has turned push off, this does not turn it back on.
+ */
+export const bindGoogleCalendarFromSignIn = async (workspaceId: string, token: GoogleStoredToken) => {
+  const settings = readGoogleCalendarSettings(workspaceId);
+  if (settings.pushDisabled || googleTokenOmitsScope(token, GOOGLE_CALENDAR_SCOPE)) {
+    return isGoogleCalendarConnected(settings);
+  }
+  adoptGoogleSignInTokenForCalendar(workspaceId, token);
+  const notify = () => {
+    if (getGoogleCalendarStatus().state !== "syncing") {
+      publishStatus({ state: "idle" });
+    }
+  };
+  if (isGoogleCalendarConnected(readGoogleCalendarSettings(workspaceId))) {
+    notify();
+    return true;
+  }
+  const clientId = readGoogleCalendarSettings(workspaceId).clientId;
+  if (!clientId) {
+    return false;
+  }
+  try {
+    await resolveCalendarBinding(workspaceId, clientId, token.accessToken);
+  } catch {
+    // Keep the stored binding. A timeout must not disconnect Calendar, and a
+    // refused scope must not fail the Google sign-in around this call.
+  }
+  const connected = isGoogleCalendarConnected(readGoogleCalendarSettings(workspaceId));
+  notify();
+  return connected;
+};
 
 /**
  * Turns Calendar push off for an account that signs in with Google. The OAuth

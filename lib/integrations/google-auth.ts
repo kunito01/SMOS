@@ -41,6 +41,14 @@ export const GOOGLE_CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.a
 export const googleTokenHasScope = (token: GoogleStoredToken, scope: string) =>
   typeof token.scope === "string" && token.scope.split(/\s+/).includes(scope);
 
+/**
+ * Whether Google's scope string explicitly leaves this scope out.
+ * A token with no scope field is unknown, not a refusal: callers try the API
+ * instead of forcing another consent screen.
+ */
+export const googleTokenOmitsScope = (token: GoogleStoredToken, scope: string) =>
+  typeof token.scope === "string" && !token.scope.split(/\s+/).includes(scope);
+
 type TokenResponse = {
   access_token?: string;
   expires_in?: number;
@@ -213,6 +221,12 @@ export type GoogleTokenRequest = {
    * expired. Set false after Google has already rejected that token.
    */
   allowStaleOnFailure?: boolean;
+  /**
+   * Scopes an interactive sign-in must actually grant. When the grant comes
+   * back without one of them, one consent prompt asks for the full set before
+   * this sign-in resolves. Silent refresh never prompts.
+   */
+  ensureScopes?: readonly string[];
 };
 
 const storeGrantedToken = (request: GoogleTokenRequest, response: TokenResponse): GoogleStoredToken => {
@@ -266,32 +280,82 @@ const requestTokenFromGis = async (
         fn();
       }
     };
-    const timeout = window.setTimeout(
-      () => settle(() => reject(new GoogleAuthError("Google sign-in timed out", true, true))),
-      timeoutMs
-    );
+    // A follow-up consent keeps the first grant when the user dismisses it,
+    // so sign-in itself still succeeds and only the omitted service stays off.
+    let granted: GoogleStoredToken | null = null;
+    let askedForMissingScopes = prompt === "consent";
+    let followUpStarted = false;
+    let timer = 0;
+    const finishFailure = (error: unknown) => {
+      const kept =
+        granted ??
+        (followUpStarted ? readGoogleTokenAllowingNearExpiry(request.storageKey) : null);
+      if (kept) {
+        settle(() => resolve(kept));
+        return;
+      }
+      settle(() => reject(error));
+    };
+    const armTimeout = () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(
+        () => finishFailure(new GoogleAuthError("Google sign-in timed out", true, true)),
+        timeoutMs
+      );
+    };
+    const missingEnsuredScope = (token: GoogleStoredToken) =>
+      request.mode === "interactive" &&
+      (request.ensureScopes ?? []).some((scope) => googleTokenOmitsScope(token, scope));
+    const accessTokenRequest = (nextPrompt: string) => ({
+      prompt: nextPrompt,
+      ...(request.hint ? { login_hint: request.hint } : {})
+    });
+    const beginScopeConsent = (tokenClient: { requestAccessToken: (overrides?: { prompt?: string; login_hint?: string }) => void }) => {
+      askedForMissingScopes = true;
+      followUpStarted = true;
+      armTimeout();
+      try {
+        tokenClient.requestAccessToken(accessTokenRequest("consent"));
+      } catch (error) {
+        finishFailure(error);
+      }
+    };
+    armTimeout();
     const client = oauth2.initTokenClient({
       client_id: request.clientId.trim(),
       scope: request.scope,
       callback: (response) => {
-        window.clearTimeout(timeout);
+        window.clearTimeout(timer);
         try {
           const token = storeGrantedToken(request, response);
+          granted = token;
+          if (missingEnsuredScope(token) && !askedForMissingScopes) {
+            // Still this sign-in: one consent for a scope the grant left out.
+            beginScopeConsent(client);
+            return;
+          }
           settle(() => resolve(token));
         } catch (error) {
-          settle(() => reject(error));
+          finishFailure(error);
         }
       },
       error_callback: (error) => {
-        window.clearTimeout(timeout);
+        window.clearTimeout(timer);
         const message = error?.message ?? error?.type ?? "Google sign-in failed";
-        settle(() => reject(new GoogleAuthError(message, true, gisFailureIsTransient(message))));
+        const transient = gisFailureIsTransient(message);
+        if (
+          !askedForMissingScopes &&
+          request.mode === "interactive" &&
+          (request.ensureScopes?.length ?? 0) > 0 &&
+          !transient
+        ) {
+          beginScopeConsent(client);
+          return;
+        }
+        finishFailure(new GoogleAuthError(message, true, transient));
       }
     });
-    client.requestAccessToken({
-      prompt,
-      ...(request.hint ? { login_hint: request.hint } : {})
-    });
+    client.requestAccessToken(accessTokenRequest(prompt));
   });
 };
 
@@ -304,10 +368,22 @@ const requestTokenFromGis = async (
  * which must run inside a user gesture; only the very first connection shows
  * the consent screen.
  */
+const interactiveGrantOmitsScope = (request: GoogleTokenRequest) => {
+  if (request.mode !== "interactive" || !(request.ensureScopes?.length ?? 0)) {
+    return false;
+  }
+  const cached = readGoogleTokenAllowingNearExpiry(request.storageKey);
+  return Boolean(
+    cached && (request.ensureScopes ?? []).some((scope) => googleTokenOmitsScope(cached, scope))
+  );
+};
+
 export const requestGoogleToken = async (request: GoogleTokenRequest): Promise<GoogleStoredToken> => {
   if (!request.ignoreCache) {
     const cached = readGoogleToken(request.storageKey);
-    if (cached) {
+    // An interactive sign-in whose cached grant left out a required scope must
+    // ask again. Reusing that token would leave Drive or Calendar unbound.
+    if (cached && !interactiveGrantOmitsScope(request)) {
       return cached;
     }
   }
@@ -345,6 +421,9 @@ export const requestGoogleToken = async (request: GoogleTokenRequest): Promise<G
     }
   }
 
+  // A cached grant that left a scope out still starts with prompt "" when this
+  // device already consented. The callback asks once, with consent, for the
+  // missing scope. Dismissing that prompt keeps the grant we already have.
   return requestTokenFromGis(
     request,
     request.consentGranted ? "" : "consent",

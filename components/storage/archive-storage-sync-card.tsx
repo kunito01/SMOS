@@ -23,9 +23,10 @@ import { SectionHeader } from "@/components/ui/section-header";
 import { useCloudKitAccountDisplay } from "@/components/storage/use-cloudkit-account-display";
 import { authApi } from "@/lib/api";
 import { isAppleSignInEnabled } from "@/lib/auth/sign-in-options";
-import { reconnectGoogleServices } from "@/lib/integrations/google-services";
+import { bindGoogleServicesFromSignIn, reconnectGoogleServices } from "@/lib/integrations/google-services";
+import { readGoogleSignInToken } from "@/lib/integrations/google-signin";
 import { formatLocalizedDate } from "@/lib/i18n/formatters";
-import { preloadGoogleIdentity } from "@/lib/integrations/google-auth";
+import { googleTokenOmitsScope, preloadGoogleIdentity } from "@/lib/integrations/google-auth";
 import {
   CLOUDKIT_SIGN_IN_BUTTON_ID,
   CLOUDKIT_SIGN_OUT_BUTTON_ID
@@ -33,6 +34,7 @@ import {
 import {
   connectGoogleDriveAccount,
   getGoogleDriveTokenUsableUntil,
+  GOOGLE_DRIVE_SCOPE,
   hasGoogleDriveAccessToken,
   isGoogleDriveConnected,
   readGoogleDriveSettings,
@@ -104,6 +106,7 @@ export function ArchiveStorageSyncCard({ workspaceId }: ArchiveStorageSyncCardPr
   const [driveClientIdDraft, setDriveClientIdDraft] = useState(
     () => readGoogleDriveSettings(workspaceId).clientId
   );
+  const [driveBindPending, setDriveBindPending] = useState(false);
   const refreshDrive = useCallback(() => {
     const next = readGoogleDriveSettings(workspaceId);
     setDrive(next);
@@ -273,14 +276,46 @@ export function ArchiveStorageSyncCard({ workspaceId }: ArchiveStorageSyncCardPr
   const ensureDriveToken = useCallback(async () => {
     if (!hasGoogleDriveAccessToken(workspaceId)) {
       if (signsInWithGoogle) {
-        // One popup refreshes Drive and Calendar together.
-        await reconnectGoogleServices(workspaceId);
+        const token = readGoogleSignInToken();
+        if (token && !googleTokenOmitsScope(token, GOOGLE_DRIVE_SCOPE)) {
+          // The sign-in token already covers Drive. A timeout retries that
+          // token instead of opening another Google prompt.
+          await bindGoogleServicesFromSignIn(workspaceId, token);
+        } else {
+          // One popup refreshes Drive and Calendar together.
+          await reconnectGoogleServices(workspaceId);
+        }
       } else {
         await requestGoogleDriveAccessToken(workspaceId, "interactive");
       }
     }
     refreshDrive();
   }, [refreshDrive, signsInWithGoogle, workspaceId]);
+
+  // A Google account does not connect Drive on its own. Retry the sign-in
+  // token while the session is still valid; this effect never opens a popup.
+  useEffect(() => {
+    if (!signsInWithGoogle || driveConnected) {
+      return;
+    }
+    const token = readGoogleSignInToken();
+    if (!token || googleTokenOmitsScope(token, GOOGLE_DRIVE_SCOPE)) {
+      return;
+    }
+    let cancelled = false;
+    setDriveBindPending(true);
+    void bindGoogleServicesFromSignIn(workspaceId, token)
+      .catch(() => undefined)
+      .finally(() => {
+        if (!cancelled) {
+          setDriveBindPending(false);
+          refreshDrive();
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [driveConnected, refreshDrive, signsInWithGoogle, workspaceId]);
 
   const switchProvider = useCallback(
     async (target: WorkspaceStorageProvider) => {
@@ -829,6 +864,21 @@ export function ArchiveStorageSyncCard({ workspaceId }: ArchiveStorageSyncCardPr
                   <p className="mt-3 rounded-studio bg-limepop/45 p-2 text-[0.68rem] font-bold leading-5 text-ink">
                     {t("storageGoogleDriveConfirmChoice")}
                   </p>
+                ) : null}
+              </div>
+            ) : signsInWithGoogle ? (
+              <div className="grid gap-2">
+                {!driveBindPending && !driveHasToken ? (
+                  <Button
+                    variant="secondary"
+                    size="md"
+                    disabled={Boolean(busy)}
+                    onClick={() => void reconnectDrive()}
+                    className="w-full"
+                  >
+                    <RefreshCw size={17} />
+                    {t("storageGoogleDriveReconnect")}
+                  </Button>
                 ) : null}
               </div>
             ) : (

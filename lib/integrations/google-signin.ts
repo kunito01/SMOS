@@ -15,10 +15,10 @@ import { GOOGLE_DRIVE_SCOPE } from "@/lib/storage/google-drive/google-drive-clie
 /**
  * Device-level Google sign-in for Studio Map OS accounts.
  *
- * One popup yields a token that both identifies the Google account (OpenID
- * userinfo) and can reach the Drive app data folder, so a sign-in never needs
- * a second consent before sync starts. No workspace exists yet when this
- * runs, so everything here is keyed by device, not by workspace.
+ * One popup yields a token that identifies the Google account (OpenID
+ * userinfo) and carries the Drive and Calendar scopes. If that grant leaves
+ * one of them out, the same sign-in asks once more. No workspace exists yet
+ * when this runs, so everything here is keyed by device, not by workspace.
  */
 
 // One consent covers sign-in, Drive storage and Calendar push.
@@ -174,8 +174,9 @@ export const forgetGoogleSignInToken = () => writeGoogleToken(GOOGLE_SIGN_IN_TOK
 
 /**
  * Opens Google's popup (interactive mode must run inside a user gesture) or
- * returns the cached token (silent mode). The token carries the sign-in and
- * Drive app-data scopes together.
+ * returns the cached token (silent mode). The token carries sign-in, Drive
+ * and Calendar together. Interactive mode asks once, inside this sign-in,
+ * when the grant left Drive or Calendar out. Silent mode never prompts.
  */
 export const requestGoogleSignIn = async (options: {
   clientId: string;
@@ -199,6 +200,8 @@ export const requestGoogleSignIn = async (options: {
     consentGranted: sameClient && (settings.consentGranted || Boolean(settings.email)),
     hint: settings.email || undefined,
     ignoreCache: options.ignoreCache,
+    ensureScopes:
+      options.mode === "interactive" ? [GOOGLE_DRIVE_SCOPE, GOOGLE_CALENDAR_SCOPE] : undefined,
     onGranted: () => {
       writeGoogleSignInSettings({ clientId, consentGranted: true });
     }
