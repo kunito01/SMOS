@@ -2146,41 +2146,20 @@ export async function signInWithGoogle(payload: GoogleSignInPayload): Promise<Go
   return withAuthMutationLock(() => signInWithGoogleUnlocked(payload));
 }
 
-/**
- * Entry without asking Google: the device vault holds the key for a Google
- * account that signed in here before and has not signed out. With a live
- * sign-in token the Drive connection is seeded and the usual login pull runs
- * (bounded); without one the session is local until the user reconnects.
- */
-async function unlockGoogleAccountLocallyUnlocked(options: {
+export type UnlockGoogleAccountLocallyOptions = {
   allowWithoutToken?: boolean;
-}): Promise<{ user: LocalAuthUser } | null> {
-  requireStorage();
-  requireCompletedRestoreState();
+  /**
+   * When true (default), unlock from the device vault immediately and refresh
+   * Google/Drive in the background so reloads and the login screen do not block
+   * on GIS or a Drive download.
+   */
+  deferCloudSync?: boolean;
+};
 
+const resolveStoredGoogleAccountForLocalEntry = () => {
   const settings = readGoogleSignInSettings();
   if (settings.signedOut) {
     return null;
-  }
-  let token = readGoogleSignInToken();
-  let tokenUsable = token !== null && hasUsableGoogleSignInToken();
-  if (!tokenUsable) {
-    const clientId = settings.clientId || resolveGoogleClientId();
-    if (clientId) {
-      try {
-        // The cached access token lasts about an hour. Google can mint a new
-        // one without a popup while the browser session is still signed in.
-        token = await requestGoogleSignIn({ clientId, mode: "silent" });
-        tokenUsable = hasUsableGoogleSignInToken();
-      } catch (error) {
-        const transient = error instanceof GoogleAuthError && error.transient;
-        if (!options.allowWithoutToken && !transient) {
-          return null;
-        }
-      }
-    } else if (!options.allowWithoutToken) {
-      return null;
-    }
   }
   const accounts = readAccounts().filter(isStoredGoogleAccount);
   const account =
@@ -2192,6 +2171,120 @@ async function unlockGoogleAccountLocallyUnlocked(options: {
   const workspace = readWorkspaces().find((item) => item.workspaceId === account.workspaceId);
   if (!workspace) {
     return null;
+  }
+  return { account, settings, workspace };
+};
+
+const refreshGoogleSignInTokenForLocalEntry = async (options: {
+  allowWithoutToken?: boolean;
+  clientId: string;
+}) => {
+  let token = readGoogleSignInToken();
+  if (token !== null && hasUsableGoogleSignInToken()) {
+    return token;
+  }
+  if (!options.clientId) {
+    return options.allowWithoutToken ? token : null;
+  }
+  try {
+    token = await requestGoogleSignIn({ clientId: options.clientId, mode: "silent" });
+    return hasUsableGoogleSignInToken() ? token : options.allowWithoutToken ? token : null;
+  } catch (error) {
+    const transient = error instanceof GoogleAuthError && error.transient;
+    if (!options.allowWithoutToken && !transient) {
+      return null;
+    }
+    return readGoogleSignInToken();
+  }
+};
+
+const syncGoogleDriveAfterLocalEntry = async (input: {
+  account: StoredGoogleAccount;
+  workspaceId: string;
+  clientId: string;
+  token: GoogleStoredToken | null;
+  allowWithoutToken?: boolean;
+}) => {
+  let token = input.token;
+  if (!token) {
+    token = await refreshGoogleSignInTokenForLocalEntry({
+      allowWithoutToken: input.allowWithoutToken,
+      clientId: input.clientId
+    });
+  }
+  if (!token) {
+    return;
+  }
+
+  const session = activeSession;
+  if (!session || session.workspace.workspaceId !== input.workspaceId) {
+    return;
+  }
+
+  let replaced = false;
+  try {
+    await bindGoogleServicesFromSignIn(input.workspaceId, token, input.clientId);
+    const pull = await pullWorkspaceFromCloudOnLogin(input.workspaceId, {
+      downloadTimeoutMs: LOCAL_ENTRY_PULL_TIMEOUT_MS,
+      validateRemoteBundle: (snapshot) => validateCloudBundleForSession(snapshot, session)
+    });
+    replaced = pull.didReplaceLocalBundle;
+    const profile = await readGoogleAccountProfile(token.accessToken, input.workspaceId);
+    const shared =
+      profile &&
+      profile.profile.ownerDigest === input.account.googleAccountDigest &&
+      profile.profile.status === "ready"
+        ? profile.profile.wraps.code
+        : null;
+    const kept = await reconcileRecoveryWrap(input.workspaceId, shared);
+    if (shared && kept && kept.wrappedMasterKey.ciphertext === shared.wrappedMasterKey.ciphertext) {
+      upsertWorkspace(kept);
+      markRecoveryWrapShared(input.workspaceId, kept);
+      if (activeSession && activeSession.workspace.workspaceId === input.workspaceId) {
+        activeSession.workspace = kept;
+      }
+    }
+  } catch {
+    // Sync stays pending until the user reconnects Google.
+  }
+  if (replaced && activeSession?.workspace.workspaceId === input.workspaceId) {
+    try {
+      await activateMockDatabaseWorkspace(input.workspaceId, activeSession.masterKey);
+    } catch {
+      // Keep the unlocked session; the storage card reports sync state.
+    }
+  }
+};
+
+/**
+ * Entry without asking Google: the device vault holds the key for a Google
+ * account that signed in here before and has not signed out. With a live
+ * sign-in token the Drive connection is seeded and the usual login pull runs
+ * (bounded); without one the session is local until the user reconnects.
+ */
+async function unlockGoogleAccountLocallyUnlocked(
+  options: UnlockGoogleAccountLocallyOptions
+): Promise<{ user: LocalAuthUser } | null> {
+  requireStorage();
+  requireCompletedRestoreState();
+
+  const deferCloudSync = options.deferCloudSync !== false;
+  const resolved = resolveStoredGoogleAccountForLocalEntry();
+  if (!resolved) {
+    return null;
+  }
+  const { account, settings, workspace } = resolved;
+  const clientId = settings.clientId || resolveGoogleClientId();
+
+  let token: GoogleStoredToken | null = null;
+  if (!deferCloudSync) {
+    token = await refreshGoogleSignInTokenForLocalEntry({
+      allowWithoutToken: options.allowWithoutToken,
+      clientId
+    });
+    if (!token && !options.allowWithoutToken) {
+      return null;
+    }
   }
 
   let masterKey: WorkspaceMasterKey;
@@ -2215,63 +2308,48 @@ async function unlockGoogleAccountLocallyUnlocked(options: {
     throw error;
   }
   rememberLastEmail(account.email);
-  // A Google account that was showing local storage (a failed sign-in restored
-  // IndexedDB, or the preference record could not be read) goes back to Drive
-  // without discarding queued edits.
   pinGoogleWorkspaceToDrive(workspace.workspaceId);
 
-  if (token) {
-    // Best effort: a reachable Drive lets the session sync right away; a
-    // failure here is recorded on the storage card, never a lock-out.
-    const session = activeSession;
-    let replaced = false;
-    try {
-      await bindGoogleServicesFromSignIn(
-        workspace.workspaceId,
-        token,
-        settings.clientId || resolveGoogleClientId()
-      );
-      const pull = await pullWorkspaceFromCloudOnLogin(workspace.workspaceId, {
-        downloadTimeoutMs: LOCAL_ENTRY_PULL_TIMEOUT_MS,
-        validateRemoteBundle: (snapshot) =>
-          session ? validateCloudBundleForSession(snapshot, session) : undefined
-      });
-      replaced = pull.didReplaceLocalBundle;
-      // A recovery key replaced on another device reaches this one here too.
-      const profile = await readGoogleAccountProfile(token.accessToken, workspace.workspaceId);
-      const shared =
-        profile && profile.profile.ownerDigest === account.googleAccountDigest && profile.profile.status === "ready"
-          ? profile.profile.wraps.code
-          : null;
-      const kept = await reconcileRecoveryWrap(workspace.workspaceId, shared);
-      if (shared && kept && kept.wrappedMasterKey.ciphertext === shared.wrappedMasterKey.ciphertext) {
-        upsertWorkspace(kept);
-        markRecoveryWrapShared(workspace.workspaceId, kept);
-        if (activeSession && activeSession.workspace.workspaceId === workspace.workspaceId) {
-          activeSession.workspace = kept;
-        }
-      }
-    } catch {
-      // Sync stays pending until the user reconnects Google.
-    }
-    if (replaced && activeSession) {
-      // The IndexedDB bundle changed under the open session: the in-memory
-      // database must follow, or the next save would overwrite the newer copy.
-      try {
-        await activateMockDatabaseWorkspace(workspace.workspaceId, activeSession.masterKey);
-      } catch (error) {
-        activeSession.masterKey.fill(0);
-        activeSession = null;
-        deactivateMockDatabaseWorkspace();
-        throw error;
-      }
-    }
+  if (deferCloudSync) {
+    void syncGoogleDriveAfterLocalEntry({
+      account,
+      workspaceId: workspace.workspaceId,
+      clientId,
+      token: readGoogleSignInToken(),
+      allowWithoutToken: options.allowWithoutToken
+    });
+    return mockApi({ user }, 0);
   }
-  return mockApi({ user });
+
+  if (token) {
+    await syncGoogleDriveAfterLocalEntry({
+      account,
+      workspaceId: workspace.workspaceId,
+      clientId,
+      token,
+      allowWithoutToken: options.allowWithoutToken
+    });
+  }
+  return mockApi({ user }, 0);
+}
+
+/**
+ * Re-opens the last Google workspace from this device's vault after a reload
+ * or PWA restart, without blocking on Google Identity Services or Drive.
+ */
+export async function restorePersistedLocalSession(): Promise<LocalAuthUser | null> {
+  if (activeSession?.user) {
+    return mockApi(activeSession.user, 0);
+  }
+  const result = await unlockGoogleAccountLocally({
+    allowWithoutToken: true,
+    deferCloudSync: true
+  });
+  return result?.user ?? null;
 }
 
 export async function unlockGoogleAccountLocally(
-  options: { allowWithoutToken?: boolean } = {}
+  options: UnlockGoogleAccountLocallyOptions = {}
 ): Promise<{ user: LocalAuthUser } | null> {
   return withAuthMutationLock(() => unlockGoogleAccountLocallyUnlocked(options));
 }

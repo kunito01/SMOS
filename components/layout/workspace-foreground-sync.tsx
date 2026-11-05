@@ -8,7 +8,7 @@ import { hasUnsavedWork } from "@/lib/utils/unsaved-work";
 const FOREGROUND_PULL_INTERVAL_MS = 60_000;
 
 /**
- * Headless: when the app returns to the foreground, fetch a newer CloudKit
+ * Headless: when the app returns to the foreground, fetch a newer Google Drive
  * copy and reload so changes from other devices or agents appear. Skipped
  * while an editor has unsaved work or a dialog is open.
  */
