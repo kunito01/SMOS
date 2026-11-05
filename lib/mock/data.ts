@@ -32,6 +32,7 @@ import {
   type ProjectBudgetCalculation
 } from "@/lib/utils/project-budget";
 import { defaultProjectPhaseNames } from "@/lib/utils/project-phases";
+import { calculateProjectProgress } from "@/lib/utils/project-progress";
 import { hasProjectPublishedRelease } from "@/lib/utils/project-release";
 
 const projectImages = [
@@ -448,12 +449,7 @@ const createPhases = (projectId: string, projectIndex: number): Phase[] =>
     };
   });
 
-const calculateProgress = (phases: Phase[]) => {
-  const tasks = phases.flatMap((phase) => phase.deliverables.flatMap((deliverable) => deliverable.tasks));
-  const completedTasks = tasks.filter((task) => task.completed).length;
-
-  return Math.round((completedTasks / tasks.length) * 100);
-};
+const calculateProgress = (phases: Phase[]) => calculateProjectProgress({ phases });
 
 const createCosts = (projectId: string, projectIndex: number): CostItem[] => [
   {

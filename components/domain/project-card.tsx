@@ -17,6 +17,7 @@ import {
 import type { TranslationKey } from "@/lib/i18n/translations";
 import type { Project, ProjectGroup } from "@/lib/types";
 import { projectPath } from "@/lib/utils/app-routes";
+import { calculateProjectProgress } from "@/lib/utils/project-progress";
 
 type ProjectCardProps = {
   project: Project;
@@ -54,7 +55,7 @@ export function ProjectCard({ project, groups, t, href = projectPath(project.id)
         action={<ProjectReleaseBadges project={project} t={t} className="max-w-48" />}
       >
         <div className="rounded-full bg-white/[0.88] p-1">
-          <ProgressBar value={project.progress} />
+          <ProgressBar value={calculateProjectProgress(project)} className="bg-ink/20" />
         </div>
         <div className="mt-3 flex items-center justify-between gap-3">
           <span className="flex min-w-0 flex-wrap items-center gap-2">
