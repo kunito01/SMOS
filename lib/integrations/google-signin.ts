@@ -6,6 +6,7 @@ import {
   googleFetch,
   googleTokenUsableUntil,
   readGoogleToken,
+  readGoogleTokenAllowingNearExpiry,
   requestGoogleToken,
   writeGoogleToken,
   type GoogleStoredToken
@@ -31,6 +32,9 @@ const USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo";
 const FINGERPRINT_DOMAIN = "studio-map-os.google-account.v1";
 // A token must outlive the sign-in's own Drive pull to count as usable.
 const MIN_USABLE_TOKEN_MS = 5 * 60_000;
+/** Refresh silently this long before the token would fail `hasUsableGoogleSignInToken`. */
+const SIGN_IN_TOKEN_REFRESH_LEAD_MS = 8 * 60_000;
+const SIGN_IN_TOKEN_REFRESH_RETRY_MS = 90_000;
 const WORKSPACE_SETTINGS_PREFIXES = ["studio-map-os.google-drive:", "studio-map-os.google-calendar:"];
 
 export type GoogleSignInSettings = {
@@ -170,7 +174,58 @@ export const hasUsableGoogleSignInToken = () => {
   return Boolean(token) && token !== null && googleTokenUsableUntil(token) - Date.now() >= MIN_USABLE_TOKEN_MS;
 };
 
+/** Milliseconds until a background silent refresh should run; `null` when not applicable. */
+export const msUntilGoogleSignInTokenRefresh = (): number | null => {
+  const settings = readGoogleSignInSettings();
+  if (settings.signedOut || !settings.email) {
+    return null;
+  }
+  if (!resolveGoogleClientId()) {
+    return null;
+  }
+  const token = readGoogleSignInToken();
+  if (!token) {
+    return 0;
+  }
+  const refreshAt =
+    googleTokenUsableUntil(token) - MIN_USABLE_TOKEN_MS - SIGN_IN_TOKEN_REFRESH_LEAD_MS;
+  const delay = refreshAt - Date.now();
+  if (delay <= 0) {
+    return 0;
+  }
+  return Math.min(delay, 45 * 60_000);
+};
+
+/**
+ * Keeps the cached sign-in grant fresh with `prompt: ""`. Never signs the
+ * user out; failures leave the prior token and local workspace untouched.
+ */
+export const refreshGoogleSignInTokenSilently = async (): Promise<boolean> => {
+  const settings = readGoogleSignInSettings();
+  if (settings.signedOut) {
+    return false;
+  }
+  const clientId = resolveGoogleClientId();
+  if (!clientId) {
+    return false;
+  }
+  if (hasUsableGoogleSignInToken()) {
+    return true;
+  }
+  try {
+    await requestGoogleSignIn({ clientId, mode: "silent" });
+    return hasUsableGoogleSignInToken();
+  } catch (error) {
+    if (error instanceof GoogleAuthError && error.transient) {
+      return Boolean(readGoogleTokenAllowingNearExpiry(GOOGLE_SIGN_IN_TOKEN_KEY));
+    }
+    return Boolean(readGoogleTokenAllowingNearExpiry(GOOGLE_SIGN_IN_TOKEN_KEY));
+  }
+};
+
 export const forgetGoogleSignInToken = () => writeGoogleToken(GOOGLE_SIGN_IN_TOKEN_KEY, null);
+
+export const googleSignInTokenRefreshRetryMs = () => SIGN_IN_TOKEN_REFRESH_RETRY_MS;
 
 /**
  * Opens Google's popup (interactive mode must run inside a user gesture) or
