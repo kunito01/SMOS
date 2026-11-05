@@ -21,7 +21,7 @@ import { DeleteConfirmDialog } from "@/components/ui/delete-confirm-dialog";
 import { SectionHeader } from "@/components/ui/section-header";
 import { authApi } from "@/lib/api";
 import { bindGoogleServicesFromSignIn, reconnectGoogleServices } from "@/lib/integrations/google-services";
-import { readGoogleSignInToken } from "@/lib/integrations/google-signin";
+import { readGoogleSignInTokenRelaxed } from "@/lib/integrations/google-signin";
 import { formatLocalizedDate } from "@/lib/i18n/formatters";
 import {
   GOOGLE_CALENDAR_SCOPE,
@@ -275,7 +275,7 @@ export function ArchiveStorageSyncCard({ workspaceId }: ArchiveStorageSyncCardPr
   const ensureDriveToken = useCallback(async () => {
     if (!hasGoogleDriveAccessToken(workspaceId)) {
       if (signsInWithGoogle) {
-        const token = readGoogleSignInToken();
+        const token = readGoogleSignInTokenRelaxed();
         if (token && !googleTokenOmitsScope(token, GOOGLE_DRIVE_SCOPE)) {
           // The sign-in token already covers Drive. A timeout retries that
           // token instead of opening another Google prompt.
@@ -297,7 +297,7 @@ export function ArchiveStorageSyncCard({ workspaceId }: ArchiveStorageSyncCardPr
     if (!signsInWithGoogle || driveConnected) {
       return;
     }
-    const token = readGoogleSignInToken();
+    const token = readGoogleSignInTokenRelaxed();
     if (!token || googleTokenOmitsScope(token, GOOGLE_DRIVE_SCOPE)) {
       return;
     }
@@ -377,7 +377,7 @@ export function ArchiveStorageSyncCard({ workspaceId }: ArchiveStorageSyncCardPr
     if (!signsInWithGoogle) {
       return;
     }
-    const token = readGoogleSignInToken();
+    const token = readGoogleSignInTokenRelaxed();
     if (
       !token ||
       googleTokenOmitsScope(token, GOOGLE_CALENDAR_SCOPE) ||
@@ -452,7 +452,7 @@ export function ArchiveStorageSyncCard({ workspaceId }: ArchiveStorageSyncCardPr
         return;
       }
       enableGoogleCalendarPush(workspaceId);
-      const token = readGoogleSignInToken();
+      const token = readGoogleSignInTokenRelaxed();
       if (
         !token ||
         googleTokenOmitsScope(token, GOOGLE_CALENDAR_SCOPE) ||

@@ -15,7 +15,7 @@ import {
 } from "@/lib/integrations/google-auth";
 import {
   readGoogleSignInSettings,
-  readGoogleSignInToken,
+  readGoogleSignInTokenRelaxed,
   resolveGoogleClientId
 } from "@/lib/integrations/google-signin";
 
@@ -710,7 +710,7 @@ export const getGoogleCalendarLinkForClient = (clientId: string) =>
  */
 export const adoptGoogleSignInTokenForCalendar = (
   workspaceId: string,
-  token: GoogleStoredToken | null = readGoogleSignInToken()
+  token: GoogleStoredToken | null = readGoogleSignInTokenRelaxed()
 ) => {
   // A scope string that leaves Calendar out is a refusal. A token with no
   // scope field is an older grant: try it, and let the API answer.
