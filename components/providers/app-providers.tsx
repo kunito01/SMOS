@@ -29,6 +29,8 @@ type AuthContextValue = {
   signInWithGoogle: (payload: GoogleSignInPayload) => Promise<GoogleAccountLoginResolution>;
   unlockGoogleAccountLocally: (options?: { allowWithoutToken?: boolean }) => Promise<{ user: LocalAuthUser } | null>;
   commitSessionUser: (nextUser: LocalAuthUser) => void;
+  /** @deprecated Renamed to `commitSessionUser`; kept for cached PWA bundles after iCloud removal. */
+  commitAppleAccountUser: (nextUser: LocalAuthUser) => void;
   signInDevelopmentTestAccount: () => Promise<void>;
   signUp: (payload: RegisterPayload) => Promise<RegisterResult>;
   signOut: () => Promise<void>;
@@ -107,6 +109,9 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
         return authApi.unlockGoogleAccountLocally(options);
       },
       commitSessionUser: (nextUser: LocalAuthUser) => {
+        setUser(nextUser);
+      },
+      commitAppleAccountUser: (nextUser: LocalAuthUser) => {
         setUser(nextUser);
       },
       signInDevelopmentTestAccount: async () => {

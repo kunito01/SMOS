@@ -22,6 +22,8 @@ type GoogleLoginFlow =
 type KnownGoogleAccount = { email: string; name: string };
 
 const GOOGLE_CLIENT_ID_PLACEHOLDER = "xxxxxxxx.apps.googleusercontent.com";
+/** Inlined at build time; empty on GitHub Pages when `vars.GOOGLE_CLIENT_ID` is unset. */
+const bakedGoogleClientId = (process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID ?? "").trim();
 
 export function GoogleLoginPanel() {
   const router = useRouter();
@@ -44,6 +46,9 @@ export function GoogleLoginPanel() {
     if (error instanceof GoogleAuthError) {
       if (error.transient) {
         return `${t("loginGoogleFailed")} (${error.message})`;
+      }
+      if (/client id is missing/i.test(error.message)) {
+        return t("loginGoogleClientIdHint");
       }
       return t("loginGoogleCancelled");
     }
@@ -193,7 +198,12 @@ export function GoogleLoginPanel() {
     }
   };
 
-  const needsClientIdInput = storedClientId === "";
+  // When the build has no baked client id (typical GitHub Pages without
+  // `vars.GOOGLE_CLIENT_ID`), show the paste field on first paint — not only
+  // after `storedClientId` flips from `null` to `""`, which left the button
+  // disabled with no field visible.
+  const needsClientIdInput =
+    storedClientId === "" || (storedClientId === null && !bakedGoogleClientId);
   const canSignIn = !busy && effectiveClientId.length > 0;
 
   return (
@@ -246,11 +256,16 @@ export function GoogleLoginPanel() {
           type="button"
           size="lg"
           className="w-full"
-          disabled={!canSignIn}
+          disabled={busy}
           onClick={() => {
-            if (canSignIn) {
-              void startGoogleSignIn(effectiveClientId);
+            if (busy) {
+              return;
             }
+            if (!effectiveClientId) {
+              setActionError(t("loginGoogleClientIdHint"));
+              return;
+            }
+            void startGoogleSignIn(effectiveClientId);
           }}
         >
           {busy ? (
