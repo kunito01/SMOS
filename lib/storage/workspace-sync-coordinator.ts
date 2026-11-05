@@ -29,6 +29,10 @@ import {
   type EncryptedWorkspaceBundleSnapshot
 } from "@/lib/storage/indexed-db";
 import {
+  googleDrivePolicyApplies,
+  normalizeGoogleWorkspaceConflictPreference
+} from "@/lib/storage/google-workspace-sync-policy";
+import {
   getWorkspaceStoragePreference,
   isCloudStorageProvider,
   setWorkspaceStorageProvider,
@@ -393,12 +397,38 @@ const markAccountMismatch = (workspaceId: string, error: unknown) =>
     lastError: genericErrorMessage(error)
   });
 
-const markConflict = (workspaceId: string, message: string) =>
-  updateWorkspaceStoragePreference(workspaceId, {
+const markConflict = (workspaceId: string, message: string) => {
+  if (googleDrivePolicyApplies(workspaceId)) {
+    return updateWorkspaceStoragePreference(workspaceId, {
+      status: "pending",
+      pendingUpload: true,
+      lastError: null
+    });
+  }
+  return updateWorkspaceStoragePreference(workspaceId, {
     status: "conflict",
     pendingUpload: true,
     lastError: message
   });
+};
+
+const markConflictOrUpload = async (
+  workspaceId: string,
+  message: string,
+  user: CloudKitUserIdentity,
+  upload: (boundUser: CloudKitUserIdentity) => Promise<WorkspaceSyncResult>
+): Promise<WorkspaceSyncResult> => {
+  if (googleDrivePolicyApplies(workspaceId)) {
+    updateWorkspaceStoragePreference(workspaceId, {
+      status: "pending",
+      pendingUpload: true,
+      lastError: null
+    });
+    return upload(user);
+  }
+  markConflict(workspaceId, message);
+  return result(workspaceId, "conflict", "none", false, user);
+};
 
 const TRANSPORT_FAILURE_PATTERN =
   /NETWORK_ERROR|UNEXPECTED_SERVER_RESPONSE|SERVICE_UNAVAILABLE|TRY_AGAIN_LATER|timed out|Failed to fetch|no response/i;
@@ -841,6 +871,7 @@ const manualSyncInternal = async (
     return staleSyncResult(workspaceId);
   }
 
+  normalizeGoogleWorkspaceConflictPreference(workspaceId);
   let preference = getWorkspaceStoragePreference(workspaceId);
   const adapter = adapterFor(preference.provider);
   if (!adapter) {
@@ -884,6 +915,10 @@ const manualSyncInternal = async (
       adapter.download(workspaceId)
     ]);
     user = await adapter.assertIdentity(workspaceId, user);
+    if (!user) {
+      markAuthRequired(workspaceId, adapter);
+      return result(workspaceId, "auth-required", "none", false, null);
+    }
     preference = getWorkspaceStoragePreference(workspaceId);
 
     if (!cloudBindingStillMatches(workspaceId, user, preference)) {
@@ -924,13 +959,35 @@ const manualSyncInternal = async (
         getWorkspaceMutationEpoch(workspaceId) !== mutationEpoch
       ) {
         const message = `The local workspace changed while its restored ${adapter.label} copy was being checked. Sync again to avoid overwriting either version.`;
-        markConflict(workspaceId, message);
-        return result(workspaceId, "conflict", "none", false, user);
+        return markConflictOrUpload(workspaceId, message, user, (boundUser) =>
+          uploadLocalBundle(
+            adapter,
+            workspaceId,
+            boundUser,
+            local,
+            remote.manifest.recordChangeTag,
+            localSaveRevision,
+            mutationEpoch
+          )
+        );
       }
 
       if (!encryptedWorkspaceRecordsMatch(local, remote.snapshot)) {
-        markConflict(workspaceId, noSharedVersionHistoryMessage(adapter.label));
-        return result(workspaceId, "conflict", "none", false, user);
+        return markConflictOrUpload(
+          workspaceId,
+          noSharedVersionHistoryMessage(adapter.label),
+          user,
+          (boundUser) =>
+            uploadLocalBundle(
+              adapter,
+              workspaceId,
+              boundUser,
+              local,
+              remote.manifest.recordChangeTag,
+              localSaveRevision,
+              mutationEpoch
+            )
+        );
       }
 
       const settled = await markSyncedIfLocalUnchangedUnderMutationLock(
@@ -953,8 +1010,17 @@ const manualSyncInternal = async (
     if (preference.pendingUpload) {
       if (remoteChangedSinceLastSync(preference, remote)) {
         const message = `Both the local workspace and its ${adapter.label} copy have changes. Resolve the conflict before syncing.`;
-        markConflict(workspaceId, message);
-        return result(workspaceId, "conflict", "none", false, user);
+        return markConflictOrUpload(workspaceId, message, user, (boundUser) =>
+          uploadLocalBundle(
+            adapter,
+            workspaceId,
+            boundUser,
+            local,
+            remote.manifest.recordChangeTag,
+            localSaveRevision,
+            mutationEpoch
+          )
+        );
       }
       return await uploadLocalBundle(
         adapter,
@@ -995,8 +1061,36 @@ const manualSyncInternal = async (
         return staleSyncResult(workspaceId);
       }
       const message = `The local workspace changed while ${adapter.label} was being checked. Sync again to avoid overwriting either version.`;
-      markConflict(workspaceId, message);
-      return result(workspaceId, "conflict", "none", false, user);
+      return markConflictOrUpload(workspaceId, message, user, (boundUser) =>
+        uploadLocalBundle(
+          adapter,
+          workspaceId,
+          boundUser,
+          local,
+          remote.manifest.recordChangeTag,
+          localSaveRevision,
+          mutationEpoch
+        )
+      );
+    }
+    if (
+      googleDrivePolicyApplies(workspaceId, preference) &&
+      !encryptedWorkspaceRecordsMatch(local, remote.snapshot)
+    ) {
+      updateWorkspaceStoragePreference(workspaceId, {
+        status: "pending",
+        pendingUpload: true,
+        lastError: null
+      });
+      return await uploadLocalBundle(
+        adapter,
+        workspaceId,
+        user,
+        local,
+        remote.manifest.recordChangeTag,
+        localSaveRevision,
+        mutationEpoch
+      );
     }
     const restored = await restoreRemoteBundleUnderMutationLock(
       workspaceId,
@@ -1013,6 +1107,17 @@ const manualSyncInternal = async (
       return staleSyncResult(workspaceId);
     }
     if (restored === "conflict") {
+      if (googleDrivePolicyApplies(workspaceId)) {
+        return await uploadLocalBundle(
+          adapter,
+          workspaceId,
+          user,
+          local,
+          remote.manifest.recordChangeTag,
+          localSaveRevision,
+          mutationEpoch
+        );
+      }
       return result(workspaceId, "conflict", "none", false, user);
     }
     return result(workspaceId, "synced", "download", true, user);
@@ -1035,6 +1140,15 @@ const manualSyncInternal = async (
       return result(workspaceId, "account-mismatch", "none", false, user);
     }
     if (adapter.isConflictError(error)) {
+      if (googleDrivePolicyApplies(workspaceId)) {
+        updateWorkspaceStoragePreference(workspaceId, {
+          status: "pending",
+          pendingUpload: true,
+          lastError: genericErrorMessage(error)
+        });
+        scheduleWorkspaceCloudUpload(workspaceId);
+        return result(workspaceId, "pending", "none", false, user);
+      }
       markConflict(workspaceId, genericErrorMessage(error));
       return result(workspaceId, "conflict", "none", false, user);
     }
@@ -1113,6 +1227,7 @@ export async function getWorkspaceCloudAuthState(): Promise<WorkspaceCloudAuthSt
 
 export function noteWorkspaceLocalSave(workspaceIdInput: string) {
   const workspaceId = validateWorkspaceId(workspaceIdInput);
+  normalizeGoogleWorkspaceConflictPreference(workspaceId);
   const preference = getWorkspaceStoragePreference(workspaceId);
   if (!isCloudStorageProvider(preference.provider)) {
     return preference;
@@ -1123,7 +1238,7 @@ export function noteWorkspaceLocalSave(workspaceIdInput: string) {
   // An unresolved conflict must stay visible until the user picks a side;
   // flipping back to "pending" here would hide it and let scheduled uploads
   // race the pending decision.
-  if (preference.status === "conflict") {
+  if (preference.status === "conflict" && !googleDrivePolicyApplies(workspaceId, preference)) {
     return preference;
   }
 
@@ -1199,12 +1314,25 @@ export async function resolveWorkspaceCloudConflict(
       return staleSyncResult(workspaceId);
     }
 
+    normalizeGoogleWorkspaceConflictPreference(workspaceId);
     const preference = getWorkspaceStoragePreference(workspaceId);
     const adapter = adapterFor(preference.provider);
     if (!adapter) {
       return result(workspaceId, "not-enabled", "none", false, null);
     }
+    const effectiveResolution: WorkspaceConflictResolution =
+      googleDrivePolicyApplies(workspaceId, preference) && resolution === "use-cloud"
+        ? "keep-local"
+        : resolution;
     if (isOffline()) {
+      if (googleDrivePolicyApplies(workspaceId, preference)) {
+        updateWorkspaceStoragePreference(workspaceId, {
+          status: "pending",
+          pendingUpload: true,
+          lastError: `${adapter.label} sync is waiting for a network connection.`
+        });
+        return result(workspaceId, "offline", "none", false, null);
+      }
       updateWorkspaceStoragePreference(workspaceId, {
         status: "conflict",
         lastError: `Connect to the internet before resolving this ${adapter.label} conflict.`
@@ -1239,7 +1367,7 @@ export async function resolveWorkspaceCloudConflict(
       }
 
       if (!remote) {
-        if (resolution === "use-cloud" || !preference.cloudKitUserRecordName) {
+        if (effectiveResolution === "use-cloud" || !preference.cloudKitUserRecordName) {
           const missingRemote = new WorkspaceSyncError(
             "REMOTE_WORKSPACE_MISSING",
             `No verified ${adapter.label} copy is available. The local encrypted copy is unchanged.`
@@ -1261,7 +1389,7 @@ export async function resolveWorkspaceCloudConflict(
 
       await validateRemoteBundleBeforeRestore(remote, options);
 
-      if (resolution === "keep-local") {
+      if (effectiveResolution === "keep-local") {
         return await uploadLocalBundle(
           adapter,
           workspaceId,
@@ -1283,8 +1411,17 @@ export async function resolveWorkspaceCloudConflict(
         !encryptedWorkspaceRecordsMatch(latestLocal, local)
       ) {
         const message = `The local workspace changed while the ${adapter.label} conflict was being resolved. Review both versions again.`;
-        markConflict(workspaceId, message);
-        return result(workspaceId, "conflict", "none", false, user);
+        return markConflictOrUpload(workspaceId, message, user, (boundUser) =>
+          uploadLocalBundle(
+            adapter,
+            workspaceId,
+            boundUser,
+            local,
+            remote.manifest.recordChangeTag,
+            localSaveRevision,
+            mutationEpoch
+          )
+        );
       }
 
       const restored = await restoreRemoteBundleUnderMutationLock(
@@ -1303,6 +1440,17 @@ export async function resolveWorkspaceCloudConflict(
         return staleSyncResult(workspaceId);
       }
       if (restored === "conflict") {
+        if (googleDrivePolicyApplies(workspaceId)) {
+          return await uploadLocalBundle(
+            adapter,
+            workspaceId,
+            user,
+            local,
+            remote.manifest.recordChangeTag,
+            localSaveRevision,
+            mutationEpoch
+          );
+        }
         return result(workspaceId, "conflict", "none", false, user);
       }
       return result(workspaceId, "synced", "download", true, user);
@@ -1325,6 +1473,15 @@ export async function resolveWorkspaceCloudConflict(
         return result(workspaceId, "account-mismatch", "none", false, user);
       }
       if (adapter.isConflictError(error)) {
+        if (googleDrivePolicyApplies(workspaceId)) {
+          updateWorkspaceStoragePreference(workspaceId, {
+            status: "pending",
+            pendingUpload: true,
+            lastError: genericErrorMessage(error)
+          });
+          scheduleWorkspaceCloudUpload(workspaceId);
+          return result(workspaceId, "pending", "none", false, user);
+        }
         markConflict(workspaceId, genericErrorMessage(error));
         return result(workspaceId, "conflict", "none", false, user);
       }
@@ -1353,6 +1510,7 @@ export async function pullWorkspaceFromCloudOnLogin(
     return result(workspaceId, "offline", "none", false, null);
   }
 
+  normalizeGoogleWorkspaceConflictPreference(workspaceId);
   const startGuard = captureCloudSyncStartGuard(workspaceId);
   return runExclusive(workspaceId, async () => {
     if (!cloudSyncStartGuardStillMatches(workspaceId, startGuard)) {
@@ -1439,6 +1597,20 @@ export async function pullWorkspaceFromCloudOnLogin(
           return staleSyncResult(workspaceId);
         }
         if (restored === "conflict") {
+          if (googleDrivePolicyApplies(workspaceId)) {
+            const localSaveRevision = getLocalSaveRevision(workspaceId);
+            const mutationEpoch = getWorkspaceMutationEpoch(workspaceId);
+            const local = await captureRequiredLocalBundle(workspaceId);
+            return await uploadLocalBundle(
+              adapter,
+              workspaceId,
+              user,
+              local,
+              remote.manifest.recordChangeTag,
+              localSaveRevision,
+              mutationEpoch
+            );
+          }
           return result(workspaceId, "conflict", "none", false, user);
         }
         return result(workspaceId, "synced", "download", true, user);
@@ -1455,13 +1627,35 @@ export async function pullWorkspaceFromCloudOnLogin(
         }
         if (getWorkspaceMutationEpoch(workspaceId) !== mutationEpoch) {
           const message = `The local workspace changed while its restored ${adapter.label} copy was being checked. Sync again to avoid overwriting either version.`;
-          markConflict(workspaceId, message);
-          return result(workspaceId, "conflict", "none", false, user);
+          return markConflictOrUpload(workspaceId, message, user, (boundUser) =>
+            uploadLocalBundle(
+              adapter,
+              workspaceId,
+              boundUser,
+              local,
+              remote.manifest.recordChangeTag,
+              localSaveRevision,
+              mutationEpoch
+            )
+          );
         }
 
         if (!encryptedWorkspaceRecordsMatch(local, remote.snapshot)) {
-          markConflict(workspaceId, noSharedVersionHistoryMessage(adapter.label));
-          return result(workspaceId, "conflict", "none", false, user);
+          return markConflictOrUpload(
+            workspaceId,
+            noSharedVersionHistoryMessage(adapter.label),
+            user,
+            (boundUser) =>
+              uploadLocalBundle(
+                adapter,
+                workspaceId,
+                boundUser,
+                local,
+                remote.manifest.recordChangeTag,
+                localSaveRevision,
+                mutationEpoch
+              )
+          );
         }
 
         const settled = await markSyncedIfLocalUnchangedUnderMutationLock(
@@ -1483,8 +1677,20 @@ export async function pullWorkspaceFromCloudOnLogin(
       if (current.pendingUpload) {
         if (remoteChangedSinceLastSync(current, remote)) {
           const message = `Both the local workspace and its ${adapter.label} copy have changes. Resolve the conflict before syncing.`;
-          markConflict(workspaceId, message);
-          return result(workspaceId, "conflict", "none", false, user);
+          const localSaveRevision = getLocalSaveRevision(workspaceId);
+          const mutationEpoch = getWorkspaceMutationEpoch(workspaceId);
+          const local = await captureRequiredLocalBundle(workspaceId);
+          return markConflictOrUpload(workspaceId, message, user, (boundUser) =>
+            uploadLocalBundle(
+              adapter,
+              workspaceId,
+              boundUser,
+              local,
+              remote.manifest.recordChangeTag,
+              localSaveRevision,
+              mutationEpoch
+            )
+          );
         }
         scheduleWorkspaceCloudUpload(workspaceId);
         return result(workspaceId, "pending", "none", false, user);
@@ -1515,6 +1721,25 @@ export async function pullWorkspaceFromCloudOnLogin(
       const mutationEpoch = getWorkspaceMutationEpoch(workspaceId);
       const local = await captureRequiredLocalBundle(workspaceId);
       await validateRemoteBundleBeforeRestore(remote, options);
+      if (
+        googleDrivePolicyApplies(workspaceId, current) &&
+        !encryptedWorkspaceRecordsMatch(local, remote.snapshot)
+      ) {
+        updateWorkspaceStoragePreference(workspaceId, {
+          status: "pending",
+          pendingUpload: true,
+          lastError: null
+        });
+        return await uploadLocalBundle(
+          adapter,
+          workspaceId,
+          user,
+          local,
+          remote.manifest.recordChangeTag,
+          localSaveRevision,
+          mutationEpoch
+        );
+      }
       const restored = await restoreRemoteBundleUnderMutationLock(
         workspaceId,
         user,
@@ -1530,6 +1755,17 @@ export async function pullWorkspaceFromCloudOnLogin(
         return staleSyncResult(workspaceId);
       }
       if (restored === "conflict") {
+        if (googleDrivePolicyApplies(workspaceId)) {
+          return await uploadLocalBundle(
+            adapter,
+            workspaceId,
+            user,
+            local,
+            remote.manifest.recordChangeTag,
+            localSaveRevision,
+            mutationEpoch
+          );
+        }
         return result(workspaceId, "conflict", "none", false, user);
       }
       return result(workspaceId, "synced", "download", true, user);
@@ -1552,6 +1788,15 @@ export async function pullWorkspaceFromCloudOnLogin(
         return result(workspaceId, "account-mismatch", "none", false, user);
       }
       if (adapter.isConflictError(error)) {
+        if (googleDrivePolicyApplies(workspaceId)) {
+          updateWorkspaceStoragePreference(workspaceId, {
+            status: "pending",
+            pendingUpload: true,
+            lastError: genericErrorMessage(error)
+          });
+          scheduleWorkspaceCloudUpload(workspaceId);
+          return result(workspaceId, "pending", "none", false, user);
+        }
         markConflict(workspaceId, genericErrorMessage(error));
         return result(workspaceId, "conflict", "none", false, user);
       }

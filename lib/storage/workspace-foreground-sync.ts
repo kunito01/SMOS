@@ -1,6 +1,10 @@
 "use client";
 
 import { authApi } from "@/lib/api";
+import {
+  googleDrivePolicyApplies,
+  normalizeGoogleWorkspaceConflictPreference
+} from "@/lib/storage/google-workspace-sync-policy";
 import { getWorkspaceStoragePreference, isCloudStorageProvider } from "@/lib/storage/storage-preferences";
 
 /**
@@ -24,11 +28,12 @@ export const pullWorkspaceFromCloud = async (
   workspaceId: string,
   options: { reloadPage?: boolean; minIntervalMs?: number; skipWhenUnsaved?: () => boolean } = {}
 ): Promise<ForegroundPullResult> => {
+  normalizeGoogleWorkspaceConflictPreference(workspaceId);
   const preference = getWorkspaceStoragePreference(workspaceId);
   if (!isCloudStorageProvider(preference.provider)) {
     return { status: "skipped", reason: "not-cloud" };
   }
-  if (preference.status === "conflict") {
+  if (preference.status === "conflict" && !googleDrivePolicyApplies(workspaceId, preference)) {
     return { status: "skipped", reason: "conflict" };
   }
   if (typeof navigator !== "undefined" && navigator.onLine === false) {

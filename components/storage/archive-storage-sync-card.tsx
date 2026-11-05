@@ -72,6 +72,7 @@ import {
   type WorkspaceStoragePreference,
   type WorkspaceStorageProvider
 } from "@/lib/storage/storage-preferences";
+import { normalizeGoogleWorkspaceConflictPreference } from "@/lib/storage/google-workspace-sync-policy";
 import { cn } from "@/lib/utils/cn";
 
 type ArchiveStorageSyncCardProps = {
@@ -197,13 +198,13 @@ export function ArchiveStorageSyncCard({ workspaceId }: ArchiveStorageSyncCardPr
   const showICloudBox = isAppleSignInEnabled() || isCloudKitProvider;
 
   const refreshPreference = useCallback(() => {
-    const next = getWorkspaceStoragePreference(workspaceId);
+    const next = normalizeGoogleWorkspaceConflictPreference(workspaceId);
     setPreference(next);
     return next;
   }, [workspaceId]);
 
   useEffect(() => {
-    setPreference(getWorkspaceStoragePreference(workspaceId));
+    setPreference(normalizeGoogleWorkspaceConflictPreference(workspaceId));
   }, [workspaceId]);
 
   // Keep the status badge and "last sync" time live: the background cloud
@@ -284,7 +285,10 @@ export function ArchiveStorageSyncCard({ workspaceId }: ArchiveStorageSyncCardPr
 
       if (result.outcome === "synced") {
         setNotice({ message: successMessage, tone: "success" });
-        if (result.didReplaceLocalBundle) {
+        if (
+          result.didReplaceLocalBundle &&
+          !(googleOwned && result.preference.provider === "gdrive")
+        ) {
           await authApi.reloadActiveWorkspaceDatabase();
           window.location.reload();
         }
@@ -306,7 +310,7 @@ export function ArchiveStorageSyncCard({ workspaceId }: ArchiveStorageSyncCardPr
       });
       return false;
     },
-    [refreshCloudKitAuth, refreshDrive, t]
+    [googleOwned, refreshCloudKitAuth, refreshDrive, t]
   );
 
   /** Must run inside a click handler: Google's popup needs the user gesture. */
@@ -784,37 +788,39 @@ export function ArchiveStorageSyncCard({ workspaceId }: ArchiveStorageSyncCardPr
           </div>
         </div>
 
-        <div className="mt-6 grid gap-4">
-          <StorageOption
-            active={preference.provider === "indexeddb"}
-            icon={<Database size={22} />}
-            title={t("storageIndexedDbTitle")}
-            body={t("storageIndexedDbBody")}
-            warning={t("storageIndexedDbWarning")}
-            action={
-              preference.provider !== "indexeddb" ? (
-                cloudRequired ? (
-                  <p className="rounded-studio bg-ink/[0.06] p-3 text-xs font-bold leading-5 text-muted">
-                    {user?.accountKind === "google"
-                      ? t("storageGoogleCloudRequired")
-                      : t("storageAppleCloudRequired")}
-                  </p>
-                ) : (
-                  <Button
-                    variant="ghost"
-                    size="md"
-                    disabled={Boolean(busy)}
-                    onClick={() => setSwitchTarget("indexeddb")}
-                    className="w-full sm:w-auto"
-                  >
-                    <CloudOff size={17} />
-                    {isDriveProvider ? t("storageGoogleDriveStopSync") : t("storageCloudKitDisconnect")}
-                  </Button>
-                )
-              ) : null
-            }
-          />
-        </div>
+        {!googleOwned ? (
+          <div className="mt-6 grid gap-4">
+            <StorageOption
+              active={preference.provider === "indexeddb"}
+              icon={<Database size={22} />}
+              title={t("storageIndexedDbTitle")}
+              body={t("storageIndexedDbBody")}
+              warning={t("storageIndexedDbWarning")}
+              action={
+                preference.provider !== "indexeddb" ? (
+                  cloudRequired ? (
+                    <p className="rounded-studio bg-ink/[0.06] p-3 text-xs font-bold leading-5 text-muted">
+                      {user?.accountKind === "google"
+                        ? t("storageGoogleCloudRequired")
+                        : t("storageAppleCloudRequired")}
+                    </p>
+                  ) : (
+                    <Button
+                      variant="ghost"
+                      size="md"
+                      disabled={Boolean(busy)}
+                      onClick={() => setSwitchTarget("indexeddb")}
+                      className="w-full sm:w-auto"
+                    >
+                      <CloudOff size={17} />
+                      {isDriveProvider ? t("storageGoogleDriveStopSync") : t("storageCloudKitDisconnect")}
+                    </Button>
+                  )
+                ) : null
+              }
+            />
+          </div>
+        ) : null}
 
         {showICloudBox ? (
         <div className="mt-4 grid gap-4 rounded-studio-lg bg-ink/[0.055] p-4 lg:grid-cols-[minmax(0,1fr)_minmax(15rem,0.45fr)]">
@@ -904,7 +910,7 @@ export function ArchiveStorageSyncCard({ workspaceId }: ArchiveStorageSyncCardPr
                       <AlertTriangle className="mt-0.5 shrink-0" size={16} />
                       <span>{t("storageCloudKitAccountMismatch")}</span>
                     </p>
-                  ) : preference.status === "conflict" ? (
+                  ) : preference.status === "conflict" && !googleOwned ? (
                     <>
                       <Button
                         variant="secondary"
@@ -1128,7 +1134,7 @@ export function ArchiveStorageSyncCard({ workspaceId }: ArchiveStorageSyncCardPr
                       {googleSyncBusy ? t("storageSyncing") : t("storageSyncNow")}
                     </Button>
                   </>
-                ) : preference.status === "conflict" ? (
+                ) : preference.status === "conflict" && !googleOwned ? (
                   <>
                     <Button
                       variant="secondary"
